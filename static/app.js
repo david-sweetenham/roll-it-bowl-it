@@ -793,14 +793,19 @@ function flipCoin() {
     resultEl.textContent = `${winner.name} wins the toss!`;
     resultEl.classList.remove('hidden');
 
-    if (AppState.playerMode === 'ai_vs_ai') {
-      // AI vs AI: auto-choose bat/field randomly, no user interaction needed
+    const humanWonToss = AppState.playerMode === 'human_vs_ai'
+      && winner.id === AppState.humanTeamId;
+    const humanChooses = AppState.playerMode === 'human_vs_human' || humanWonToss;
+
+    if (!humanChooses) {
+      // AI vs AI, or human_vs_ai where the AI won: AI decides automatically
       const autoChoice = Math.random() < 0.5 ? 'bat' : 'field';
-      const autoLabel  = autoChoice === 'bat' ? 'Bat' : 'Field';
+      const autoLabel  = autoChoice === 'bat' ? 'bat' : 'field';
       document.getElementById('toss-winner-line').textContent =
-        `${winner.name} — elect to ${autoLabel}`;
+        `${winner.name} elect to ${autoLabel}`;
       confirmToss(autoChoice);
     } else {
+      // Human won the toss: let them choose
       document.getElementById('toss-winner-line').textContent =
         `${winner.name} — choose to:`;
       document.getElementById('toss-choice-area').classList.remove('hidden');
