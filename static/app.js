@@ -46,6 +46,30 @@ function animMs(normal, fast, instant = 0) {
   }
 }
 
+// ── Disclaimer Text ───────────────────────────────────────────────────────────
+
+const DISCLAIMER_TEXT = {
+  short: 'An independent fan-made project. Not affiliated with any cricket board, ' +
+         'governing body, or commercial cricket organisation.',
+  full: `Roll It & Bowl It is an independent fan-made project created for personal \
+entertainment. It is not affiliated with, endorsed by, or connected to any \
+cricket board, governing body, broadcaster, or commercial cricket organisation, \
+including but not limited to the ICC, ECB, Cricket Australia, BCCI, or any \
+other national or international cricket authority.
+
+Player names used in pre-loaded squads are included for entertainment purposes \
+only in the spirit of the dice cricket tradition. No association with or \
+endorsement by any named individual is implied or should be inferred.
+
+"Wisden" and "Wisden Cricketers' Almanack" are registered trademarks of \
+John Wisden & Co. "The Dice Cricketers' Almanack" is an original name created \
+for this project and is not affiliated with or derived from Wisden in any \
+commercial sense.
+
+This application is not a commercial product. It is free, open source, and \
+intended solely for personal use and enjoyment.`
+};
+
 // ── Score / Overs Formatting Helpers ─────────────────────────────────────────
 
 /**
@@ -3302,6 +3326,7 @@ async function loadSettingsScreen() {
   }
   if (venSel && AppState.defaultVenueId) venSel.value = AppState.defaultVenueId;
 
+  populateSettingsLegal();
   await loadDbStats();
 }
 
@@ -4835,7 +4860,8 @@ async function loadAlmanackScreen() {
       `<div class="alm-masthead-footer">` +
         `<span class="alm-masthead-volume">Volume I</span>` +
         `<span class="alm-masthead-est">Est. ${yr}</span>` +
-      `</div>`;
+      `</div>` +
+      `<p class="alm-masthead-disclaimer">Independent fan project &middot; Not affiliated with Wisden or any cricket authority</p>`;
     if (h2) {
       h2.replaceWith(masthead);
       if (sub && sub.classList.contains('screen-subtitle')) sub.remove();
@@ -6708,6 +6734,42 @@ function toggleWelcomeInfo(btn) {
   btn.textContent = open ? '▾ What is this?' : '▸ What is this?';
 }
 
+// ── Disclaimer Modal ──────────────────────────────────────────────────────────
+
+function showDisclaimerModal(dismissible) {
+  const modal = document.getElementById('disclaimer-modal');
+  const closeBtn = document.getElementById('disclaimer-modal-close');
+  const acceptBtn = document.getElementById('disclaimer-modal-accept');
+  const body = document.getElementById('disclaimer-modal-body');
+  if (!modal) return;
+
+  if (body) body.textContent = DISCLAIMER_TEXT.full;
+
+  if (closeBtn) closeBtn.classList.toggle('hidden', !dismissible);
+  if (acceptBtn) acceptBtn.classList.toggle('hidden', dismissible);
+
+  modal.classList.remove('hidden');
+}
+
+function closeDisclaimerModal() {
+  const modal = document.getElementById('disclaimer-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function acceptDisclaimer() {
+  try { localStorage.setItem('ribi_disclaimer_accepted', 'true'); } catch (_) {}
+  closeDisclaimerModal();
+}
+
+function openFullDisclaimer() {
+  showDisclaimerModal(true);
+}
+
+function populateSettingsLegal() {
+  const shortEl = document.getElementById('settings-legal-short');
+  if (shortEl) shortEl.textContent = DISCLAIMER_TEXT.short;
+}
+
 // ── DOMContentLoaded ──────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -6751,6 +6813,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const recPopupSaved = localStorage.getItem('ribi_record_popups');
     if (recPopupSaved !== null) {
       AppState.recordPopups = recPopupSaved === '1';
+    }
+  } catch (_) {}
+
+  // First-launch disclaimer check
+  try {
+    const accepted = localStorage.getItem('ribi_disclaimer_accepted');
+    if (!accepted) {
+      showDisclaimerModal(false);
     }
   } catch (_) {}
 

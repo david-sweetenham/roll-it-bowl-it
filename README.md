@@ -212,6 +212,25 @@ The output is `dist/RollItBowlIt` (Linux/Mac) or `dist/RollItBowlIt.exe` (Window
 
 ---
 
+## Disclaimer
+
+Roll It & Bowl It is an independent fan-made project created for personal
+entertainment. It is not affiliated with, endorsed by, or connected to any
+cricket board, governing body, broadcaster, or commercial cricket organisation,
+including but not limited to the ICC, ECB, Cricket Australia, BCCI, or any
+other national or international cricket authority.
+
+Player names used in pre-loaded squads are included for entertainment purposes
+only in the spirit of the dice cricket tradition. No association with or
+endorsement by any named individual is implied or should be inferred.
+
+"The Dice Cricketers' Almanack" is an original name created for this project
+and is not affiliated with Wisden or John Wisden & Co. in any commercial sense.
+
+This is a free, open source personal project. It is not a commercial product.
+
+---
+
 ## Version
 
 `0.2.0-dev` — Python 3.14.3, Flask 3.1.3

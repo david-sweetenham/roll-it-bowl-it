@@ -1,5 +1,7 @@
 # Development Guide — Roll It & Bowl It
 
+> Independent fan project — not affiliated with any cricket board or governing body.
+
 Technical reference for working on this codebase.
 
 ---

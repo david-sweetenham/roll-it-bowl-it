@@ -1,5 +1,7 @@
 # Changelog
 
+> Independent fan project — not affiliated with any cricket board or governing body.
+
 All notable changes to Roll It & Bowl It are documented here.
 
 ---

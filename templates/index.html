@@ -1283,6 +1283,15 @@
               <p class="about-desc">Beyond single matches, the game gives you a full cricket universe: create teams and players, run bilateral series and World Cups, build a living world calendar, and watch an Almanack of records accumulate over time. The dice decide the moment; you decide the era.</p>
             </div>
           </div>
+
+          <div class="settings-section" id="settings-legal-section">
+            <h3>About &amp; Legal</h3>
+            <hr class="settings-rule">
+            <div id="settings-legal-version" class="settings-legal-version">Roll It &amp; Bowl It v0.1.0-dev</div>
+            <p id="settings-legal-short" class="settings-legal-short"></p>
+            <button class="btn btn-secondary settings-legal-btn" onclick="openFullDisclaimer()">View Full Disclaimer</button>
+          </div>
+
         </div>
       </div>
     </div>
@@ -1292,6 +1301,28 @@
   <!-- SESSION BAR -->
   <div id="session-bar">
     <span id="session-bar-text">Session: 0 matches • 0 runs • 0 wickets • 0 sixes</span>
+  </div>
+
+  <!-- DISCLAIMER FOOTER -->
+  <div class="disclaimer-footer">
+    Roll It &amp; Bowl It — Independent fan project — Not affiliated with any cricket board or governing body
+  </div>
+
+  <!-- FIRST-LAUNCH / FULL DISCLAIMER MODAL -->
+  <div id="disclaimer-modal" class="disclaimer-modal-dim hidden" role="dialog" aria-modal="true">
+    <div class="disclaimer-modal-card">
+      <button id="disclaimer-modal-close" class="disclaimer-modal-close hidden" onclick="closeDisclaimerModal()" title="Close">&times;</button>
+      <div class="disclaimer-modal-logo">
+        <span class="disclaimer-modal-logo-icon">🏏</span>
+        <h2 class="disclaimer-modal-title">Roll It &amp; Bowl It</h2>
+        <p class="disclaimer-modal-subtitle">Dice Cricket Done Digitally</p>
+      </div>
+      <hr class="disclaimer-modal-rule">
+      <p class="disclaimer-modal-prompt">Before you play, please note:</p>
+      <div class="disclaimer-modal-body" id="disclaimer-modal-body"></div>
+      <hr class="disclaimer-modal-rule">
+      <button id="disclaimer-modal-accept" class="btn btn-primary disclaimer-modal-btn" onclick="acceptDisclaimer()">I Understand — Let's Play</button>
+    </div>
   </div>
 
   <script src="/static/canvas.js"></script>

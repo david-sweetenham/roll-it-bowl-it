@@ -3791,6 +3791,33 @@ def archive_old_matches():
         database.close_db(db)
 
 
+# ── Disclaimer ────────────────────────────────────────────────────────────────
+
+@app.route('/api/disclaimer')
+def get_disclaimer():
+    return jsonify({
+        'short': 'An independent fan-made project. Not affiliated with any cricket board, '
+                 'governing body, or commercial cricket organisation.',
+        'full': (
+            'Roll It & Bowl It is an independent fan-made project created for personal '
+            'entertainment. It is not affiliated with, endorsed by, or connected to any '
+            'cricket board, governing body, broadcaster, or commercial cricket organisation, '
+            'including but not limited to the ICC, ECB, Cricket Australia, BCCI, or any '
+            'other national or international cricket authority.\n\n'
+            'Player names used in pre-loaded squads are included for entertainment purposes '
+            'only in the spirit of the dice cricket tradition. No association with or '
+            'endorsement by any named individual is implied or should be inferred.\n\n'
+            '"Wisden" and "Wisden Cricketers\' Almanack" are registered trademarks of '
+            'John Wisden & Co. "The Dice Cricketers\' Almanack" is an original name created '
+            'for this project and is not affiliated with or derived from Wisden in any '
+            'commercial sense.\n\n'
+            'This application is not a commercial product. It is free, open source, and '
+            'intended solely for personal use and enjoyment.'
+        ),
+        'version': config.APP_VERSION,
+    })
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 # Run DB migrations on startup
