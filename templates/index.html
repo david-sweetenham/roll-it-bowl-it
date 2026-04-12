@@ -477,13 +477,6 @@
           </div>
         </div>
 
-        <!-- ═══════════════════════════════════════════════════
-             BROADCAST GRAPHIC OVERLAY LAYER
-             Fixed-position, inert (pointer-events:none) unless
-             a dismissible graphic is active.
-        ════════════════════════════════════════════════════════ -->
-        <div id="graphic-backdrop" class="graphic-backdrop"></div>
-        <div id="graphic-overlay" class="graphic-overlay" style="display:none;"></div>
 
       </div><!-- /#match-live -->
 
@@ -1395,6 +1388,12 @@
       <button id="disclaimer-modal-accept" class="btn btn-primary disclaimer-modal-btn" onclick="acceptDisclaimer()">I Understand — Let's Play</button>
     </div>
   </div>
+
+  <!-- BROADCAST GRAPHIC OVERLAY LAYER
+       Kept at top level of <body> so position:fixed works from any screen
+       (including Demo Mode). GraphicQueue targets these by id. -->
+  <div id="graphic-backdrop" class="graphic-backdrop"></div>
+  <div id="graphic-overlay" class="graphic-overlay" style="display:none;"></div>
 
   <script src="/static/canvas.js"></script>
   <script src="/static/app.js"></script>
