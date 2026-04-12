@@ -417,8 +417,33 @@ def roll_die() -> int:
     return random.randint(1, 6)
 
 
+def _stage1_scoring_outcome(stage1_roll, scoring_mode='modern', format='T20',
+                            bowler_rating=3):
+    """Resolve the literal scoring face for Stage 1, with light modern moderation."""
+    if stage1_roll == 1:
+        return 'single', 1
+    if stage1_roll == 2:
+        return 'two', 2
+    if stage1_roll == 3:
+        return 'three', 3
+    if stage1_roll == 4:
+        if scoring_mode == 'modern' and format == 'Test':
+            drag_back = 0.18 if bowler_rating >= 5 else 0.10 if bowler_rating >= 4 else 0.0
+            if drag_back and random.random() < drag_back:
+                return 'three', 3
+        return 'four', 4
+    if stage1_roll == 6:
+        if scoring_mode == 'modern' and format in ('ODI', 'Test'):
+            keep_threshold = 4 if format == 'ODI' else 5
+            if roll_die() < keep_threshold:
+                return 'four', 4
+        return 'six', 6
+    return None, 0
+
+
 def bowl_ball(batter_rating, bowler_rating, bowling_type,
-              is_free_hit=False, partnership_balls=0) -> dict:
+              is_free_hit=False, partnership_balls=0,
+              scoring_mode='modern', format='T20') -> dict:
     """Four-stage HOWZAT system. Returns a complete result dict."""
 
     result = {
@@ -443,61 +468,45 @@ def bowl_ball(batter_rating, bowler_rating, bowling_type,
     s1 = roll_die()
     result['stage1'] = s1
 
-    if s1 not in (1, 2):
-        # Non-HOWZAT outcomes
-        # s1==3→dot, s1==4→single, s1==5→two/four (sub-roll), s1==6→four/six (sub-roll)
-        if s1 == 3:
-            outcome_type, runs = 'dot', 0
-        elif s1 == 4:
-            outcome_type, runs = 'single', 1
-        elif s1 == 5:
-            sub = roll_die()
-            if sub <= 3:
-                outcome_type, runs = 'two', 2
-            else:
-                outcome_type, runs = 'four', 4
-        else:  # s1 == 6
-            sub = roll_die()
-            if sub <= 3:
-                outcome_type, runs = 'four', 4
-            else:
-                outcome_type, runs = 'six', 6
+    if s1 != 5:
+        outcome_type, runs = _stage1_scoring_outcome(
+            s1, scoring_mode=scoring_mode, format=format, bowler_rating=bowler_rating
+        )
 
-        if outcome_type != 'dot':
-            # Extras check: roll a d6, on 6 check for wide/no-ball
-            extras_roll = roll_die()
-            if extras_roll == 6:
-                extras_sub = roll_die()
-                if extras_sub == 5:
-                    # Wide
-                    result['outcome_type'] = 'wide'
-                    result['extras_type'] = 'wide'
-                    result['extras_runs'] = 1
-                    result['runs'] = 0
-                    result['commentary_key'] = 'wide'
-                    result['shot_angle'] = generate_shot_angle('wide', 0)
-                    return result
-                elif extras_sub == 6:
-                    # No-ball
-                    result['outcome_type'] = 'no_ball'
-                    result['extras_type'] = 'no_ball'
-                    result['extras_runs'] = 1
-                    result['runs'] = 0
-                    result['next_is_free_hit'] = True
-                    result['commentary_key'] = 'no_ball'
-                    result['shot_angle'] = generate_shot_angle('no_ball', 0)
-                    return result
+        # Extras check: roll a d6, on 6 check for wide/no-ball
+        extras_roll = roll_die()
+        if extras_roll == 6:
+            extras_sub = roll_die()
+            if extras_sub == 5:
+                # Wide
+                result['outcome_type'] = 'wide'
+                result['extras_type'] = 'wide'
+                result['extras_runs'] = 1
+                result['runs'] = 0
+                result['commentary_key'] = 'wide'
+                result['shot_angle'] = generate_shot_angle('wide', 0)
+                return result
+            elif extras_sub == 6:
+                # No-ball
+                result['outcome_type'] = 'no_ball'
+                result['extras_type'] = 'no_ball'
+                result['extras_runs'] = 1
+                result['runs'] = 0
+                result['next_is_free_hit'] = True
+                result['commentary_key'] = 'no_ball'
+                result['shot_angle'] = generate_shot_angle('no_ball', 0)
+                return result
 
         result['outcome_type'] = outcome_type
         result['runs'] = runs
         result['shot_angle'] = generate_shot_angle(outcome_type, runs)
 
-        if outcome_type == 'dot':
-            result['commentary_key'] = 'dot'
-        elif outcome_type == 'single':
+        if outcome_type == 'single':
             result['commentary_key'] = 'single'
         elif outcome_type == 'two':
             result['commentary_key'] = 'two'
+        elif outcome_type == 'three':
+            result['commentary_key'] = 'three'
         elif outcome_type == 'four':
             result['commentary_key'] = 'four'
         elif outcome_type == 'six':
@@ -688,6 +697,12 @@ def generate_shot_angle(outcome_type, runs) -> float:
         else:
             return gauss_in_range(10, 20)   # straight
 
+    if outcome_type == 'three':
+        if random.random() < 0.5:
+            return gauss_in_range(80, 22)   # deep cover / extra cover
+        else:
+            return gauss_in_range(255, 20)  # deep square / midwicket
+
     if outcome_type == 'four':
         zone = random.randint(1, 3)
         if zone == 1:
@@ -798,7 +813,8 @@ def calculate_result(innings1_runs, innings1_wickets, innings2_runs, innings2_wi
     return result
 
 
-def simulate_innings_fast(batting_players, bowling_players, format, target=None) -> dict:
+def simulate_innings_fast(batting_players, bowling_players, format, target=None,
+                          scoring_mode='modern') -> dict:
     """Simulate a complete innings using bowl_ball() in a loop."""
 
     over_limits = {'T20': 20, 'ODI': 50, 'Test': 999}
@@ -883,7 +899,8 @@ def simulate_innings_fast(batting_players, bowling_players, format, target=None)
         bowling_type = bowler['bowling_type']
 
         ball_result = bowl_ball(batter_rating, bowler_rating, bowling_type,
-                                is_free_hit, 0)
+                                is_free_hit, 0,
+                                scoring_mode=scoring_mode, format=format)
         deliveries.append(ball_result)
 
         is_free_hit = ball_result['next_is_free_hit']
@@ -1067,6 +1084,7 @@ def simulate_to(target: str, state: dict) -> dict:
     max_overs     = state.get('max_overs')
     target_runs   = state.get('target')
     innings_num   = state.get('innings_number', 1)
+    scoring_mode  = state.get('scoring_mode', 'modern')
 
     over_number   = state['over_number']
     ball_in_over  = state['ball_in_over']
@@ -1158,6 +1176,8 @@ def simulate_to(target: str, state: dict) -> dict:
             bowling_type      = bowler['bowling_type'],
             is_free_hit       = is_free_hit,
             partnership_balls = 0,
+            scoring_mode      = scoring_mode,
+            format            = fmt,
         )
 
         is_free_hit = ball['next_is_free_hit']

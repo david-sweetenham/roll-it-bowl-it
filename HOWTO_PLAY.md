@@ -7,22 +7,39 @@ This guide covers everything from starting your first match to understanding the
 ## First run
 
 When you open the app for the first time, the database is automatically created and seeded with:
-- 10 international teams (England, Australia, India, Pakistan, New Zealand, South Africa, West Indies, Sri Lanka, Bangladesh, Afghanistan)
-- 18 venues
+- international teams
+- associate nations
+- domestic and franchise competitions
+- venues across both international and domestic cricket
 - Full player rosters with individual ratings
-- A season schedule across all formats (T20, ODI, Test)
 
 Navigate to **http://127.0.0.1:5001** in your browser. You'll land on the home screen showing current standings and upcoming fixtures.
+
+On first load, choose your default scoring style:
+
+- `Classic` keeps the die literal: `1, 2, 3, 4, 6` score exactly those runs, `5` triggers the appeal chain
+- `Modern` keeps the same appeal chain but lightly reins in some boundary results in longer formats
 
 ---
 
 ## Starting a match
 
-1. Go to the **Schedule** or **Fixtures** section
-2. Find an upcoming match and click it
-3. Choose **Play** to control the match yourself, or **Fast Sim** to let the AI resolve it instantly
-4. Select your toss result and batting/bowling decision
-5. The live match screen opens
+1. Open the **Play** screen
+2. Choose **Cricket Type**
+3. Choose **Format**
+4. Pick your two teams
+5. Choose **Scoring System**
+6. Choose venue and date
+7. Click **Choose Mode**
+8. Select spectator, single-player, or two-player
+9. Take the toss and begin
+
+### Cricket Type
+
+- `International` shows national teams only
+- `Domestic` shows counties, states, and franchise sides only
+
+If you choose domestic cricket, a **Domestic League** filter appears so you can narrow the selector to one competition like IPL or BBL.
 
 ---
 
@@ -70,16 +87,20 @@ Manual mode is more work but the tension of waiting on that Stage 2 roll is the 
 
 Every delivery passes through the dice engine in up to four stages. You never roll dice that aren't relevant — a no-ball that goes for four doesn't need an appeal.
 
-### Stage 1 — Delivery type
+### Stage 1 — The visible scoring roll
 
-The first roll determines what kind of delivery this is:
+In `Classic`:
 
-- **Dot ball** — defended, missed, hit to a fielder
-- **Runs** (1–6) — struck for runs
-- **Wide / No-ball** — extras, plus a re-bowl
-- **Wicket-possible** — the delivery has beaten or found the edge of the bat; an appeal follows
+- **1** = 1 run
+- **2** = 2 runs
+- **3** = 3 runs
+- **4** = 4 runs
+- **5** = appeal ball
+- **6** = 6 runs
 
-On a free hit (after a no-ball), a wicket-possible delivery skips the appeal and goes to Stage 3 — the batter cannot be out.
+In `Modern`, the same faces are used, but some `4` and `6` outcomes in longer formats can be pulled back a little for realism.
+
+On a free hit, a `5` still creates drama, but the batter is protected from normal dismissal outcomes.
 
 ### Stage 2 — Appeal outcome
 
@@ -135,12 +156,14 @@ You can see individual player ratings on the team roster pages.
 - 50 overs per side
 - One innings each
 - Fast-sim the powerplay and death overs if you want, play the middle overs manually
+- In domestic mode this is labelled **One-Day**
 
 ### Test
 - Up to 5 days
 - Two innings per side
 - Follow-on rule applies (team trailing by 200+ runs in a two-innings match may be asked to bat again)
 - Declarations are supported
+- In domestic mode this is labelled **First-Class**
 
 ---
 
@@ -199,6 +222,24 @@ Every ball is recorded to the database. After the match:
 - Season standings update with points, NRR, and run totals
 
 Records are permanent unless you reset the world from the admin panel.
+
+Canon and exhibition are tracked separately, so you can still run one-off fun matches without polluting the Almanack.
+
+---
+
+## World creation
+
+When creating a world you now choose a **World Type**:
+
+- `International` for national teams only
+- `Domestic` for league/franchise cricket only
+- `Combined` for international cricket plus domestic leagues in the same save
+
+In realistic worlds:
+
+- `International` builds an international FTP-style calendar
+- `Domestic` uses the domestic competitions you selected
+- `Combined` runs both side by side
 
 ---
 

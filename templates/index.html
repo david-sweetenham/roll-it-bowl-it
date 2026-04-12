@@ -52,6 +52,25 @@
           <p class="welcome-subtitle">Dice Cricket Done Digitally</p>
         </div>
         <p class="welcome-tagline">A complete cricket universe, decided by dice. Roll for glory.</p>
+        <div class="welcome-pref">
+          <div class="welcome-pref-head">
+            <h3>Choose Your Default Scoring Style</h3>
+            <p>Both systems keep the multi-roll HOWZAT appeal chain. You can change this per match on the Play screen or later in Settings.</p>
+          </div>
+          <div class="welcome-pref-grid">
+            <button id="welcome-scoring-classic" class="welcome-pref-card" onclick="chooseWelcomeScoringMode('classic')">
+              <span class="welcome-pref-kicker">Classic</span>
+              <strong>Pure dice cricket</strong>
+              <span>1, 2, 3, 4 and 6 score exactly what the die shows. 5 triggers the appeal chain.</span>
+            </button>
+            <button id="welcome-scoring-modern" class="welcome-pref-card" onclick="chooseWelcomeScoringMode('modern')">
+              <span class="welcome-pref-kicker">Modern</span>
+              <strong>Same faces, lighter realism</strong>
+              <span>Keeps the classic mapping, but longer formats can occasionally drag a boundary back.</span>
+            </button>
+          </div>
+          <div id="welcome-scoring-note" class="welcome-pref-note"></div>
+        </div>
         <div class="welcome-cards">
           <div class="welcome-card" onclick="showScreen('play')">
             <div class="welcome-card-icon">🏏</div>
@@ -107,6 +126,20 @@
         <p class="screen-subtitle">Set up your match below.</p>
         <div id="play-setup-form">
           <div class="form-section">
+            <label class="form-label">Cricket Type</label>
+            <div class="scoring-mode-toggle">
+              <button id="play-scope-international" class="scoring-mode-btn" type="button" onclick="setPlayCricketScope('international')">
+                <span class="scoring-mode-name">International</span>
+                <span class="scoring-mode-sub">National sides and ICC cricket</span>
+              </button>
+              <button id="play-scope-domestic" class="scoring-mode-btn" type="button" onclick="setPlayCricketScope('domestic')">
+                <span class="scoring-mode-name">Domestic</span>
+                <span class="scoring-mode-sub">Counties, states and franchise leagues</span>
+              </button>
+            </div>
+            <p id="play-scope-help" class="form-help"></p>
+          </div>
+          <div class="form-section">
             <label class="form-label">Format</label>
             <div class="format-toggles">
               <button class="format-btn active" data-format="T20">
@@ -126,6 +159,13 @@
               </button>
             </div>
           </div>
+          <div id="play-domestic-league-section" class="form-section hidden">
+            <label class="form-label">Domestic League</label>
+            <select id="play-domestic-league" class="form-select" onchange="setPlayDomesticLeague(this.value)">
+              <option value="">All domestic competitions</option>
+            </select>
+            <p class="form-help">Filter the domestic team list to one competition if you want a cleaner setup.</p>
+          </div>
           <div class="form-section two-col">
             <div>
               <label class="form-label">Team 1</label>
@@ -139,6 +179,20 @@
           <div class="form-section">
             <label class="form-label">Venue</label>
             <select id="venue-select" class="form-select"><option>Loading venues...</option></select>
+          </div>
+          <div class="form-section">
+            <label class="form-label">Scoring System</label>
+            <div class="scoring-mode-toggle">
+              <button id="play-scoring-classic" class="scoring-mode-btn" type="button" onclick="selectPlayScoringMode('classic')">
+                <span class="scoring-mode-name">Classic</span>
+                <span class="scoring-mode-sub">Pure roll values</span>
+              </button>
+              <button id="play-scoring-modern" class="scoring-mode-btn" type="button" onclick="selectPlayScoringMode('modern')">
+                <span class="scoring-mode-name">Modern</span>
+                <span class="scoring-mode-sub">Literal dice with light tuning</span>
+              </button>
+            </div>
+            <p id="play-scoring-help" class="form-help"></p>
           </div>
           <div class="form-section">
             <label class="form-label">Match Date</label>
@@ -329,14 +383,18 @@
 
         <!-- Top bar -->
         <div id="match-topbar" class="match-topbar">
-          <span id="match-title" class="match-title"></span>
-          <span id="match-context" class="match-context"></span>
-          <span id="match-mode-badge" class="match-mode-badge hidden"></span>
-          <div id="roll-mode-toggle" class="roll-mode-toggle hidden">
-            <span class="roll-mode-label">Rolling:</span>
-            <button id="btn-mode-auto" class="roll-mode-btn active" onclick="setRollMode('auto')" title="All dice resolve automatically">⚡ Auto</button>
-            <button id="btn-mode-manual" class="roll-mode-btn" onclick="setRollMode('manual')" title="Press each die roll separately — feel every appeal">🎲 Manual</button>
-            <span id="roll-mode-forced-label" class="roll-mode-forced hidden">Auto only in spectator mode</span>
+          <div class="match-topbar-meta">
+            <span id="match-title" class="match-title"></span>
+            <span id="match-context" class="match-context"></span>
+          </div>
+          <div class="match-topbar-controls">
+            <span id="match-mode-badge" class="match-mode-badge hidden"></span>
+            <div id="roll-mode-toggle" class="roll-mode-toggle hidden">
+              <span class="roll-mode-label">Rolling:</span>
+              <button id="btn-mode-auto" class="roll-mode-btn active" onclick="setRollMode('auto')" title="All dice resolve automatically">⚡ Auto</button>
+              <button id="btn-mode-manual" class="roll-mode-btn" onclick="setRollMode('manual')" title="Press each die roll separately — feel every appeal">🎲 Manual</button>
+              <span id="roll-mode-forced-label" class="roll-mode-forced hidden">Auto only in spectator mode</span>
+            </div>
           </div>
         </div>
 
@@ -371,18 +429,26 @@
 
         <!-- Scoreboard -->
         <div id="match-scoreboard" class="match-scoreboard">
-          <div class="scoreboard-main">
-            <span id="sb-team" class="sb-team"></span>
-            <span id="sb-score" class="sb-score">0/0</span>
-            <span id="sb-overs" class="sb-overs">0.0 ov</span>
-            <span id="sb-rr" class="sb-rr">RR: —</span>
-          </div>
-          <div id="sb-chase" class="sb-chase hidden">
-            <span id="sb-target"></span>
-            <span id="sb-required"></span>
-          </div>
-          <div class="sb-arc-wrap">
-            <canvas id="canvas-innings-arc" width="200" height="120"></canvas>
+          <div class="sb-body">
+            <div class="sb-left">
+              <div class="scoreboard-main">
+                <span id="sb-team" class="sb-team"></span>
+                <span id="sb-score" class="sb-score">0/0</span>
+                <span id="sb-overs" class="sb-overs">0.0 ov</span>
+                <span id="sb-rr" class="sb-rr">RR: —</span>
+              </div>
+              <div id="sb-chase" class="sb-chase hidden">
+                <span id="sb-target"></span>
+                <span id="sb-required"></span>
+              </div>
+              <div id="sb-story-strip" class="sb-story-strip hidden"></div>
+              <div id="sb-situation" class="sb-situation"></div>
+            </div>
+            <div class="sb-right">
+              <div class="sb-arc-wrap">
+                <canvas id="canvas-innings-arc" width="200" height="120"></canvas>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -414,6 +480,18 @@
               <div class="die-pips"></div>
             </div>
             <div id="die-stage-label" class="die-stage-label"></div>
+            <div class="howzat-legend" aria-label="Dice guide">
+              <div class="howzat-legend-title">Dice Guide <span id="howzat-legend-mode" class="howzat-legend-mode">Modern</span></div>
+              <div id="howzat-legend-row" class="howzat-legend-row">
+                <span class="howzat-legend-chip">1 Single</span>
+                <span class="howzat-legend-chip">2 Two</span>
+                <span class="howzat-legend-chip">3 Three</span>
+                <span class="howzat-legend-chip">4 Four*</span>
+                <span class="howzat-legend-chip">5 Appeal</span>
+                <span class="howzat-legend-chip">6 Six*</span>
+              </div>
+              <div id="howzat-legend-note" class="howzat-legend-note">Modern can occasionally drag a 4 or 6 back in longer formats.</div>
+            </div>
 
             <!-- Standard action buttons -->
             <div class="dice-btns">
@@ -443,7 +521,10 @@
 
           <!-- Right: commentary -->
           <div class="match-commentary-panel">
-            <div class="commentary-header">COMMENTARY</div>
+            <div class="commentary-header">
+              <span>Commentary</span>
+              <span class="commentary-header-sub">Latest ball first</span>
+            </div>
             <div id="commentary-feed" class="commentary-feed"></div>
           </div>
 
@@ -654,15 +735,14 @@
           <button class="tab-btn alm-manage-tab" onclick="switchAlmTab('manage',this)">Manage</button>
         </div>
 
-        <!-- Collapsible filters (hidden for honours tab) -->
+        <!-- Filters (hidden for honours tab) -->
         <div id="alm-filter-panel" class="alm-filter-panel">
-          <div class="alm-filter-header" onclick="toggleAlmFilters()">
+          <div class="alm-filter-header">
             <span>Filters</span>
-            <span id="alm-filter-chevron" class="alm-chevron">▸</span>
           </div>
-          <div id="alm-filter-body" class="alm-filter-body hidden">
+          <div id="alm-filter-body" class="alm-filter-body">
             <div class="alm-filter-grid">
-              <div class="alm-filter-cell">
+              <div class="alm-filter-cell alm-filter-cell-wide">
                 <label>Format</label>
                 <div class="alm-fmt-toggles">
                   <button class="alm-fmt-btn active" data-fmt="Test"   onclick="almToggleFmt(this)">Test</button>
@@ -670,7 +750,7 @@
                   <button class="alm-fmt-btn active" data-fmt="T20"    onclick="almToggleFmt(this)">T20</button>
                 </div>
               </div>
-              <div class="alm-filter-cell">
+              <div class="alm-filter-cell alm-filter-cell-wide">
                 <label>Mode</label>
                 <div class="alm-fmt-toggles">
                   <button class="alm-fmt-btn alm-mode-btn active" data-mode="ai_vs_ai"        onclick="almToggleMode(this)">Auto</button>
@@ -976,6 +1056,22 @@
           <div id="wizard-page-1" class="wizard-page">
             <h3>Step 1 — Name your World</h3>
             <input id="wc-name" type="text" class="form-input" placeholder="e.g. Dynasty 2025" autocomplete="off" />
+            <label class="form-label" style="margin-top:14px">World Type</label>
+            <div class="scoring-mode-toggle">
+              <button id="wc-scope-international" class="scoring-mode-btn" type="button" onclick="setWorldScope('international')">
+                <span class="scoring-mode-name">International</span>
+                <span class="scoring-mode-sub">National teams only</span>
+              </button>
+              <button id="wc-scope-domestic" class="scoring-mode-btn" type="button" onclick="setWorldScope('domestic')">
+                <span class="scoring-mode-name">Domestic</span>
+                <span class="scoring-mode-sub">League and franchise cricket only</span>
+              </button>
+              <button id="wc-scope-combined" class="scoring-mode-btn" type="button" onclick="setWorldScope('combined')">
+                <span class="scoring-mode-name">Combined</span>
+                <span class="scoring-mode-sub">International plus domestic seasons</span>
+              </button>
+            </div>
+            <p id="wc-scope-help" class="form-help"></p>
             <div class="wizard-nav">
               <button class="btn btn-secondary" onclick="hideWorldWizard()">Cancel</button>
               <button class="btn btn-primary" onclick="wizardNext(1)">Next →</button>
@@ -1028,6 +1124,11 @@
                 </span>
               </label>
             </div>
+            <div id="wc-domestic-section" class="hidden" style="margin-top:14px">
+              <label class="form-label">Domestic &amp; Franchise Leagues <span class="text-muted">(Realistic only)</span></label>
+              <p class="form-help" style="margin-bottom:8px">Add these competitions to the world calendar alongside international cricket. Each league generates a full season of fixtures using its real teams.</p>
+              <div id="wc-domestic-leagues" class="domestic-league-grid"></div>
+            </div>
             <div class="wizard-nav">
               <button class="btn btn-secondary" onclick="wizardBack(2)">← Back</button>
               <button class="btn btn-primary" onclick="wizardNext(2)">Next →</button>
@@ -1036,7 +1137,7 @@
 
           <!-- Step 3: Team selection -->
           <div id="wizard-page-3" class="wizard-page hidden">
-            <h3>Step 3 — Select Teams <span class="text-muted">(min 4)</span></h3>
+            <h3 id="wizard-team-step-title">Step 3 — Select Teams <span class="text-muted">(min 4)</span></h3>
             <div class="wizard-team-actions">
               <button class="btn btn-secondary btn-sm" onclick="wizardSelectAllTeams()">Select All</button>
               <span id="wizard-team-count" class="text-muted" style="font-size:var(--fs-sm)">0 selected</span>
@@ -1074,6 +1175,7 @@
             <h2 id="wd-name">World</h2>
             <span id="wd-date-badge" class="stage-badge"></span>
             <span id="wd-density-badge" class="badge" style="margin-left:6px"></span>
+            <span id="wd-scope-badge" class="badge" style="margin-left:6px"></span>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="openWorldCalendar()">📅 Full Calendar</button>
         </div>
@@ -1089,7 +1191,7 @@
           <span class="sim-btn-label">Simulate to:</span>
           <button class="btn btn-sim" onclick="simulateWorld('next_match')">Next Match</button>
           <button class="btn btn-sim" onclick="simulateWorld('end_of_series')">End of Series</button>
-          <button class="btn btn-sim" onclick="simulateWorld('next_my_match')">Next My Match</button>
+          <button class="btn btn-sim" onclick="simulateWorld('next_my_match')">My Next Match</button>
           <input type="date" id="wd-sim-date" class="sim-date-input" />
           <button class="btn btn-sim" onclick="simulateWorld('date')">Sim to Date</button>
         </div>
@@ -1103,8 +1205,15 @@
 
         <!-- OVERVIEW TAB -->
         <div id="wd-tab-overview">
+          <div id="wd-world-desk" class="world-desk-grid" style="margin-top:12px"></div>
+
           <!-- Next fixture card -->
           <div id="wd-next-fixture" class="next-fixture-card" style="margin-top:12px"></div>
+
+          <div style="margin-top:16px">
+            <h3>Active Series & Events</h3>
+            <div id="wd-series-list"></div>
+          </div>
 
           <!-- Two-column: upcoming fortnight | mini rankings -->
           <div class="wd-overview-grid" style="margin-top:14px">
@@ -1248,6 +1357,14 @@
                 <option value="">— Any —</option>
               </select>
             </div>
+            <div class="setting-row">
+              <label>Default Scoring</label>
+              <select id="settings-default-scoring" class="select-input" onchange="setDefaultScoringMode(this.value)">
+                <option value="classic">Classic</option>
+                <option value="modern">Modern</option>
+              </select>
+            </div>
+            <p class="settings-help text-muted">Classic uses pure dice values. Modern keeps the same HOWZAT appeal chain but softens some big hits in longer formats.</p>
           </div>
 
           <div class="settings-section">

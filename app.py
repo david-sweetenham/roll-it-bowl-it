@@ -524,6 +524,10 @@ def start_match():
             return err(f'{field} is required')
     if data['format'] not in ('Test', 'ODI', 'T20'):
         return err('format must be Test, ODI or T20')
+    scoring_mode = data.get('scoring_mode', 'modern')
+    if scoring_mode not in ('classic', 'modern'):
+        scoring_mode = 'modern'
+    data['scoring_mode'] = scoring_mode
     player_mode = data.get('player_mode', 'ai_vs_ai')
     if player_mode not in ('ai_vs_ai', 'human_vs_ai', 'human_vs_human'):
         player_mode = 'ai_vs_ai'
@@ -785,6 +789,8 @@ def bowl_ball_route(id):
             bowling_type   = bowler_row['bowling_type'],
             is_free_hit    = is_free_hit,
             partnership_balls = 0,
+            scoring_mode   = state['match'].get('scoring_mode', 'modern'),
+            format         = fmt,
         )
 
         is_legal  = ball_result['outcome_type'] not in ('wide', 'no_ball')
@@ -1285,8 +1291,10 @@ def fast_sim(id):
                 for p in state['bowling_team_players'] if p['bowling_type'] != 'none'
             ]
 
-            result = game_engine.simulate_innings_fast(batting_players, bowling_players,
-                                                       fmt, target)
+            result = game_engine.simulate_innings_fast(
+                batting_players, bowling_players, fmt, target,
+                scoring_mode=state['match'].get('scoring_mode', 'modern')
+            )
 
             # Persist batter scores
             for bs in result['batter_scores']:
@@ -1414,6 +1422,7 @@ def _build_sim_state(state):
 
     return {
         'format':          fmt,
+        'scoring_mode':    state['match'].get('scoring_mode', 'modern'),
         'max_overs':       max_overs,
         'target':          state['target'],
         'innings_number':  innings_num,
@@ -2677,24 +2686,32 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
 @app.route('/api/worlds', methods=['POST'])
 def create_world():
     import json
-    body           = request.get_json() or {}
-    name           = (body.get('name') or '').strip()
-    team_ids       = body.get('team_ids', [])
-    my_team_id     = body.get('my_team_id')
-    start_date     = body.get('start_date', '2025-01-01')
-    density        = body.get('calendar_density', 'moderate')
-    cal_style      = body.get('calendar_style', 'random')  # 'realistic' | 'random'
-    cal_years      = int(body.get('calendar_years', 2))
+    body              = request.get_json() or {}
+    name              = (body.get('name') or '').strip()
+    team_ids          = body.get('team_ids', [])
+    my_team_id        = body.get('my_team_id')
+    start_date        = body.get('start_date', '2025-01-01')
+    density           = body.get('calendar_density', 'moderate')
+    cal_style         = body.get('calendar_style', 'random')  # 'realistic' | 'random'
+    cal_years         = int(body.get('calendar_years', 2))
+    domestic_leagues  = body.get('domestic_leagues', [])   # e.g. ['ipl', 'bbl', 'county_championship']
+    world_scope       = body.get('world_scope', 'international')
+    if world_scope not in ('international', 'domestic', 'combined'):
+        world_scope = 'international'
 
     if not name:
         return err('name required')
     if len(team_ids) < 2:
         return err('at least 2 teams required')
+    if world_scope == 'domestic' and cal_style == 'realistic' and not domestic_leagues:
+        return err('domestic realistic worlds require at least one domestic league')
 
     db = database.get_db()
     try:
         settings = {'team_ids': team_ids, 'my_team_id': my_team_id,
-                    'calendar_style': cal_style}
+                    'calendar_style': cal_style,
+                    'domestic_leagues': domestic_leagues,
+                    'world_scope': world_scope}
         world_id = database.create_world(db, {
             'name':             name,
             'created_date':     start_date,
@@ -2728,15 +2745,41 @@ def create_world():
         venues         = database.get_venues(db)
         fallback_venue = venues[0]['id'] if venues else None
 
+        # ── Build domestic team lookup (for leagues opted in) ─────────────────
+        domestic_team_list = []
+        if domestic_leagues and cal_style == 'realistic':
+            all_leagues_needed = set()
+            for comp_key in domestic_leagues:
+                comp = cricket_calendar.DOMESTIC_COMPETITIONS.get(comp_key)
+                if comp:
+                    all_leagues_needed.add(comp['league'])
+            if all_leagues_needed:
+                dom_rows = db.execute(
+                    "SELECT t.id as team_id, t.name, t.league, t.home_venue_id "
+                    "FROM teams t WHERE t.league IN ({})".format(
+                        ','.join('?' * len(all_leagues_needed))
+                    ),
+                    list(all_leagues_needed)
+                ).fetchall()
+                domestic_team_list = [dict(r) for r in dom_rows]
+                # Also add their home venues to the fallback map
+                for dt in domestic_team_list:
+                    if dt.get('home_venue_id'):
+                        team_venues.setdefault(dt['team_id'], dt['home_venue_id'])
+
         # ── Generate fixture calendar ─────────────────────────────────────────
+        calendar_team_ids = team_ids if world_scope != 'domestic' else []
+
         if cal_style == 'realistic':
             raw_fixtures = cricket_calendar.generate_realistic_calendar(
-                team_ids       = team_ids,
-                team_names     = team_name_map,
-                venue_ids      = venue_name_map,
-                start_date_str = start_date,
-                density        = density,
-                years          = cal_years,
+                team_ids         = calendar_team_ids,
+                team_names       = team_name_map,
+                venue_ids        = venue_name_map,
+                start_date_str   = start_date,
+                density          = density,
+                years            = cal_years,
+                domestic_leagues = domestic_leagues or None,
+                domestic_teams   = domestic_team_list or None,
             )
         else:
             raw_fixtures = game_engine.generate_fixture_calendar(
@@ -2820,14 +2863,54 @@ def create_world():
             except Exception:
                 pass
 
-        # ── Initialise rankings ───────────────────────────────────────────────
-        for pos, tid in enumerate(team_ids, 1):
+        # ── Initialise rankings (international teams only) ────────────────────
+        ranking_seed_ids = set(team_ids)
+        if world_scope == 'domestic' and domestic_team_list:
+            ranking_seed_ids.update(dt['team_id'] for dt in domestic_team_list if dt.get('team_id'))
+
+        intl_team_ids = []
+        domestic_rank_ids = []
+        for tid in ranking_seed_ids:
+            t = database.get_team(db, tid)
+            if not t:
+                continue
+            if t.get('team_type', 'international') == 'international':
+                intl_team_ids.append(tid)
+            else:
+                domestic_rank_ids.append(tid)
+        for pos, tid in enumerate(sorted(intl_team_ids), 1):
+            for fmt in ('Test', 'ODI', 'T20'):
+                database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
+        for pos, tid in enumerate(sorted(domestic_rank_ids), 1):
             for fmt in ('Test', 'ODI', 'T20'):
                 database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
 
         world = database.get_world(db, world_id)
         return jsonify({'world_id': world_id, 'fixture_count': len(fixtures_to_insert),
-                        'world': world, 'calendar_style': cal_style})
+                        'world': world, 'calendar_style': cal_style, 'world_scope': world_scope})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/domestic-leagues', methods=['GET'])
+def get_domestic_leagues():
+    """Return available domestic competition definitions with team counts."""
+    db = database.get_db()
+    try:
+        result = []
+        for comp_key, comp in cricket_calendar.DOMESTIC_COMPETITIONS.items():
+            league_name = comp['league']
+            count = db.execute(
+                "SELECT COUNT(*) as c FROM teams WHERE league=?", (league_name,)
+            ).fetchone()['c']
+            result.append({
+                'key':    comp_key,
+                'name':   comp['name'],
+                'league': league_name,
+                'format': comp['format'],
+                'team_count': count,
+            })
+        return jsonify({'leagues': result})
     finally:
         database.close_db(db)
 
@@ -3645,15 +3728,18 @@ def import_almanack():
             db.execute(
                 "INSERT OR REPLACE INTO matches "
                 "(id, team1_id, team2_id, venue_id, format, status, match_date, "
-                " result_type, winning_team_id, margin_runs, margin_wickets, match_notes, "
+                " result_type, winning_team_id, margin_runs, margin_wickets, scoring_mode, match_notes, "
                 " series_id, tournament_id, world_id) "
                 "VALUES (:id, :team1_id, :team2_id, :venue_id, :format, :status, :match_date, "
-                " :result_type, :winning_team_id, :margin_runs, :margin_wickets, :match_notes, "
+                " :result_type, :winning_team_id, :margin_runs, :margin_wickets, :scoring_mode, :match_notes, "
                 " :series_id, :tournament_id, :world_id)",
-                {k: m.get(k) for k in ('id', 'team1_id', 'team2_id', 'venue_id', 'format', 'status',
-                                        'match_date', 'result_type', 'winning_team_id', 'margin_runs',
-                                        'margin_wickets', 'match_notes', 'series_id',
-                                        'tournament_id', 'world_id')}
+                {
+                    **{k: m.get(k) for k in ('id', 'team1_id', 'team2_id', 'venue_id', 'format', 'status',
+                                             'match_date', 'result_type', 'winning_team_id', 'margin_runs',
+                                             'margin_wickets', 'match_notes', 'series_id',
+                                             'tournament_id', 'world_id')},
+                    'scoring_mode': m.get('scoring_mode') or 'modern',
+                }
             )
             match_count += 1
         counts['matches'] = match_count

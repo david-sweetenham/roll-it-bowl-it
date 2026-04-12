@@ -160,9 +160,9 @@ def create_match(db, data):
     cur = db.execute(
         "INSERT INTO matches "
         "(series_id, tournament_id, world_id, format, venue_id, match_date, "
-        " team1_id, team2_id, status, player_mode, human_team_id, canon_status) "
+        " team1_id, team2_id, status, player_mode, human_team_id, canon_status, scoring_mode) "
         "VALUES (:series_id, :tournament_id, :world_id, :format, :venue_id, :match_date, "
-        " :team1_id, :team2_id, 'in_progress', :player_mode, :human_team_id, :canon_status)",
+        " :team1_id, :team2_id, 'in_progress', :player_mode, :human_team_id, :canon_status, :scoring_mode)",
         {
             'series_id':     data.get('series_id'),
             'tournament_id': data.get('tournament_id'),
@@ -175,6 +175,7 @@ def create_match(db, data):
             'player_mode':   data.get('player_mode', 'ai_vs_ai'),
             'human_team_id': data.get('human_team_id'),
             'canon_status':  data.get('canon_status', 'canon'),
+            'scoring_mode':  data.get('scoring_mode', 'modern'),
         }
     )
     db.commit()
@@ -207,7 +208,7 @@ def update_match(db, id, data):
     allowed = [
         'toss_winner_id', 'toss_choice', 'result_type', 'winning_team_id',
         'margin_runs', 'margin_wickets', 'player_of_match_id', 'status', 'match_notes',
-        'player_mode', 'human_team_id',
+        'player_mode', 'human_team_id', 'scoring_mode',
     ]
     sets = ', '.join(f"{k} = :{k}" for k in allowed if k in data)
     if not sets:
@@ -1099,6 +1100,7 @@ def run_migrations(db):
         "ALTER TABLE matches ADD COLUMN canon_status TEXT DEFAULT 'canon'",
         "ALTER TABLE matches ADD COLUMN player_mode TEXT DEFAULT 'ai_vs_ai'",
         "ALTER TABLE matches ADD COLUMN human_team_id INTEGER DEFAULT NULL",
+        "ALTER TABLE matches ADD COLUMN scoring_mode TEXT DEFAULT 'modern'",
         # Calendar engine columns
         "ALTER TABLE fixtures ADD COLUMN series_name TEXT",
         "ALTER TABLE fixtures ADD COLUMN match_number_in_series INTEGER DEFAULT 1",
@@ -1110,6 +1112,10 @@ def run_migrations(db):
         "ALTER TABLE fixtures ADD COLUMN season_year INTEGER",
         # Calendar style on worlds table
         "ALTER TABLE worlds ADD COLUMN calendar_style TEXT DEFAULT 'random'",
+        # Domestic / franchise team type
+        "ALTER TABLE teams ADD COLUMN team_type TEXT DEFAULT 'international'",
+        "ALTER TABLE teams ADD COLUMN league TEXT",
+        # domestic_leagues on worlds settings (stored in settings_json; no column needed)
     ]
     for sql in migrations:
         try:
@@ -1172,14 +1178,14 @@ def run_migrations(db):
         ")"
     )
 
-    # Recreate statistical views — no canon filter here; applied at query time
+    # Recreate statistical views so fresh and migrated DBs agree on canon filtering.
     # (DROP + CREATE is idempotent — views have no data)
     db.execute("DROP VIEW IF EXISTS batting_averages")
     db.execute(
         "CREATE VIEW batting_averages AS "
         "SELECT "
         " p.id as player_id, p.name, t.name as team_name, t.id as team_id, m.format, "
-        " m.canon_status, "
+        " COALESCE(m.canon_status, 'canon') as canon_status, "
         " COUNT(DISTINCT m.id) as matches, COUNT(bi.id) as innings, "
         " SUM(CASE WHEN bi.not_out=1 OR bi.status='batting' OR bi.status='not_out' THEN 1 ELSE 0 END) as not_outs, "
         " SUM(bi.runs) as runs, MAX(bi.runs) as highest_score, "
@@ -1197,7 +1203,8 @@ def run_migrations(db):
         "JOIN players p ON bi.player_id = p.id "
         "JOIN teams t ON p.team_id = t.id "
         "WHERE bi.status != 'yet_to_bat' "
-        "GROUP BY p.id, m.format, m.canon_status"
+        "  AND COALESCE(m.canon_status, 'canon') = 'canon' "
+        "GROUP BY p.id, m.format, COALESCE(m.canon_status, 'canon')"
     )
 
     db.execute("DROP VIEW IF EXISTS bowling_averages")
@@ -1205,7 +1212,7 @@ def run_migrations(db):
         "CREATE VIEW bowling_averages AS "
         "SELECT "
         " p.id as player_id, p.name, p.bowling_type, t.name as team_name, t.id as team_id, m.format, "
-        " m.canon_status, "
+        " COALESCE(m.canon_status, 'canon') as canon_status, "
         " COUNT(DISTINCT m.id) as matches, COUNT(bwi.id) as innings_bowled, "
         " SUM(bwi.overs) as overs, SUM(bwi.maidens) as maidens, "
         " SUM(bwi.runs_conceded) as runs_conceded, SUM(bwi.wickets) as wickets, "
@@ -1219,7 +1226,8 @@ def run_migrations(db):
         "JOIN players p ON bwi.player_id = p.id "
         "JOIN teams t ON p.team_id = t.id "
         "WHERE bwi.overs > 0 "
-        "GROUP BY p.id, m.format, m.canon_status"
+        "  AND COALESCE(m.canon_status, 'canon') = 'canon' "
+        "GROUP BY p.id, m.format, COALESCE(m.canon_status, 'canon')"
     )
 
     db.execute("DROP VIEW IF EXISTS team_records_view")
@@ -2389,6 +2397,7 @@ def get_match_state(db, match_id):
             'fall_of_wickets':        [],
             'over_number':            0,
             'ball_in_over':           0,
+            'current_over_deliveries': [],
             'is_free_hit':            False,
             'format':                 fmt,
             'max_overs':              max_overs,
@@ -2415,6 +2424,14 @@ def get_match_state(db, match_id):
 
     over_number  = total_legal // 6
     ball_in_over = total_legal % 6
+
+    # Current over deliveries (for ball-by-ball display)
+    cur_over_rows = db.execute(
+        "SELECT outcome_type, runs_scored, is_wide, is_no_ball "
+        "FROM deliveries WHERE innings_id=? AND over_number=? ORDER BY id",
+        (innings_id, over_number)
+    ).fetchall()
+    current_over_deliveries = [dict(r) for r in cur_over_rows]
 
     # Last delivery for state reconstruction
     last_del = db.execute(
@@ -2533,9 +2550,9 @@ def get_match_state(db, match_id):
         'fall_of_wickets':        fow,
         'over_number':            over_number,
         'ball_in_over':           ball_in_over,
+        'current_over_deliveries': current_over_deliveries,
         'is_free_hit':            is_free_hit,
         'format':                 fmt,
         'max_overs':              max_overs,
         'target':                 target,
     }
-

@@ -114,6 +114,48 @@ HOME_SEASONS = {
         'preferred_test_months': [],
         'avoid_months': [10, 11, 12, 1, 2, 3, 4, 9],
     },
+    'Namibia': {
+        'months': [9, 10, 11, 12, 1, 2, 3],
+        'formats': ['ODI', 'T20'],
+        'hemisphere': 'south',
+        'preferred_test_months': [],
+        'avoid_months': [4, 5, 6, 7, 8],
+    },
+    'Nepal': {
+        'months': [2, 3, 4, 10, 11],
+        'formats': ['ODI', 'T20'],
+        'hemisphere': 'subcontinent',
+        'preferred_test_months': [],
+        'avoid_months': [5, 6, 7, 8, 9],
+    },
+    'UAE': {
+        'months': [10, 11, 12, 1, 2, 3],
+        'formats': ['ODI', 'T20'],
+        'hemisphere': 'gulf',
+        'preferred_test_months': [],
+        'avoid_months': [5, 6, 7, 8, 9],
+    },
+    'Oman': {
+        'months': [10, 11, 12, 1, 2, 3],
+        'formats': ['ODI', 'T20'],
+        'hemisphere': 'gulf',
+        'preferred_test_months': [],
+        'avoid_months': [5, 6, 7, 8, 9],
+    },
+    'United States': {
+        'months': [4, 5, 6, 7, 8, 9],
+        'formats': ['ODI', 'T20'],
+        'hemisphere': 'north',
+        'preferred_test_months': [],
+        'avoid_months': [11, 12, 1, 2],
+    },
+    'Canada': {
+        'months': [5, 6, 7, 8, 9],
+        'formats': ['ODI', 'T20'],
+        'hemisphere': 'north',
+        'preferred_test_months': [],
+        'avoid_months': [10, 11, 12, 1, 2, 3, 4],
+    },
 }
 
 # ── Tour Structure Templates ───────────────────────────────────────────────────
@@ -184,6 +226,22 @@ TOUR_TEMPLATES = {
         'gap_between_formats_days': 0,
         'gap_between_matches': {'T20': 2},
     },
+    'white_ball_standard': {
+        'tests': 0,
+        'odis': 3,
+        't20s': 3,
+        'duration_days': 16,
+        'gap_between_formats_days': 2,
+        'gap_between_matches': {'ODI': 2, 'T20': 1},
+    },
+    'associate_white_ball': {
+        'tests': 0,
+        'odis': 2,
+        't20s': 3,
+        'duration_days': 12,
+        'gap_between_formats_days': 2,
+        'gap_between_matches': {'ODI': 2, 'T20': 1},
+    },
 }
 
 # ── Special Series ─────────────────────────────────────────────────────────────
@@ -225,10 +283,16 @@ SPECIAL_SERIES = {
 }
 
 # ── Major nations (get full tours by default) ──────────────────────────────────
-_MAJOR_NATIONS = frozenset([
+_FULL_MEMBERS = frozenset([
     'England', 'Australia', 'India', 'Pakistan',
     'New Zealand', 'South Africa', 'West Indies', 'Sri Lanka',
+    'Bangladesh', 'Afghanistan', 'Zimbabwe', 'Ireland',
 ])
+
+_ASSOCIATE_PRIORITY = [
+    'Scotland', 'Netherlands', 'Namibia', 'Nepal',
+    'UAE', 'Oman', 'United States', 'Canada',
+]
 
 
 # ── ICC Event Cycle ────────────────────────────────────────────────────────────
@@ -388,8 +452,19 @@ def _get_season_data(team_name):
     })
 
 
+def _supported_formats(team_name):
+    return _get_season_data(team_name).get('formats', ['Test', 'ODI', 'T20'])
+
+
+def _team_tier(team_name):
+    norm = _normalise(team_name)
+    if norm in _FULL_MEMBERS:
+        return 'full'
+    return 'associate'
+
+
 def _is_major(team_name):
-    return _normalise(team_name) in _MAJOR_NATIONS
+    return _normalise(team_name) in _FULL_MEMBERS
 
 
 # ── Schedule Tracker ───────────────────────────────────────────────────────────
@@ -558,6 +633,35 @@ def _place_icc_events(team_ids, id_to_name, venue_lookup, sched,
         series_ctr[0] += 1
         return f'icc_{series_ctr[0]:04d}'
 
+    def select_participants(event):
+        limit = min(len(team_ids), event.get('teams', len(team_ids)))
+        host_name = _normalise(event.get('host', ''))
+        host_id = next((tid for tid in team_ids if _normalise(id_to_name.get(tid, '')) == host_name), None)
+
+        ordered = []
+        if host_id is not None:
+            ordered.append(host_id)
+
+        fulls = [
+            tid for tid in team_ids
+            if tid != host_id and _team_tier(id_to_name.get(tid, '')) == 'full'
+        ]
+        associates = []
+        for assoc_name in _ASSOCIATE_PRIORITY:
+            for tid in team_ids:
+                if tid == host_id or tid in fulls or tid in associates:
+                    continue
+                if _normalise(id_to_name.get(tid, '')) == assoc_name:
+                    associates.append(tid)
+        leftovers = [
+            tid for tid in team_ids
+            if tid not in ordered and tid not in fulls and tid not in associates
+        ]
+        ordered.extend(fulls)
+        ordered.extend(associates)
+        ordered.extend(leftovers)
+        return ordered[:limit]
+
     for event in events:
         event_start = date(event['year'], event['start_month'], 1)
         if event_start < start_date or event_start >= end_date:
@@ -578,19 +682,19 @@ def _place_icc_events(team_ids, id_to_name, venue_lookup, sched,
                     sched.book(tid, event_start, event_end)
             continue
 
-        # Block all teams for the event duration
-        for tid in team_ids:
+        participants = select_participants(event)
+
+        # Block participating teams only for the event duration
+        for tid in participants:
             sched.book(tid, event_start, event_end)
 
         # Generate round-robin group fixtures between all participating teams
-        # Cap at 8 teams for group stage for manageability
-        participants = list(team_ids)
-        pairs = list(combinations(participants[:min(len(participants), 8)], 2))
+        pairs = list(combinations(participants, 2))
 
         if density == 'relaxed':
             pairs = pairs[:max(len(pairs) // 2, 3)]
         elif density == 'moderate':
-            pairs = pairs[:min(len(pairs), 12)]
+            pairs = pairs[:min(len(pairs), 20)]
 
         series_key     = next_key()
         current        = event_start
@@ -641,10 +745,14 @@ def _place_icc_events(team_ids, id_to_name, venue_lookup, sched,
         # Add knockout stubs (SF + Final) for larger events
         if len(participants) >= 4 and density != 'relaxed':
             ko_start = event_start + timedelta(days=event['duration_days'] - 8)
-            for label, offset in [('Semi-Final 1', 0), ('Semi-Final 2', 2), ('Final', 5)]:
+            knockout_pairs = [
+                ('Semi-Final 1', 0, participants[0], participants[3]),
+                ('Semi-Final 2', 2, participants[1], participants[2]),
+                ('Final', 5, participants[0], participants[1]),
+            ]
+            for label, offset, t1, t2 in knockout_pairs:
                 if ko_start + timedelta(days=offset) >= event_end:
                     break
-                t1, t2 = participants[0], participants[1]
                 fixtures.append({
                     'fixture_id':             f'{series_key}_{label.replace(" ", "_").lower()}',
                     'series_name':            f'{ev_name} — {label}',
@@ -754,15 +862,28 @@ def schedule_ashes(calendar_fixtures, start_year, england_venues, australia_venu
 
 def _pick_template(host_name, visitor_name, density, special=None):
     """Return the tour template name for this bilateral pair."""
+    host_tier = _team_tier(host_name)
+    visitor_tier = _team_tier(visitor_name)
+    host_formats = set(_supported_formats(host_name))
+    visitor_formats = set(_supported_formats(visitor_name))
+    can_play_tests = 'Test' in host_formats and 'Test' in visitor_formats
+
     if special and special.get('preferred_template'):
         tmpl = special['preferred_template']
-    elif _is_major(host_name) and _is_major(visitor_name):
+    elif not can_play_tests:
+        tmpl = 'white_ball_standard' if host_tier == 'full' or visitor_tier == 'full' else 'associate_white_ball'
+    elif host_tier == 'full' and visitor_tier == 'full':
         tmpl = 'full_tour_major' if density == 'busy' else 'full_tour_standard'
+    elif host_tier == 'associate' and visitor_tier == 'associate':
+        tmpl = 'associate_white_ball'
     else:
-        tmpl = 'full_tour_standard' if density != 'relaxed' else 'short_tour'
+        tmpl = 'short_tour' if density != 'busy' else 'full_tour_standard'
 
     if density == 'relaxed':
-        tmpl = 'short_tour'
+        if tmpl == 'white_ball_standard':
+            tmpl = 'associate_white_ball'
+        elif tmpl not in ('associate_white_ball', 't20_series_only', 'odi_series_only'):
+            tmpl = 'short_tour'
 
     return tmpl
 
@@ -807,6 +928,8 @@ def _schedule_bilateral(team_ids, id_to_name, venue_lookup, sched,
     for t1, t2 in pairs:
         n1 = _normalise(id_to_name.get(t1, f'Team{t1}'))
         n2 = _normalise(id_to_name.get(t2, f'Team{t2}'))
+        tier1 = _team_tier(n1)
+        tier2 = _team_tier(n2)
 
         key1    = (n1, n2)
         key2    = (n2, n1)
@@ -818,6 +941,9 @@ def _schedule_bilateral(team_ids, id_to_name, venue_lookup, sched,
 
         # Skip Ashes — handled separately
         if special and special.get('name') == 'The Ashes':
+            continue
+
+        if tier1 == 'associate' and tier2 == 'associate' and density == 'relaxed':
             continue
 
         series_name_base = special.get('name', f'{n1} v {n2}') if special else f'{n1} v {n2}'
@@ -834,8 +960,17 @@ def _schedule_bilateral(team_ids, id_to_name, venue_lookup, sched,
         )
         fixtures.extend(fxs)
 
-        # Tour 2: t2 hosts t1 — search from midpoint (if multi-year, not relaxed)
+        should_return = False
         if years >= 2 and density != 'relaxed':
+            if tier1 == 'full' and tier2 == 'full':
+                should_return = True
+            elif (tier1 == 'full' or tier2 == 'full') and years >= 3:
+                should_return = True
+            elif density == 'busy' and years >= 4:
+                should_return = True
+
+        # Tour 2: t2 hosts t1 — search from midpoint when warranted
+        if should_return:
             mid_date = start_date + timedelta(days=365)
             series_ctr[0] += 1
             key2_str   = f's{series_ctr[0]:04d}'
@@ -882,6 +1017,197 @@ def _fill_gaps(team_ids, id_to_name, venue_lookup, sched,
 
 # ── Main Calendar Generator ────────────────────────────────────────────────────
 
+# ── Domestic Competition Definitions ──────────────────────────────────────────
+
+DOMESTIC_COMPETITIONS = {
+    'county_championship': {
+        'name':        'County Championship',
+        'league':      'County Championship',
+        'format':      'Test',
+        'start_month': 4,
+        'end_month':   9,
+        'gap_days':    5,        # days between matches in the season
+        'home_away':   True,
+        'series_key_prefix': 'county',
+    },
+    't20_blast': {
+        'name':        'Vitality T20 Blast',
+        'league':      'County Championship',  # same clubs
+        'format':      'T20',
+        'start_month': 6,
+        'end_month':   8,
+        'gap_days':    3,
+        'home_away':   True,
+        'series_key_prefix': 't20blast',
+    },
+    'royal_london_cup': {
+        'name':        'Royal London One-Day Cup',
+        'league':      'County Championship',
+        'format':      'ODI',
+        'start_month': 4,
+        'end_month':   5,
+        'gap_days':    3,
+        'home_away':   True,
+        'series_key_prefix': 'rlcup',
+    },
+    'sheffield_shield': {
+        'name':        'Sheffield Shield',
+        'league':      'Sheffield Shield',
+        'format':      'Test',
+        'start_month': 10,
+        'end_month':   3,   # wraps into next year
+        'gap_days':    7,
+        'home_away':   True,
+        'series_key_prefix': 'shield',
+    },
+    'marsh_cup': {
+        'name':        'Marsh One-Day Cup',
+        'league':      'Sheffield Shield',
+        'format':      'ODI',
+        'start_month': 9,
+        'end_month':   11,
+        'gap_days':    3,
+        'home_away':   True,
+        'series_key_prefix': 'marsh',
+    },
+    'bbl': {
+        'name':        'Big Bash League',
+        'league':      'Big Bash League',
+        'format':      'T20',
+        'start_month': 12,
+        'end_month':   2,   # wraps Jan-Feb
+        'gap_days':    2,
+        'home_away':   True,
+        'series_key_prefix': 'bbl',
+    },
+    'ipl': {
+        'name':        'Indian Premier League',
+        'league':      'IPL',
+        'format':      'T20',
+        'start_month': 3,
+        'end_month':   5,
+        'gap_days':    2,
+        'home_away':   True,
+        'series_key_prefix': 'ipl',
+    },
+    'cpl': {
+        'name':        'Caribbean Premier League',
+        'league':      'CPL',
+        'format':      'T20',
+        'start_month': 8,
+        'end_month':   9,
+        'gap_days':    2,
+        'home_away':   True,
+        'series_key_prefix': 'cpl',
+    },
+    'psl': {
+        'name':        'Pakistan Super League',
+        'league':      'PSL',
+        'format':      'T20',
+        'start_month': 2,
+        'end_month':   3,
+        'gap_days':    2,
+        'home_away':   True,
+        'series_key_prefix': 'psl',
+    },
+}
+
+
+def _season_start(year, start_month):
+    """Return the first date of the competition window in the given year."""
+    try:
+        return date(year, start_month, 1)
+    except ValueError:
+        return date(year, 1, 1)
+
+
+def _season_end(year, start_month, end_month):
+    """Return the last date of the competition window, handling year wraps."""
+    if end_month >= start_month:
+        return date(year, end_month, 28)
+    else:
+        # wraps into next year (e.g. Dec → Feb)
+        return date(year + 1, end_month, 28)
+
+
+def generate_domestic_fixtures(comp_key, comp_teams, start_year, end_year):
+    """
+    Generate round-robin fixtures for a domestic competition.
+
+    Parameters
+    ----------
+    comp_key   : str — key in DOMESTIC_COMPETITIONS
+    comp_teams : list of dicts with keys: team_id, home_venue_id, name
+    start_year : int
+    end_year   : int (exclusive)
+
+    Returns list of fixture dicts compatible with create_world() expectations.
+    """
+    comp = DOMESTIC_COMPETITIONS.get(comp_key)
+    if not comp or len(comp_teams) < 2:
+        return []
+
+    fixtures  = []
+    fx_ctr    = [0]
+
+    def _next_id():
+        fx_ctr[0] += 1
+        return f"dom_{comp_key}_{fx_ctr[0]}"
+
+    for year in range(start_year, end_year):
+        sm   = comp['start_month']
+        em   = comp['end_month']
+        gap  = comp['gap_days']
+        fmt  = comp['format']
+        name = comp['name']
+        pfx  = comp['series_key_prefix']
+
+        season_start = _season_start(year, sm)
+        season_end   = _season_end(year, sm, em)
+
+        # Generate all pairings
+        from itertools import combinations as _comb
+        pairs = list(_comb(range(len(comp_teams)), 2))
+        if comp['home_away']:
+            # both home and away
+            pairs = [(a, b) for a, b in pairs] + [(b, a) for a, b in pairs]
+
+        # Spread fixtures evenly across the season window
+        window_days = max(1, (season_end - season_start).days)
+        if len(pairs) == 0:
+            continue
+        step = max(gap, window_days // len(pairs))
+
+        current_date = season_start
+        for i, (a_idx, b_idx) in enumerate(pairs):
+            t1 = comp_teams[a_idx]
+            t2 = comp_teams[b_idx]
+            fdate = season_start + timedelta(days=i * step)
+            if fdate > season_end:
+                fdate = season_end - timedelta(days=1)
+
+            sk = f"{pfx}_{year}_{t1['team_id']}_{t2['team_id']}"
+            fixtures.append({
+                'fixture_id':              _next_id(),
+                'series_name':             f"{name} {year}",
+                'series_key':              f"{pfx}_{year}",
+                'team1_id':                t1['team_id'],
+                'team2_id':                t2['team_id'],
+                'scheduled_date':          fdate.isoformat(),
+                'format':                  fmt,
+                'venue_id':                t1.get('home_venue_id'),
+                'is_icc_event':            False,
+                'icc_event_name':          None,
+                'match_number_in_series':  i + 1,
+                'series_length':           len(pairs),
+                'is_home_for_team1':       True,
+                'tour_template':           f'domestic_{comp_key}',
+                'domestic_competition':    comp_key,
+            })
+
+    return fixtures
+
+
 def generate_realistic_calendar(
     team_ids,
     team_names,
@@ -890,6 +1216,8 @@ def generate_realistic_calendar(
     density='moderate',
     years=2,
     use_real_schedule=True,
+    domestic_leagues=None,
+    domestic_teams=None,
 ):
     """
     Generate a realistic FTP-style international cricket calendar.
@@ -965,13 +1293,34 @@ def generate_realistic_calendar(
         )
         all_fixtures.extend(gap_fxs)
 
-    # ── Step 5: Filter out fixtures outside the generation window ─────────────
+    # ── Step 5: Domestic league fixtures ────────────────────────────────────────
+    if domestic_leagues and domestic_teams:
+        start_year = start_date.year
+        end_year   = start_date.year + years
+        for comp_key in domestic_leagues:
+            comp = DOMESTIC_COMPETITIONS.get(comp_key)
+            if not comp:
+                continue
+            league_name = comp['league']
+            # Filter domestic_teams to those belonging to this competition
+            league_team_list = [
+                t for t in domestic_teams
+                if t.get('league') == league_name
+            ]
+            if len(league_team_list) < 2:
+                continue
+            dom_fxs = generate_domestic_fixtures(
+                comp_key, league_team_list, start_year, end_year
+            )
+            all_fixtures.extend(dom_fxs)
+
+    # ── Step 6: Filter out fixtures outside the generation window ─────────────
     all_fixtures = [
         fx for fx in all_fixtures
         if start_date.isoformat() <= fx.get('scheduled_date', '') < end_date.isoformat()
     ]
 
-    # ── Step 6: Sort by date ──────────────────────────────────────────────────
+    # ── Step 7: Sort by date ──────────────────────────────────────────────────
     all_fixtures.sort(key=lambda x: x.get('scheduled_date', ''))
 
     return all_fixtures

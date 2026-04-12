@@ -19,6 +19,7 @@ const AppState = {
   animationSpeed:    'normal',   // 'normal' | 'fast' | 'instant'
   defaultFormat:     'T20',
   defaultVenueId:    null,
+  defaultScoringMode:'modern',
   recordPopups:      false,   // false = collect records and show at end of match
   playerMode:        'ai_vs_ai',   // 'ai_vs_ai' | 'human_vs_ai' | 'human_vs_human'
   humanTeamId:       null,         // team id for human-controlled team in human_vs_ai
@@ -45,6 +46,30 @@ function animMs(normal, fast, instant = 0) {
     default:        return normal;
   }
 }
+
+const SCORING_MODE_META = {
+  classic: {
+    label: 'Classic',
+    playHelp: 'Pure dice cricket: 1, 2, 3, 4 and 6 score exactly what the face shows. 5 triggers the HOWZAT appeal chain.',
+    welcomeNote: 'Classic is the closest match to the old tabletop dice game and is the clearest mode for viewers.',
+  },
+  modern: {
+    label: 'Modern',
+    playHelp: 'Modern keeps the same face meanings and HOWZAT appeal chain, but in ODI and Test cricket a few big hits can be cut back.',
+    welcomeNote: 'Modern keeps the old-school feel but makes longer-format scoring a touch more grounded.',
+  }
+};
+
+const PLAY_SCOPE_META = {
+  international: 'International mode shows national teams. Use this for Tests, ODIs, T20Is and broader world cricket.',
+  domestic: 'Domestic mode shows county, state and franchise sides. Use the league filter below to narrow the team pool.'
+};
+
+const WORLD_SCOPE_META = {
+  international: 'International worlds use national teams only and generate an international calendar.',
+  domestic: 'Domestic worlds focus on league and franchise cricket. In realistic mode, pick at least one domestic competition.',
+  combined: 'Combined worlds generate the international calendar and layer selected domestic leagues into the same save.'
+};
 
 // ── Disclaimer Text ───────────────────────────────────────────────────────────
 
@@ -93,7 +118,10 @@ function formatOvers(overs) {
   if (overs === null || overs === undefined || overs === '') return '0';
   const completeOvers = Math.floor(overs);
   const remainder = overs - completeOvers;
-  let balls = Math.round(remainder * 6);
+  const tenths = Math.round(remainder * 10);
+  // Cricket notation (ball-by-ball): tenths digit IS the ball count (0–5)
+  // True decimal (simulation): tenths digit can exceed 5, so use × 6 conversion
+  let balls = tenths > 5 ? Math.round(remainder * 6) : tenths;
   if (balls >= 6) {
     return String(completeOvers + 1);
   }
@@ -108,6 +136,14 @@ function formatOvers(overs) {
 function formatBowlerOvers(completeOvers, balls) {
   if (!balls) return `${completeOvers}`;
   return `${completeOvers}.${balls}`;
+}
+
+function oversToLegalBalls(overs) {
+  if (overs === null || overs === undefined || overs === '') return 0;
+  const wholeOvers = Math.floor(Number(overs) || 0);
+  const remainder = (Number(overs) || 0) - wholeOvers;
+  const balls = Math.round(remainder * 10);
+  return wholeOvers * 6 + balls;
 }
 
 // ── API Helper ────────────────────────────────────────────────────────────────
@@ -218,7 +254,7 @@ function showScreen(name) {
 
 function onScreenLoad(name) {
   switch (name) {
-    case 'welcome':           /* static — no load needed */ break;
+    case 'welcome':           loadWelcomeScreen();       break;
     case 'home':              loadHomeScreen();          break;
     case 'play':              loadPlayScreen();          break;
     case 'match':             loadMatchScreen();         break;
@@ -239,6 +275,10 @@ function onScreenLoad(name) {
     case 'venue-detail':  break;  // loaded by loadVenueDetail()
     case 'demo':          break;  // loaded by DemoMode.start()
   }
+}
+
+function loadWelcomeScreen() {
+  syncWelcomeScoringMode();
 }
 
 // ── Nav Wiring ────────────────────────────────────────────────────────────────
@@ -424,6 +464,161 @@ async function loadHomeScreen() {
 
 // ── Play Screen ───────────────────────────────────────────────────────────────
 
+function getDefaultScoringMode() {
+  return ['classic', 'modern'].includes(AppState.defaultScoringMode)
+    ? AppState.defaultScoringMode
+    : 'modern';
+}
+
+function getSelectedPlayScoringMode() {
+  return ['classic', 'modern'].includes(AppState._playScoringMode)
+    ? AppState._playScoringMode
+    : getDefaultScoringMode();
+}
+
+function syncWelcomeScoringMode() {
+  const mode = getDefaultScoringMode();
+  const classicBtn = document.getElementById('welcome-scoring-classic');
+  const modernBtn = document.getElementById('welcome-scoring-modern');
+  if (classicBtn) classicBtn.classList.toggle('active', mode === 'classic');
+  if (modernBtn) modernBtn.classList.toggle('active', mode === 'modern');
+  const noteEl = document.getElementById('welcome-scoring-note');
+  if (noteEl) noteEl.textContent = SCORING_MODE_META[mode].welcomeNote;
+}
+
+function chooseWelcomeScoringMode(mode) {
+  setDefaultScoringMode(mode);
+  syncWelcomeScoringMode();
+}
+
+function getPlayCricketScope() {
+  return AppState._playCricketScope === 'domestic' ? 'domestic' : 'international';
+}
+
+function syncPlayCricketScope() {
+  const scope = getPlayCricketScope();
+  const intlBtn = document.getElementById('play-scope-international');
+  const domBtn = document.getElementById('play-scope-domestic');
+  if (intlBtn) intlBtn.classList.toggle('active', scope === 'international');
+  if (domBtn) domBtn.classList.toggle('active', scope === 'domestic');
+  const helpEl = document.getElementById('play-scope-help');
+  if (helpEl) helpEl.textContent = PLAY_SCOPE_META[scope];
+  document.getElementById('play-domestic-league-section')?.classList.toggle('hidden', scope !== 'domestic');
+}
+
+function setPlayCricketScope(scope) {
+  AppState._playCricketScope = scope === 'domestic' ? 'domestic' : 'international';
+  if (scope !== 'domestic') {
+    AppState._playDomesticLeague = '';
+  }
+  syncPlayCricketScope();
+  syncPlayFormatLabels();
+  applyPlayTeamFilters();
+}
+
+function setPlayDomesticLeague(league) {
+  AppState._playDomesticLeague = league || '';
+  applyPlayTeamFilters();
+}
+
+function populateDomesticLeagueFilter(teams) {
+  const leagueSelect = document.getElementById('play-domestic-league');
+  if (!leagueSelect) return;
+  const leagues = [...new Set(
+    (teams || [])
+      .filter(t => t.team_type && t.team_type !== 'international' && t.league)
+      .map(t => t.league)
+  )].sort((a, b) => a.localeCompare(b));
+  leagueSelect.innerHTML = [
+    '<option value="">All domestic competitions</option>',
+    ...leagues.map(l => `<option value="${escHtml(l)}">${escHtml(l)}</option>`)
+  ].join('');
+  if (AppState._playDomesticLeague && leagues.includes(AppState._playDomesticLeague)) {
+    leagueSelect.value = AppState._playDomesticLeague;
+  } else {
+    AppState._playDomesticLeague = '';
+    leagueSelect.value = '';
+  }
+}
+
+function syncPlayFormatLabels() {
+  const domestic = getPlayCricketScope() === 'domestic';
+  document.querySelectorAll('.format-btn').forEach(btn => {
+    const format = btn.dataset.format;
+    const nameEl = btn.querySelector('.fmt-name');
+    const oversEl = btn.querySelector('.fmt-overs');
+    const descEl = btn.querySelector('.fmt-desc');
+    if (!nameEl || !oversEl || !descEl) return;
+    if (domestic) {
+      if (format === 'Test') {
+        nameEl.textContent = 'First-Class';
+        oversEl.textContent = '2 innings each';
+        descEl.textContent = 'Long-form domestic cricket with declarations and patience';
+      } else if (format === 'ODI') {
+        nameEl.textContent = 'One-Day';
+        oversEl.textContent = '50 overs per side';
+        descEl.textContent = 'List-A rhythm with room for both accumulation and attack';
+      } else if (format === 'T20') {
+        nameEl.textContent = 'T20';
+        oversEl.textContent = '20 overs per side';
+        descEl.textContent = 'Franchise pace, pressure overs and fast scoring';
+      }
+    } else {
+      if (format === 'Test') {
+        nameEl.textContent = 'Test';
+        oversEl.textContent = '2 innings each';
+        descEl.textContent = 'The ultimate examination — declare or fight to the last';
+      } else if (format === 'ODI') {
+        nameEl.textContent = 'ODI';
+        oversEl.textContent = '50 overs per side';
+        descEl.textContent = 'The tactical balance of strategy and power';
+      } else if (format === 'T20') {
+        nameEl.textContent = 'T20';
+        oversEl.textContent = '20 overs per side';
+        descEl.textContent = 'Fast-paced, big hitting, decided in an evening';
+      }
+    }
+  });
+}
+
+function applyPlayTeamFilters() {
+  const allTeams = AppState._playTeams || [];
+  const scope = getPlayCricketScope();
+  const league = AppState._playDomesticLeague || '';
+  const filtered = allTeams.filter(t => {
+    const isDomestic = !!t.team_type && t.team_type !== 'international';
+    if (scope === 'international') {
+      return !isDomestic;
+    }
+    if (!isDomestic) return false;
+    if (league && t.league !== league) return false;
+    return true;
+  });
+
+  const validIds = new Set(filtered.map(t => t.id));
+  if (!validIds.has(AppState._selectedTeam1)) AppState._selectedTeam1 = null;
+  if (!validIds.has(AppState._selectedTeam2)) AppState._selectedTeam2 = null;
+
+  renderTeamSelector('team1-selector', filtered, 1);
+  renderTeamSelector('team2-selector', filtered, 2);
+  checkStartReady();
+}
+
+function syncPlayScoringMode() {
+  const mode = getSelectedPlayScoringMode();
+  const classicBtn = document.getElementById('play-scoring-classic');
+  const modernBtn = document.getElementById('play-scoring-modern');
+  if (classicBtn) classicBtn.classList.toggle('active', mode === 'classic');
+  if (modernBtn) modernBtn.classList.toggle('active', mode === 'modern');
+  const helpEl = document.getElementById('play-scoring-help');
+  if (helpEl) helpEl.textContent = SCORING_MODE_META[mode].playHelp;
+}
+
+function selectPlayScoringMode(mode) {
+  AppState._playScoringMode = mode === 'classic' ? 'classic' : 'modern';
+  syncPlayScoringMode();
+}
+
 async function loadPlayScreen() {
   // Set default date
   const dateInput = document.getElementById('match-date');
@@ -436,8 +631,11 @@ async function loadPlayScreen() {
   const teamList = teams && teams.teams ? teams.teams : [];
 
   AppState._playTeams = teamList;  // keep for mode selection team name lookup
-  renderTeamSelector('team1-selector', teamList, 1);
-  renderTeamSelector('team2-selector', teamList, 2);
+  AppState._playCricketScope = AppState._playCricketScope || 'international';
+  populateDomesticLeagueFilter(teamList);
+  syncPlayCricketScope();
+  syncPlayFormatLabels();
+  applyPlayTeamFilters();
 
   // Load venues
   const venues = await api('GET', '/api/venues');
@@ -447,16 +645,23 @@ async function loadPlayScreen() {
     venueSelect.innerHTML = venueList.length
       ? venueList.map(v => `<option value="${v.id}">${v.name}${v.city ? ', ' + v.city : ''}</option>`).join('')
       : '<option value="">No venues available</option>';
+    if (AppState.defaultVenueId && venueList.some(v => v.id === AppState.defaultVenueId)) {
+      venueSelect.value = String(AppState.defaultVenueId);
+    }
   }
 
   // Format buttons
   document.querySelectorAll('.format-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.format === AppState.defaultFormat);
     btn.addEventListener('click', () => {
       document.querySelectorAll('.format-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       checkStartReady();
     });
   });
+
+  AppState._playScoringMode = getDefaultScoringMode();
+  syncPlayScoringMode();
 
   checkStartReady();
 
@@ -474,12 +679,14 @@ function renderTeamSelector(containerId, teams, slot) {
   if (!container) return;
 
   if (!teams.length) {
-    container.innerHTML = '<p class="text-muted" style="padding:12px;font-size:13px;">No teams found — run Section 2 to load squads.</p>';
+    container.innerHTML = '<p class="text-muted" style="padding:12px;font-size:13px;">No teams match the current cricket type and league filter.</p>';
     return;
   }
 
+  const selectedId = slot === 1 ? AppState._selectedTeam1 : AppState._selectedTeam2;
+  const otherSelectedId = slot === 1 ? AppState._selectedTeam2 : AppState._selectedTeam1;
   container.innerHTML = teams.map(t => `
-    <div class="team-option" data-id="${t.id}" data-slot="${slot}" onclick="selectTeam(this, ${slot})">
+    <div class="team-option${selectedId === t.id ? ' selected' : ''}${otherSelectedId === t.id ? ' disabled' : ''}" data-id="${t.id}" data-slot="${slot}" onclick="selectTeam(this, ${slot})">
       <span class="team-badge" style="background:${t.badge_colour || '#444'}"></span>
       <span class="team-option-name">${t.name}</span>
       <span class="team-option-code">${t.short_code || ''}</span>
@@ -588,6 +795,7 @@ async function _doStartMatch(playerMode, humanTeamId) {
   const venue = venueEl ? parseInt(venueEl.value) : null;
   const dateEl = document.getElementById('match-date');
   const date = dateEl?.value || new Date().toISOString().split('T')[0];
+  const scoringMode = getSelectedPlayScoringMode();
 
   if (!t1 || !t2 || !fmt) { showError('Please select two teams and a format.'); return; }
 
@@ -601,6 +809,7 @@ async function _doStartMatch(playerMode, humanTeamId) {
     player_mode:    playerMode,
     human_team_id:  humanTeamId,
     canon_status:   canonStatus,
+    scoring_mode:   scoringMode,
   });
 
   if (res) {
@@ -608,6 +817,7 @@ async function _doStartMatch(playerMode, humanTeamId) {
     AppState.activeMatch.match_id = res.match_id || res.match?.id;
     AppState.activeMatch.playerMode  = playerMode;
     AppState.activeMatch.humanTeamId = humanTeamId;
+    AppState.activeMatch.scoring_mode = res.match?.scoring_mode || scoringMode;
 
     MatchUI.lastState = null;
     MatchUI.commentaryLines = [];
@@ -655,8 +865,10 @@ const MatchUI = {
   _pendingDelivery:       null,     // delivery object waiting for manual resolution
   _pendingRes:            null,     // full API response waiting for manual resolution
   _ballInProgress:        false,    // true between first Roll press and ball completion
+  _transitionActive:      false,    // innings/result overlay is blocking live play
   _pendingRollModeSwitch: null,     // queued mode switch to apply after current ball
   _dismissedSuggestions:  [],       // suggestion keys dismissed this innings
+  _storyState:            { key: '', primaryTone: 'neutral', alertedKey: '' },
 };
 
 // ── DiceState Machine ─────────────────────────────────────────────────────────
@@ -849,6 +1061,50 @@ function buildAllPlayersMap(state) {
   players.forEach(p => { MatchUI.allPlayers[p.id] = p; });
 }
 
+const TEAM_FLAGS = {
+  'Afghanistan': '🇦🇫',
+  'Australia': '🇦🇺',
+  'Bangladesh': '🇧🇩',
+  'Canada': '🇨🇦',
+  'India': '🇮🇳',
+  'Ireland': '🇮🇪',
+  'Namibia': '🇳🇦',
+  'Netherlands': '🇳🇱',
+  'Nepal': '🇳🇵',
+  'New Zealand': '🇳🇿',
+  'Oman': '🇴🇲',
+  'Pakistan': '🇵🇰',
+  'South Africa': '🇿🇦',
+  'Sri Lanka': '🇱🇰',
+  'UAE': '🇦🇪',
+  'United Arab Emirates': '🇦🇪',
+  'United States': '🇺🇸',
+  'USA': '🇺🇸',
+  'Zimbabwe': '🇿🇼',
+};
+
+function getTeamFlag(teamName) {
+  if (!teamName) return '';
+  const normalized = String(teamName).trim();
+  if (!normalized) return '';
+  if (TEAM_FLAGS[normalized]) return TEAM_FLAGS[normalized];
+  const base = normalized.replace(/\s+(Men|Women|XI|A)\b.*$/i, '').trim();
+  return TEAM_FLAGS[base] || '';
+}
+
+function renderTeamLabel(teamName, { compact = false } = {}) {
+  const safeName = escHtml(teamName || '');
+  if ((teamName || '').trim() === 'England') {
+    return `<span class="tv-team-inline${compact ? ' compact' : ''}"><span class="tv-flag tv-flag-england" aria-label="England flag"></span><span class="tv-team-name">${safeName}</span></span>`;
+  }
+  if ((teamName || '').trim() === 'Scotland') {
+    return `<span class="tv-team-inline${compact ? ' compact' : ''}"><span class="tv-flag tv-flag-scotland" aria-label="Scotland flag"></span><span class="tv-team-name">${safeName}</span></span>`;
+  }
+  const flag = getTeamFlag(teamName);
+  if (!flag) return safeName;
+  return `<span class="tv-team-inline${compact ? ' compact' : ''}"><span class="tv-flag" aria-hidden="true">${flag}</span><span class="tv-team-name">${safeName}</span></span>`;
+}
+
 function initLiveView(state) {
   const m = state.match || AppState.activeMatch;
   const matchId = m.id || getMatchId();
@@ -857,10 +1113,13 @@ function initLiveView(state) {
   AppState.humanTeamId = AppState.activeMatch?.humanTeamId || m.human_team_id || null;
 
   // Title
-  document.getElementById('match-title').textContent =
-    `${m.team1_name} vs ${m.team2_name} — ${m.format}, ${m.venue_name || ''}`;
-  document.getElementById('match-context').textContent =
-    m.series_id ? `Series #${m.series_id}` : '';
+  document.getElementById('match-title').innerHTML =
+    `${renderTeamLabel(m.team1_name, { compact: true })} <span class="match-title-sep">vs</span> ${renderTeamLabel(m.team2_name, { compact: true })} — ${escHtml(m.format)}, ${escHtml(m.venue_name || '')}`;
+  const contextBits = [];
+  if (m.series_id) contextBits.push(`Series #${m.series_id}`);
+  contextBits.push(`${SCORING_MODE_META[(m.scoring_mode === 'classic' ? 'classic' : 'modern')].label} Scoring`);
+  document.getElementById('match-context').textContent = contextBits.join(' · ');
+  updateHowzatLegend(m.scoring_mode);
 
   // Mode badge
   const modeBadgeEl = document.getElementById('match-mode-badge');
@@ -959,8 +1218,8 @@ function updateLiveView(state) {
 
   // Scoreboard
   if (inn) {
-    document.getElementById('sb-team').textContent =
-      inn.batting_team_name || inn.batting_team_code || '';
+    document.getElementById('sb-team').innerHTML =
+      renderTeamLabel(inn.batting_team_name || inn.batting_team_code || '');
     document.getElementById('sb-score').textContent =
       formatScore(inn.total_runs, inn.total_wickets);
     const overs = inn.overs_completed || 0;
@@ -978,7 +1237,9 @@ function updateLiveView(state) {
       document.getElementById('sb-target').textContent =
         `Target: ${state.target}`;
       const needed = state.target - inn.total_runs;
-      const remOvers = (state.max_overs || 999) - overs;
+      const maxLegalBalls = oversToLegalBalls(state.max_overs || 0);
+      const remainingBalls = Math.max(0, maxLegalBalls - legalBalls);
+      const remOvers = remainingBalls / 6;
       const rrr = remOvers > 0 ? (needed / remOvers).toFixed(2) : '—';
       document.getElementById('sb-required').textContent =
         `Need ${needed} (RRR: ${rrr})`;
@@ -993,6 +1254,12 @@ function updateLiveView(state) {
 
   // Bowler
   renderBowlerRow(state);
+
+  // Story strip
+  renderStoryStrip(state);
+
+  // Situation panel (current over, partnership, fall of wickets)
+  renderMatchSituationPanel(state);
 
   // Scorecard tab
   renderScorecardTab(state);
@@ -1060,6 +1327,219 @@ function renderBowlerRow(state) {
   `;
 }
 
+function renderStoryStrip(state) {
+  const el = document.getElementById('sb-story-strip');
+  if (!el) return;
+
+  const inn = state.current_innings;
+  if (!inn) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    MatchUI._storyState = { key: '', primaryTone: 'neutral', alertedKey: '' };
+    return;
+  }
+
+  const stories = [];
+  const striker = (state.batter_innings || []).find(
+    b => b.player_id === state.current_striker_id && b.status === 'batting'
+  ) || {};
+  const nonStriker = (state.batter_innings || []).find(
+    b => b.player_id === state.current_non_striker_id && b.status === 'batting'
+  ) || {};
+  const bowler = (state.bowler_innings || []).find(
+    b => b.player_id === state.current_bowler_id
+  ) || {};
+  const activePship = (state.partnerships || []).length
+    ? state.partnerships[state.partnerships.length - 1]
+    : null;
+
+  const strikerName = (MatchUI.allPlayers[state.current_striker_id]?.name || '').split(' ').pop();
+  const nonStrikerName = (MatchUI.allPlayers[state.current_non_striker_id]?.name || '').split(' ').pop();
+  const bowlerName = (MatchUI.allPlayers[state.current_bowler_id]?.name || '').split(' ').pop();
+
+  if (state.target) {
+    const legalBalls = (state.over_number || 0) * 6 + (state.ball_in_over || 0);
+    const maxLegalBalls = oversToLegalBalls(state.max_overs || 0);
+    const ballsLeft = Math.max(0, maxLegalBalls - legalBalls);
+    const runsNeeded = Math.max(0, state.target - inn.total_runs);
+    if (runsNeeded > 0) {
+      stories.push({ tone: 'pressure', text: `${runsNeeded} needed from ${ballsLeft} balls` });
+    }
+    if (ballsLeft > 0) {
+      const rrr = runsNeeded / (ballsLeft / 6);
+      if (rrr >= 12) stories.push({ tone: 'pressure', text: `Required rate ${rrr.toFixed(2)}` });
+    }
+    if ((10 - (inn.total_wickets || 0)) <= 2) {
+      stories.push({ tone: 'danger', text: `${10 - (inn.total_wickets || 0)} wickets left` });
+    }
+  }
+
+  for (const batter of [striker, nonStriker]) {
+    const runs = batter.runs || 0;
+    if (runs >= 90 && runs < 100) {
+      const name = (MatchUI.allPlayers[batter.player_id]?.name || '').split(' ').pop();
+      stories.push({ tone: 'milestone', text: `${name} nearing a century (${runs})` });
+      break;
+    }
+    if (runs >= 45 && runs < 50) {
+      const name = (MatchUI.allPlayers[batter.player_id]?.name || '').split(' ').pop();
+      stories.push({ tone: 'milestone', text: `${name} closing on fifty (${runs})` });
+      break;
+    }
+  }
+
+  if (activePship) {
+    const pr = activePship.runs || 0;
+    if (pr >= 75) stories.push({ tone: 'hot', text: `${pr}-run stand: ${strikerName} & ${nonStrikerName}` });
+    else if (pr >= 40) stories.push({ tone: 'neutral', text: `Partnership building: ${pr} runs` });
+  }
+
+  if (bowler.wickets >= 2 && bowlerName) {
+    stories.push({ tone: 'danger', text: `${bowlerName} has ${bowler.wickets} wickets` });
+  }
+  if ((bowler.maidens || 0) > 0 && bowlerName) {
+    stories.push({ tone: 'neutral', text: `${bowlerName} has bowled ${bowler.maidens} maiden${bowler.maidens > 1 ? 's' : ''}` });
+  }
+
+  const overBalls = state.current_over_deliveries || [];
+  if (overBalls.length >= 3) {
+    const recentRuns = overBalls.reduce((sum, d) => sum + (d.runs_scored || 0) + ((d.is_wide || d.is_no_ball) ? 1 : 0), 0);
+    const wicketThisOver = overBalls.some(d => d.outcome_type === 'wicket');
+    if (wicketThisOver) {
+      stories.push({ tone: 'danger', text: 'Wicket in the over - pressure on' });
+    } else if (recentRuns >= 10) {
+      stories.push({ tone: 'hot', text: `${recentRuns} runs already in this over` });
+    } else if (recentRuns === 0 && overBalls.length >= 4) {
+      stories.push({ tone: 'neutral', text: 'Dot-ball pressure building' });
+    }
+  }
+
+  const uniqueStories = [];
+  const seen = new Set();
+  for (const story of stories) {
+    if (!story?.text || seen.has(story.text)) continue;
+    seen.add(story.text);
+    uniqueStories.push(story);
+    if (uniqueStories.length >= 4) break;
+  }
+
+  if (!uniqueStories.length) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    MatchUI._storyState = { key: '', primaryTone: 'neutral', alertedKey: '' };
+    return;
+  }
+
+  const storyKey = uniqueStories.map(story => `${story.tone}:${story.text}`).join('|');
+  const primaryTone = uniqueStories[0]?.tone || 'neutral';
+  const changed = storyKey !== MatchUI._storyState.key;
+  const alertedKey = MatchUI._storyState.alertedKey || '';
+  MatchUI._storyState = { key: storyKey, primaryTone, alertedKey };
+
+  el.innerHTML = uniqueStories.map(story =>
+    `<div class="story-pill story-pill-${story.tone}">${escHtml(story.text)}</div>`
+  ).join('');
+  el.classList.remove('hidden');
+  el.classList.toggle('story-strip-live', changed);
+  if (changed) {
+    _queueStoryAlert(uniqueStories[0], storyKey);
+    setTimeout(() => {
+      if (document.getElementById('sb-story-strip') === el) {
+        el.classList.remove('story-strip-live');
+      }
+    }, 950);
+  }
+}
+
+function _queueStoryAlert(primaryStory, storyKey) {
+  if (!primaryStory || !storyKey) return;
+  if (!['pressure', 'danger', 'milestone', 'hot'].includes(primaryStory.tone)) return;
+  if (MatchUI._storyState.alertedKey === storyKey) return;
+
+  const toneLabel = {
+    pressure: 'Pressure Watch',
+    danger: 'Match Turning',
+    milestone: 'Milestone Watch',
+    hot: 'Momentum Shift'
+  }[primaryStory.tone] || 'Story Update';
+
+  GraphicQueue.add({
+    type: 'story_alert',
+    label: toneLabel,
+    text: primaryStory.text,
+    tone: primaryStory.tone
+  });
+  MatchUI._storyState.alertedKey = storyKey;
+}
+
+// ── Match situation panel ─────────────────────────────────────────────────────
+
+function renderMatchSituationPanel(state) {
+  const el = document.getElementById('sb-situation');
+  if (!el) return;
+
+  const inn = state.current_innings;
+  if (!inn) { el.innerHTML = ''; return; }
+
+  const parts = [];
+
+  // ── Current over ball-by-ball ──────────────────────────────────────────────
+  const overBalls = state.current_over_deliveries || [];
+  if (state.ball_in_over > 0 || overBalls.length > 0) {
+    const ballTokens = overBalls.map(d => {
+      if (d.is_wide)    return '<span class="situ-ball situ-ball-wide">Wd</span>';
+      if (d.is_no_ball) return '<span class="situ-ball situ-ball-nb">Nb</span>';
+      const ot = d.outcome_type;
+      if (ot === 'wicket') return '<span class="situ-ball situ-ball-wicket">W</span>';
+      if (ot === 'six')    return '<span class="situ-ball situ-ball-six">6</span>';
+      if (ot === 'four')   return '<span class="situ-ball situ-ball-four">4</span>';
+      const r = d.runs_scored || 0;
+      if (r > 0) return `<span class="situ-ball situ-ball-runs">${r}</span>`;
+      return '<span class="situ-ball situ-ball-dot">·</span>';
+    });
+    // Pad to 6 slots with placeholders
+    while (ballTokens.length < 6) {
+      ballTokens.push('<span class="situ-ball situ-ball-empty"></span>');
+    }
+    const overNum = state.over_number + 1;
+    parts.push(`<div class="situ-row situ-over-row">
+      <span class="situ-label">Over ${overNum}</span>
+      <span class="situ-balls">${ballTokens.join('')}</span>
+    </div>`);
+  }
+
+  // ── Current partnership ────────────────────────────────────────────────────
+  const partnerships = state.partnerships || [];
+  const activePship = partnerships.length > 0 ? partnerships[partnerships.length - 1] : null;
+  if (activePship) {
+    const b1 = activePship.batter1_name || '';
+    const b2 = activePship.batter2_name || '';
+    const pr = activePship.runs || 0;
+    const pb = activePship.balls || 0;
+    // Shorten names to last name only
+    const lastName = n => n.split(' ').pop();
+    parts.push(`<div class="situ-row">
+      <span class="situ-label">Partnership</span>
+      <span class="situ-value"><strong>${pr}</strong> (${pb}b) &mdash; ${lastName(b1)} &amp; ${lastName(b2)}</span>
+    </div>`);
+  }
+
+  // ── Fall of wickets ────────────────────────────────────────────────────────
+  const fow = state.fall_of_wickets || [];
+  if (fow.length > 0) {
+    const fowTokens = fow.map(w => {
+      const lastName = (w.batter_name || '').split(' ').pop();
+      return `<span class="situ-fow-item" title="${w.batter_name}">${w.wicket_number}-${w.score_at_fall} <span class="situ-fow-name">${lastName}</span></span>`;
+    });
+    parts.push(`<div class="situ-row situ-fow-row">
+      <span class="situ-label">FoW</span>
+      <span class="situ-fow">${fowTokens.join('')}</span>
+    </div>`);
+  }
+
+  el.innerHTML = parts.length ? parts.join('') : '';
+}
+
 // ── Die face rendering ────────────────────────────────────────────────────────
 
 const DIE_PIPS = {
@@ -1090,43 +1570,194 @@ function renderDieFace(face, stageLabel) {
     pipsEl.innerHTML = DIE_PIPS[face] || '';
   }
   if (stageLabel !== undefined) {
-    document.getElementById('die-stage-label').textContent = stageLabel || '';
+    setDieStageLabel(stageLabel || '');
   }
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+function setDieStageLabel(message = '', tone = 'neutral', allowHtml = false) {
+  const labelEl = document.getElementById('die-stage-label');
+  if (!labelEl) return;
+  labelEl.classList.remove('tone-neutral', 'tone-hype', 'tone-alert', 'tone-wicket', 'tone-good');
+  labelEl.classList.add(`tone-${tone}`);
+  if (allowHtml) labelEl.innerHTML = message;
+  else labelEl.textContent = message;
+}
+
+function _titleCaseWords(s) {
+  return String(s || '')
+    .split('_')
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function getCurrentMatchScoringMode() {
+  return MatchUI.lastState?.match?.scoring_mode
+    || AppState.activeMatch?.scoring_mode
+    || getDefaultScoringMode();
+}
+
+function updateHowzatLegend(scoringMode = getCurrentMatchScoringMode()) {
+  const mode = scoringMode === 'classic' ? 'classic' : 'modern';
+  const modeEl = document.getElementById('howzat-legend-mode');
+  const rowEl = document.getElementById('howzat-legend-row');
+  const noteEl = document.getElementById('howzat-legend-note');
+  if (modeEl) modeEl.textContent = SCORING_MODE_META[mode].label;
+  if (rowEl) {
+    rowEl.innerHTML = mode === 'classic'
+      ? [
+          '1 Single', '2 Two', '3 Three',
+          '4 Four', '5 Appeal', '6 Six'
+        ].map(text => `<span class="howzat-legend-chip">${text}</span>`).join('')
+      : [
+          '1 Single', '2 Two', '3 Three',
+          '4 Four*', '5 Appeal', '6 Six*'
+        ].map(text => `<span class="howzat-legend-chip">${text}</span>`).join('');
+  }
+  if (noteEl) {
+    noteEl.textContent = mode === 'classic'
+      ? 'Classic keeps every scoring face exactly literal.'
+      : 'Modern can occasionally drag a 4 or 6 back in longer formats.';
+  }
+}
+
+function _stage1Meaning(delivery) {
+  const s1 = delivery.stage1_roll;
+  const mode = getCurrentMatchScoringMode();
+  if (s1 === 1) return 'Single';
+  if (s1 === 2) return 'Two runs';
+  if (s1 === 3) return 'Three runs';
+  if (s1 === 4) {
+    if (mode === 'modern' && delivery.outcome_type === 'three') return 'Boundary check - three';
+    return 'Four runs';
+  }
+  if (s1 === 5) return 'Appeal ball';
+  if (s1 === 6) {
+    if (mode === 'modern' && delivery.outcome_type === 'four') return 'Big hit held to four';
+    return 'Six runs';
+  }
+  return 'Delivery';
+}
+
+function _autoOutcomePresentation(delivery) {
+  const ot = delivery.outcome_type || '';
+  const stage1Text = delivery.stage1_roll != null
+    ? `S1 ${delivery.stage1_roll}: ${_stage1Meaning(delivery)}`
+    : '';
+  if (ot === 'wicket') {
+    return {
+      text: stage1Text
+        ? `${stage1Text} - OUT! ${_titleCaseWords(delivery.dismissal_type || 'wicket')}`
+        : `OUT! ${_titleCaseWords(delivery.dismissal_type || 'wicket')}`,
+      tone: 'wicket'
+    };
+  }
+  if (ot === 'six')  return { text: `${stage1Text} - SIX! MAXIMUM`, tone: 'hype' };
+  if (ot === 'four') return { text: `${stage1Text} - FOUR! TO THE ROPE`, tone: 'good' };
+  if (ot === 'three') return { text: `${stage1Text} - THREE RUNS`, tone: 'good' };
+  if (ot === 'two')   return { text: `${stage1Text} - TWO RUNS`, tone: 'good' };
+  if (ot === 'single') return { text: `${stage1Text} - SINGLE TAKEN`, tone: 'neutral' };
+  if (ot === 'wide')  return { text: `${stage1Text || 'Stage 3'} - WIDE BALL`, tone: 'alert' };
+  if (ot === 'no_ball') return { text: `${stage1Text || 'Stage 3'} - NO BALL - FREE HIT`, tone: 'alert' };
+  if (ot === 'bye') return { text: `${stage1Text || 'Stage 3'} - BYE`, tone: 'neutral' };
+  if (ot === 'leg_bye') return { text: `${stage1Text || 'Stage 3'} - LEG BYE`, tone: 'neutral' };
+  if (delivery.is_free_hit && ot !== 'wicket') {
+    return { text: `${stage1Text} - FREE HIT SURVIVED`, tone: 'good' };
+  }
+  return { text: `${stage1Text || 'Stage 3'} - DOT BALL`, tone: 'neutral' };
+}
+
+function _autoStageFrames(delivery) {
+  const frames = [
+    {
+      roll: delivery.stage1_roll,
+      label: delivery.is_free_hit
+        ? `STAGE 1 - ${delivery.stage1_roll}: ${_stage1Meaning(delivery)}`
+        : `STAGE 1 - ${delivery.stage1_roll}: ${_stage1Meaning(delivery)}`,
+      tone: delivery.is_free_hit ? 'alert' : 'neutral',
+      hold: delivery.stage2_roll != null ? null : 0
+    }
+  ];
+
+  if (delivery.stage2_roll != null) {
+    frames.push({
+      roll: delivery.stage2_roll,
+      label: 'HOWZAT! UP GOES THE APPEAL',
+      tone: 'alert',
+      hold: null
+    });
+  }
+  if (delivery.stage3_roll != null) {
+    frames.push({
+      roll: delivery.stage3_roll,
+      label: delivery.is_free_hit ? 'FREE HIT - SAFE' : 'NOT OUT',
+      tone: delivery.is_free_hit ? 'good' : 'neutral',
+      hold: null
+    });
+  }
+  if (delivery.stage4_roll != null) {
+    frames.push({
+      roll: delivery.stage4_roll,
+      label: `OUT - ${_titleCaseWords(delivery.dismissal_type || 'wicket')}`,
+      tone: 'wicket',
+      hold: null
+    });
+  }
+  if (delivery.stage4b_roll != null) {
+    frames.push({
+      roll: delivery.stage4b_roll,
+      label: 'CAUGHT - BUT WHERE?',
+      tone: 'alert',
+      hold: null
+    });
+  }
+  return frames;
+}
+
 async function animateDice(delivery) {
   const dieEl = document.getElementById('die-face');
   dieEl.classList.add('rolling');
   const broadcast   = AppState.broadcastMode;
-  const stagePause  = animMs(broadcast ? 200 : 150, broadcast ? 80 : 60, 0);
-  const totalMs     = animMs(broadcast ? 1000 : 600, broadcast ? 300 : 200, 0);
+  const stagePause  = animMs(broadcast ? 260 : 180, broadcast ? 120 : 80, 0);
+  const suspensePause = animMs(broadcast ? 520 : 280, broadcast ? 180 : 120, 0);
+  const totalMsBase = animMs(broadcast ? 1300 : 800, broadcast ? 420 : 260, 0);
+  const highlightHold = (() => {
+    const ot = delivery.outcome_type;
+    if (ot === 'wicket') return animMs(broadcast ? 1500 : 850, broadcast ? 420 : 260, 0);
+    if (ot === 'six' || ot === 'four') return animMs(broadcast ? 1100 : 650, broadcast ? 320 : 180, 0);
+    if (ot === 'wide' || ot === 'no_ball') return animMs(broadcast ? 800 : 500, broadcast ? 220 : 140, 0);
+    return animMs(broadcast ? 520 : 320, broadcast ? 180 : 100, 0);
+  })();
+  const stages = _autoStageFrames(delivery);
+  const finalRoll = stages[stages.length - 1]?.roll ?? delivery.stage1_roll;
+  const finalOutcome = _autoOutcomePresentation(delivery);
 
-  const stages = [
-    { roll: delivery.stage1_roll, label: 'STAGE 1' },
-    delivery.stage2_roll != null && { roll: delivery.stage2_roll, label: 'STAGE 2' },
-    delivery.stage3_roll != null && { roll: delivery.stage3_roll, label: 'STAGE 3' },
-    delivery.stage4_roll != null && { roll: delivery.stage4_roll, label: 'STAGE 4' },
-    delivery.stage4b_roll != null && { roll: delivery.stage4b_roll, label: 'STAGE 4b' },
-  ].filter(Boolean);
+  if (delivery.is_free_hit) {
+    _showFreeHitBanner(true);
+  }
 
-  if (totalMs === 0) {
-    // Instant: just show result
-    renderDieFace(delivery.stage1_roll, '');
+  if (totalMsBase === 0) {
+    renderDieFace(finalRoll);
+    setDieStageLabel(finalOutcome.text, finalOutcome.tone);
     dieEl.classList.remove('rolling');
     return;
   }
 
   let elapsed = 0;
   for (const stage of stages) {
-    renderDieFace(stage.roll, stage.label);
-    await sleep(stagePause);
-    elapsed += stagePause;
+    renderDieFace(stage.roll);
+    setDieStageLabel(stage.label, stage.tone);
+    const hold = (stage.label.includes('HOWZAT!') || stage.label === 'NOT OUT' || stage.label.startsWith('OUT -'))
+      ? suspensePause
+      : stagePause;
+    await sleep(hold);
+    elapsed += hold;
   }
 
-  // Show random faces for remaining time
-  const remaining = totalMs - elapsed;
+  // Show random faces for any remaining animation budget before the verdict
+  const remaining = totalMsBase - elapsed;
   if (remaining > 0) {
     const flickers = Math.max(2, Math.floor(remaining / 120));
     for (let i = 0; i < flickers; i++) {
@@ -1135,8 +1766,10 @@ async function animateDice(delivery) {
     }
   }
 
-  // Show final stage1 roll
-  renderDieFace(delivery.stage1_roll, '');
+  // Land on the decisive face and hold long enough for the outcome to read on stream
+  renderDieFace(finalRoll);
+  setDieStageLabel(finalOutcome.text, finalOutcome.tone);
+  await sleep(highlightHold);
   dieEl.classList.remove('rolling');
 }
 
@@ -1647,6 +2280,8 @@ function dismissTensionSuggestion() {
 async function simulateTo(target) {
   const matchId = getMatchId();
   if (!matchId) return;
+  const shouldResumeAi = AppState.playerMode === 'ai_vs_ai' && MatchUI.aiPlay.running;
+  _stopAiAutoPlay();
 
   // Disable all sim + roll buttons during simulation
   const allBtns = document.querySelectorAll('#btn-roll, .btn-sim, #btn-fast-sim');
@@ -1698,6 +2333,11 @@ async function simulateTo(target) {
     AppState.sessionStats.matches += 1;
     updateSessionBar();
     await showResultScreen(matchId);
+    return;
+  }
+
+  if (shouldResumeAi && !MatchUI._transitionActive) {
+    _startAiAutoPlay();
   }
 }
 
@@ -1947,16 +2587,26 @@ function applyMatchTintFromDelivery(outcomeType) {
 function applyMatchTint(_state) {
   const el = document.getElementById('screen-match');
   if (!el) return;
-  el.classList.remove('situation-crisis', 'situation-dominant');
+  el.classList.remove('situation-crisis', 'situation-dominant', 'situation-pressure', 'situation-hot', 'situation-milestone');
 
   const recent = MatchUI._recentOutcomes;
   // Check last 3 for wickets, last 10 for scoring dominance
   const last3     = recent.slice(-3);
   const wickets3  = last3.filter(o => o === 'wicket').length;
   const scoring10 = recent.filter(o => o === 'four' || o === 'six').length;
+  const primaryTone = MatchUI._storyState?.primaryTone || 'neutral';
 
-  if (wickets3 >= 2)    el.classList.add('situation-crisis');
-  else if (scoring10 >= 3) el.classList.add('situation-dominant');
+  if (wickets3 >= 2 || primaryTone === 'danger') {
+    el.classList.add('situation-crisis');
+  } else if (primaryTone === 'pressure') {
+    el.classList.add('situation-pressure');
+  } else if (scoring10 >= 3) {
+    el.classList.add('situation-dominant');
+  } else if (primaryTone === 'hot') {
+    el.classList.add('situation-hot');
+  } else if (primaryTone === 'milestone') {
+    el.classList.add('situation-milestone');
+  }
 }
 
 // ── Mode helpers ──────────────────────────────────────────────────────────────
@@ -2087,12 +2737,12 @@ function _stopAiAutoPlay() {
 }
 
 async function _aiAutoPlayLoop() {
-  if (!MatchUI.aiPlay.running || MatchUI.aiPlay.paused) return;
+  if (!MatchUI.aiPlay.running || MatchUI.aiPlay.paused || MatchUI._transitionActive) return;
 
   // Roll the next ball
   await rollBall();
 
-  if (!MatchUI.aiPlay.running || MatchUI.aiPlay.paused) return;
+  if (!MatchUI.aiPlay.running || MatchUI.aiPlay.paused || MatchUI._transitionActive) return;
 
   const delayMs = _AI_SPEED_MS[MatchUI.aiPlay.speed] ?? 800;
   if (delayMs <= 0) {
@@ -2270,6 +2920,7 @@ async function _maybeShowBowlingPanel(state) {
 async function showInningsTransition(completedInnings, target) {
   const el   = document.getElementById('match-innings-transition');
   const live = document.getElementById('match-live');
+  MatchUI._transitionActive = true;
   live.classList.add('hidden');
   el.classList.remove('hidden');
 
@@ -2347,36 +2998,40 @@ async function showInningsTransition(completedInnings, target) {
   const isBroadcast = AppState.broadcastMode;
   const maxHold = animMs(isBroadcast ? 99999 : 8000, isBroadcast ? 800 : 2000, 0);
 
-  if (maxHold === 0) {
-    el.classList.add('hidden');
-    live.classList.remove('hidden');
-  } else if (isBroadcast) {
-    // Click or 8s timeout
-    await new Promise(resolve => {
-      const tid = setTimeout(resolve, 8000);
-      const onClick = () => { clearTimeout(tid); el.removeEventListener('click', onClick); resolve(); };
-      el.addEventListener('click', onClick);
-    });
-    el.classList.add('hidden');
-    live.classList.remove('hidden');
-  } else {
-    await sleep(maxHold);
-    el.classList.add('hidden');
-    live.classList.remove('hidden');
-  }
+  try {
+    if (maxHold === 0) {
+      el.classList.add('hidden');
+      live.classList.remove('hidden');
+    } else if (isBroadcast) {
+      // Click or 8s timeout
+      await new Promise(resolve => {
+        const tid = setTimeout(resolve, 8000);
+        const onClick = () => { clearTimeout(tid); el.removeEventListener('click', onClick); resolve(); };
+        el.addEventListener('click', onClick);
+      });
+      el.classList.add('hidden');
+      live.classList.remove('hidden');
+    } else {
+      await sleep(maxHold);
+      el.classList.add('hidden');
+      live.classList.remove('hidden');
+    }
 
-  // Refresh state after new innings starts
-  const fresh = await api('GET', `/api/matches/${getMatchId()}`);
-  if (fresh) updateLiveView(fresh);
+    // Refresh state after new innings starts
+    const fresh = await api('GET', `/api/matches/${getMatchId()}`);
+    if (fresh) updateLiveView(fresh);
 
-  // Human vs Human: show handover card so device can be passed over
-  if (AppState.playerMode === 'human_vs_human' && fresh?.current_innings) {
-    await showHandoverCard(fresh, completedInnings, target);
-  }
+    // Human vs Human: show handover card so device can be passed over
+    if (AppState.playerMode === 'human_vs_human' && fresh?.current_innings) {
+      await showHandoverCard(fresh, completedInnings, target);
+    }
 
-  // Human vs AI: if new innings is AI's turn, start auto-play
-  if (AppState.playerMode === 'human_vs_ai' && fresh && _isAiTurn(fresh)) {
-    _startAiAutoPlay();
+    // Human vs AI: if new innings is AI's turn, start auto-play
+    if (AppState.playerMode === 'human_vs_ai' && fresh && _isAiTurn(fresh)) {
+      _startAiAutoPlay();
+    }
+  } finally {
+    MatchUI._transitionActive = false;
   }
 }
 
@@ -3316,6 +3971,8 @@ async function loadSettingsScreen() {
   // Sync default format
   const fmtSel = document.getElementById('settings-default-format');
   if (fmtSel && AppState.defaultFormat) fmtSel.value = AppState.defaultFormat;
+  const scoringSel = document.getElementById('settings-default-scoring');
+  if (scoringSel) scoringSel.value = getDefaultScoringMode();
 
   // Load venues for default venue dropdown
   const venSel = document.getElementById('settings-default-venue');
@@ -3348,6 +4005,20 @@ function setAnimationSpeed(speed) {
 function setDefaultFormat(fmt) {
   AppState.defaultFormat = fmt;
   try { localStorage.setItem('ribi_default_format', fmt || ''); } catch (_) {}
+}
+
+function setDefaultScoringMode(mode) {
+  const prevMode = getDefaultScoringMode();
+  const nextMode = mode === 'classic' ? 'classic' : 'modern';
+  AppState.defaultScoringMode = nextMode;
+  try { localStorage.setItem('ribi_default_scoring_mode', nextMode); } catch (_) {}
+  const scoringSel = document.getElementById('settings-default-scoring');
+  if (scoringSel) scoringSel.value = nextMode;
+  if (!AppState._playScoringMode || AppState._playScoringMode === prevMode) {
+    AppState._playScoringMode = nextMode;
+  }
+  syncWelcomeScoringMode();
+  syncPlayScoringMode();
 }
 
 function setDefaultVenue(venueId) {
@@ -3681,6 +4352,7 @@ const GRAPHIC_TIMING = {
     almanack_record: { hold: 5000, animIn: 400, animOut: 400 },
     world_record:    { hold: 10000, animIn: 600, animOut: 500 },
     over_complete:   { hold: 2000, animIn: 200, animOut: 200 },
+    story_alert:     { hold: 2400, animIn: 220, animOut: 220 },
   },
   broadcast: {
     wicket:          { hold: 5000, animIn: 400, animOut: 400 },
@@ -3694,6 +4366,7 @@ const GRAPHIC_TIMING = {
     almanack_record: { hold: 8000, animIn: 500, animOut: 500 },
     world_record:    { hold: 15000, animIn: 700, animOut: 600 },
     over_complete:   { hold: 3000, animIn: 300, animOut: 300 },
+    story_alert:     { hold: 3600, animIn: 300, animOut: 300 },
   },
 };
 
@@ -3707,7 +4380,7 @@ function getGraphicPriority(type) {
     world_record: 13, almanack_record: 12, double_century: 11,
     ten_wicket: 10, century: 9, five_fer: 8, one_fifty: 7,
     duck: 6, wicket: 5, fifty: 4,
-    over_complete: 1,
+    story_alert: 2, over_complete: 1,
   };
   return p[type] || 0;
 }
@@ -3839,6 +4512,7 @@ const GraphicQueue = {
       case 'almanack_record': return this._almanackRecord(el, graphic);
       case 'world_record':    return this._worldRecord(el, graphic);
       case 'over_complete':   return this._overComplete(el, graphic);
+      case 'story_alert':     return this._storyAlert(el, graphic);
       default: return null;
     }
   },
@@ -3912,7 +4586,7 @@ const GraphicQueue = {
       <div class="gfx-confetti-container"></div>
       <div class="gc-header">✦ ✦ ✦ &nbsp; CENTURY! &nbsp; ✦ ✦ ✦</div>
       <div class="gc-player">${escHtml(g.playerName)}</div>
-      ${g.teamName ? `<div class="gc-team">${escHtml(g.teamName)}</div>` : ''}
+      ${g.teamName ? `<div class="gc-team">${renderTeamLabel(g.teamName, { compact: true })}</div>` : ''}
       <div class="gc-digits">${digits}<span class="gc-star">*</span></div>
       <div class="gc-detail">(${g.balls} balls) &nbsp; SR: ${sr}</div>
       <div class="gc-context">${escHtml(g.matchContext || '')}</div>`;
@@ -3957,7 +4631,7 @@ const GraphicQueue = {
     el.innerHTML = `
       <div class="gff-header"><span class="bowling-ball-emoji">🎳</span> &nbsp; FIVE WICKET HAUL! &nbsp; <span class="bowling-ball-emoji">🎳</span></div>
       <div class="gff-player">${escHtml(g.playerName)}</div>
-      ${g.teamName ? `<div class="gff-team">${escHtml(g.teamName)}</div>` : ''}
+      ${g.teamName ? `<div class="gff-team">${renderTeamLabel(g.teamName, { compact: true })}</div>` : ''}
       <div class="gff-figures">${escHtml(g.figures || '5/?')}</div>
       <div class="gff-detail">in ${escHtml(g.overs || '?')} overs &nbsp;•&nbsp; Econ: ${escHtml(g.econ || '?')}</div>`;
     return el;
@@ -3968,7 +4642,7 @@ const GraphicQueue = {
     el.innerHTML = `
       <div class="gtw-header"><span class="lightning-emoji">⚡</span> &nbsp; TEN WICKETS IN THE MATCH! &nbsp; <span class="lightning-emoji">⚡</span></div>
       <div class="gtw-player">${escHtml(g.playerName)}</div>
-      ${g.teamName ? `<div class="gtw-team">${escHtml(g.teamName)}</div>` : ''}
+      ${g.teamName ? `<div class="gtw-team">${renderTeamLabel(g.teamName, { compact: true })}</div>` : ''}
       <div class="gtw-figures">${escHtml(g.figures || '10 wkts')}</div>
       <div class="gtw-subtitle">A match for the history books</div>`;
     return el;
@@ -4016,6 +4690,15 @@ const GraphicQueue = {
       <span class="goc-sep">•</span>
       <span class="goc-figures">${g.wickets}-${g.maidens}-${g.runs}</span>
       <span class="goc-score">${line2}</span>`;
+    return el;
+  },
+
+  _storyAlert(el, g) {
+    el.className = `graphic graphic-lower-third graphic-story-alert graphic-story-alert-${g.tone || 'neutral'}`;
+    el.innerHTML = `
+      <span class="gsa-label">${escHtml(g.label || 'Story Update')}</span>
+      <span class="gsa-sep">•</span>
+      <span class="gsa-text">${escHtml(g.text || '')}</span>`;
     return el;
   },
 };
@@ -4865,6 +5548,11 @@ const ALM_DEFAULT_SORT = {
 };
 
 async function loadAlmanackScreen() {
+  ALM.tab = 'batting';
+  ALM.offset = 0;
+  ALM.sort = ALM_DEFAULT_SORT.batting || '';
+  ALM.dir = 'DESC';
+
   // Inject publication masthead once (replaces plain h2 + subtitle)
   const screenInner = document.querySelector('#screen-almanack .screen-inner');
   if (screenInner && !screenInner.querySelector('.alm-masthead')) {
@@ -4909,10 +5597,19 @@ async function loadAlmanackScreen() {
       });
     }
   }
-  ALM.offset = 0;
-  ALM.sort   = ALM_DEFAULT_SORT[ALM.tab] || '';
-  ALM.dir    = 'DESC';
-  await loadAlmTab(ALM.tab);
+
+  document.querySelectorAll('#alm-tab-bar .tab-btn').forEach(btn => {
+    const tab = btn.classList.contains('alm-manage-tab')
+      ? 'manage'
+      : btn.textContent.trim().toLowerCase().replace('-', '');
+    btn.classList.toggle('active', tab === 'batting');
+  });
+  document.getElementById('alm-filter-panel')?.classList.remove('hidden');
+  document.getElementById('alm-toolbar')?.classList.remove('hidden');
+  document.getElementById('alm-table-area')?.classList.remove('hidden');
+  document.getElementById('alm-manage-area')?.classList.add('hidden');
+
+  await loadAlmTab('batting');
 }
 
 function switchAlmTab(tab, btn) {
@@ -5490,80 +6187,6 @@ async function loadWagonWheel(playerId, fmt) {
   drawWagonWheel('wagon-wheel-canvas', data?.deliveries || []);
 }
 
-function drawWagonWheel(canvasId, deliveries) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  const cx = W / 2, cy = H / 2;
-  const fieldR = Math.min(W, H) * 0.45;
-
-  ctx.clearRect(0, 0, W, H);
-
-  // Field background
-  ctx.fillStyle = '#2d5a27';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, fieldR, fieldR * 0.85, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 30-yard circle
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, fieldR * 0.55, fieldR * 0.55 * 0.85, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Pitch rectangle
-  ctx.fillStyle = '#8b7355';
-  ctx.fillRect(cx - 6, cy - 30, 12, 60);
-
-  // Boundary
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, fieldR, fieldR * 0.85, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Deliveries
-  deliveries.forEach(d => {
-    const angle = d.shot_angle;
-    if (angle == null) return;
-    const runs = d.runs_scored || 0;
-
-    // Radius scales with runs
-    const maxR = fieldR * 0.92;
-    let r;
-    if (runs === 0) r = fieldR * 0.25 + Math.random() * fieldR * 0.2;
-    else if (runs <= 3) r = fieldR * 0.35 + Math.random() * fieldR * 0.35;
-    else r = fieldR * 0.72 + Math.random() * fieldR * 0.18;
-    r = Math.min(r, maxR);
-
-    // angle 0=straight (top), 90=off (right), 270=leg (left)
-    const rad = (angle - 90) * Math.PI / 180;
-    const x = cx + r * Math.cos(rad);
-    const y = cy + r * 0.85 * Math.sin(rad);
-
-    // Color by runs
-    let color;
-    if (runs === 0)      color = 'rgba(160,160,160,0.7)';
-    else if (runs <= 3)  color = 'rgba(80,200,80,0.8)';
-    else if (runs === 4) color = 'rgba(255,150,30,0.9)';
-    else                 color = 'rgba(230,50,50,0.9)';
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  });
-
-  if (!deliveries.length) {
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('No delivery data', cx, cy);
-  }
-}
-
 async function loadPlayerInnings(playerId, offset) {
   _playerInningsOff = offset;
   const el = document.getElementById('player-innings-table');
@@ -6049,8 +6672,11 @@ const WorldUI = {
   wizardStep:      1,
   wizardTeamIds:   new Set(),
   wizardAllTeams:  [],
+  wizardInternationalTeams: [],
+  wizardDomesticTeams: [],
   calendarFilter:  'all',
   _worldData:      null,
+  _seriesData:     [],
 };
 
 // ── Worlds list ───────────────────────────────────────────────────────────────
@@ -6088,18 +6714,80 @@ async function loadWorldsScreen() {
 async function showWorldWizard() {
   document.getElementById('btn-show-create-world').classList.add('hidden');
   document.getElementById('world-wizard').classList.remove('hidden');
-  WorldUI.wizardStep     = 1;
-  WorldUI.wizardTeamIds  = new Set();
+  WorldUI.wizardStep          = 1;
+  WorldUI.wizardTeamIds       = new Set();
+  WorldUI.wizardDomesticLeagues = new Set();
+  WorldUI.wizardScope         = 'international';
   _wizardShowPage(1);
 
+  // Load teams for team-selection step
   const teams = await api('GET', '/api/teams');
-  WorldUI.wizardAllTeams = (teams && teams.teams ? teams.teams : teams) || [];
-  const myTeamSel = document.getElementById('wc-my-team');
-  if (myTeamSel) {
-    myTeamSel.innerHTML = '<option value="">None — AI only</option>' +
-      WorldUI.wizardAllTeams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  const allTeams = (teams && teams.teams ? teams.teams : teams) || [];
+  WorldUI.wizardInternationalTeams = allTeams.filter(t => !t.team_type || t.team_type === 'international');
+  WorldUI.wizardDomesticTeams = allTeams.filter(t => t.team_type && t.team_type !== 'international');
+
+  // Load domestic leagues
+  const leagueData = await api('GET', '/api/domestic-leagues');
+  WorldUI.wizardDomesticLeagueOptions = (leagueData?.leagues || []).filter(l => l.team_count > 0);
+  _renderWizardDomesticLeagues();
+
+  // Wire up cal-style radios to show/hide domestic section
+  document.querySelectorAll('input[name="wc-cal-style"]').forEach(radio => {
+    radio.addEventListener('change', _syncDomesticSectionVisibility);
+  });
+  setWorldScope('international');
+}
+
+function _syncDomesticSectionVisibility() {
+  const calStyle = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const section = document.getElementById('wc-domestic-section');
+  if (section) section.classList.toggle('hidden', calStyle !== 'realistic' || getWorldScope() === 'international');
+}
+
+function getWorldScope() {
+  return ['international', 'domestic', 'combined'].includes(WorldUI.wizardScope)
+    ? WorldUI.wizardScope
+    : 'international';
+}
+
+function setWorldScope(scope) {
+  WorldUI.wizardScope = ['international', 'domestic', 'combined'].includes(scope) ? scope : 'international';
+  ['international', 'domestic', 'combined'].forEach(key => {
+    document.getElementById(`wc-scope-${key}`)?.classList.toggle('active', WorldUI.wizardScope === key);
+  });
+  const helpEl = document.getElementById('wc-scope-help');
+  if (helpEl) helpEl.textContent = WORLD_SCOPE_META[WorldUI.wizardScope];
+  _syncDomesticSectionVisibility();
+  _refreshWizardTeamPool();
+}
+
+function _renderWizardDomesticLeagues() {
+  const el = document.getElementById('wc-domestic-leagues');
+  if (!el) return;
+  const leagues = WorldUI.wizardDomesticLeagueOptions || [];
+  if (!leagues.length) {
+    el.innerHTML = '<p class="text-muted" style="font-size:var(--fs-sm)">No domestic leagues available.</p>';
+    return;
   }
-  _renderWizardTeamBadges();
+  const FORMAT_LABELS = { Test: '4-day', ODI: 'List-A', T20: 'T20' };
+  el.innerHTML = leagues.map(l => `
+    <button type="button"
+      class="domestic-league-btn ${WorldUI.wizardDomesticLeagues.has(l.key) ? 'active' : ''}"
+      id="dlb-${l.key}" onclick="wizardToggleDomesticLeague('${l.key}')">
+      <span class="dlb-name">${l.name}</span>
+      <span class="dlb-meta">${FORMAT_LABELS[l.format] || l.format} · ${l.team_count} teams</span>
+    </button>`).join('');
+}
+
+function wizardToggleDomesticLeague(key) {
+  if (WorldUI.wizardDomesticLeagues.has(key)) {
+    WorldUI.wizardDomesticLeagues.delete(key);
+  } else {
+    WorldUI.wizardDomesticLeagues.add(key);
+  }
+  const btn = document.getElementById(`dlb-${key}`);
+  if (btn) btn.classList.toggle('active', WorldUI.wizardDomesticLeagues.has(key));
+  if (getWorldScope() === 'domestic') _refreshWizardTeamPool();
 }
 
 function hideWorldWizard() {
@@ -6124,8 +6812,14 @@ function wizardNext(fromStep) {
     if (!name) { alert('Enter a world name.'); return; }
   }
   if (fromStep === 3) {
-    if (WorldUI.wizardTeamIds.size < 4) {
-      alert('Select at least 4 teams.'); return;
+    const scope = getWorldScope();
+    const minTeams = scope === 'domestic' ? 2 : 4;
+    const calStyle = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+    if (scope === 'domestic' && calStyle === 'realistic' && !(WorldUI.wizardDomesticLeagues || new Set()).size) {
+      alert('Choose at least one domestic league for a realistic domestic world.'); return;
+    }
+    if (WorldUI.wizardTeamIds.size < minTeams) {
+      alert(`Select at least ${minTeams} teams.`); return;
     }
     _wizardBuildSummary();
   }
@@ -6148,6 +6842,48 @@ function _renderWizardTeamBadges() {
       <div class="wtb-name">${t.name}</div>
     </div>`).join('');
   _wizardUpdateCount();
+}
+
+function _refreshWizardTeamPool() {
+  const scope = getWorldScope();
+  let pool = [];
+  if (scope === 'domestic') {
+    const selectedLeagueNames = new Set(
+      Array.from(WorldUI.wizardDomesticLeagues || [])
+        .map(k => (WorldUI.wizardDomesticLeagueOptions || []).find(l => l.key === k)?.league)
+        .filter(Boolean)
+    );
+    pool = (WorldUI.wizardDomesticTeams || []).filter(t =>
+      !selectedLeagueNames.size || (t.league && selectedLeagueNames.has(t.league))
+    );
+  } else {
+    pool = WorldUI.wizardInternationalTeams || [];
+  }
+  WorldUI.wizardAllTeams = pool;
+  WorldUI.wizardTeamIds = new Set(Array.from(WorldUI.wizardTeamIds).filter(id => pool.some(t => t.id === id)));
+  _renderWizardTeamBadges();
+  _refreshWizardMyTeamOptions();
+  const titleEl = document.getElementById('wizard-team-step-title');
+  if (titleEl) {
+    if (scope === 'domestic') {
+      titleEl.innerHTML = 'Step 3 — Select Domestic Teams <span class="text-muted">(min 2)</span>';
+    } else if (scope === 'combined') {
+      titleEl.innerHTML = 'Step 3 — Select International Teams <span class="text-muted">(min 4)</span>';
+    } else {
+      titleEl.innerHTML = 'Step 3 — Select Teams <span class="text-muted">(min 4)</span>';
+    }
+  }
+}
+
+function _refreshWizardMyTeamOptions() {
+  const myTeamSel = document.getElementById('wc-my-team');
+  if (!myTeamSel) return;
+  const current = parseInt(myTeamSel.value) || null;
+  myTeamSel.innerHTML = '<option value="">None — AI only</option>' +
+    (WorldUI.wizardAllTeams || []).map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  if (current && (WorldUI.wizardAllTeams || []).some(t => t.id === current)) {
+    myTeamSel.value = String(current);
+  }
 }
 
 function wizardToggleTeam(id) {
@@ -6180,20 +6916,28 @@ function _wizardBuildSummary() {
   const start     = document.getElementById('wc-start').value;
   const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
   const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const worldScope = getWorldScope();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
   const myTeam    = myTeamId ? WorldUI.wizardAllTeams.find(t => t.id === myTeamId) : null;
   const teamList  = WorldUI.wizardAllTeams.filter(t => WorldUI.wizardTeamIds.has(t.id));
   const styleLabel = calStyle === 'realistic' ? 'Realistic (FTP)' : 'Random';
+  const domLeagues = Array.from(WorldUI.wizardDomesticLeagues || []);
+  const domLeagueNames = domLeagues.map(k => {
+    const opt = (WorldUI.wizardDomesticLeagueOptions || []).find(l => l.key === k);
+    return opt ? opt.name : k;
+  });
 
   el.innerHTML = `
     <div class="summary-row"><span>World Name</span><strong>${name}</strong></div>
+    <div class="summary-row"><span>World Type</span><strong>${_titleCaseWords(worldScope)}</strong></div>
     <div class="summary-row"><span>Start Date</span><strong>${start}</strong></div>
     <div class="summary-row"><span>Density</span><strong>${density}</strong></div>
     <div class="summary-row"><span>Calendar Style</span><strong>${styleLabel}</strong></div>
     <div class="summary-row"><span>Your Team</span><strong>${myTeam ? myTeam.name : 'None (AI only)'}</strong></div>
     <div class="summary-row"><span>Teams (${teamList.length})</span>
       <span>${teamList.map(t => t.short_code || t.name.slice(0,3)).join(', ')}</span>
-    </div>`;
+    </div>
+    ${domLeagueNames.length ? `<div class="summary-row"><span>Domestic Leagues</span><span>${domLeagueNames.join(', ')}</span></div>` : ''}`;
 }
 
 async function submitWorldWizard() {
@@ -6201,15 +6945,21 @@ async function submitWorldWizard() {
   const start     = document.getElementById('wc-start').value;
   const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
   const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const worldScope = getWorldScope();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
   const team_ids  = Array.from(WorldUI.wizardTeamIds);
 
   const btn = document.getElementById('wizard-create-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
 
+  const domestic_leagues = calStyle === 'realistic'
+    ? Array.from(WorldUI.wizardDomesticLeagues || [])
+    : [];
+
   const res = await api('POST', '/api/worlds', {
     name, start_date: start, calendar_density: density,
     calendar_style: calStyle, team_ids, my_team_id: myTeamId,
+    domestic_leagues, world_scope: worldScope,
   });
 
   if (btn) { btn.disabled = false; btn.textContent = 'Create World'; }
@@ -6292,14 +7042,26 @@ async function loadWorldDetail(worldId) {
   const nameEl = document.getElementById('wd-name');
   if (nameEl) nameEl.textContent = 'Loading…';
 
-  const data = await api('GET', `/api/worlds/${worldId}`);
+  const [data, seriesRes] = await Promise.all([
+    api('GET', `/api/worlds/${worldId}`),
+    api('GET', `/api/worlds/${worldId}/calendar/series`),
+  ]);
   if (!data) return;
   WorldUI._worldData = data;
+  WorldUI._seriesData = seriesRes?.series || [];
 
   const w = data.world || {};
+  const settings = (() => {
+    try { return JSON.parse(w.settings_json || '{}'); }
+    catch (_) { return {}; }
+  })();
+  const worldScope = ['international', 'domestic', 'combined'].includes(settings.world_scope)
+    ? settings.world_scope
+    : 'international';
   if (nameEl) nameEl.textContent = w.name || 'World';
   document.getElementById('wd-date-badge').textContent  = `📅 ${w.current_date || '?'}`;
   document.getElementById('wd-density-badge').textContent = w.calendar_density || 'moderate';
+  document.getElementById('wd-scope-badge').textContent = _titleCaseWords(worldScope);
 
   const done  = data.completed_count || 0;
   const left  = data.upcoming_count  || 0;
@@ -6316,17 +7078,60 @@ async function loadWorldDetail(worldId) {
 }
 
 function _renderWorldOverview(data) {
+  const settings = (() => {
+    try { return JSON.parse(data.world?.settings_json || '{}'); }
+    catch (_) { return {}; }
+  })();
+  const style = data.world?.calendar_style === 'realistic' ? 'Realistic FTP' : 'Random Calendar';
+  const worldScope = ['international', 'domestic', 'combined'].includes(settings.world_scope)
+    ? settings.world_scope
+    : 'international';
+  const upcoming = data.upcoming_fixtures || [];
+  const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
+  const iccUpcoming = upcoming.filter(f => f.is_icc_event).length;
+  const activeSeries = (WorldUI._seriesData || [])
+    .filter(s => (s.matches_remaining || 0) > 0)
+    .slice(0, 5);
+
+  const deskEl = document.getElementById('wd-world-desk');
+  if (deskEl) {
+    deskEl.innerHTML = `
+      <div class="world-desk-card">
+        <div class="world-desk-label">World Type</div>
+        <div class="world-desk-value">${escHtml(_titleCaseWords(worldScope))}</div>
+        <div class="world-desk-sub">${worldScope === 'combined' ? 'International calendar plus domestic leagues' : worldScope === 'domestic' ? 'Domestic and franchise cricket focus' : 'National teams and international fixtures only'}</div>
+      </div>
+      <div class="world-desk-card">
+        <div class="world-desk-label">Calendar</div>
+        <div class="world-desk-value">${escHtml(style)}</div>
+        <div class="world-desk-sub">${iccUpcoming} ICC fixture${iccUpcoming !== 1 ? 's' : ''} in the next 2 weeks</div>
+      </div>
+      <div class="world-desk-card">
+        <div class="world-desk-label">Active Series</div>
+        <div class="world-desk-value">${activeSeries.length}</div>
+        <div class="world-desk-sub">${upcoming.length} fixture${upcoming.length !== 1 ? 's' : ''} on the short horizon</div>
+      </div>
+      <div class="world-desk-card">
+        <div class="world-desk-label">Your Team</div>
+        <div class="world-desk-value">${myNext ? 'User Controlled' : (settings.my_team_id ? 'Tracking Enabled' : 'AI Only')}</div>
+        <div class="world-desk-sub">${myNext ? `Next playable fixture: ${escHtml(myNext.scheduled_date || '')}` : (settings.my_team_id ? 'No flagged fixture on the short horizon' : 'No user-controlled side selected')}</div>
+      </div>`;
+  }
+
   // Next fixture card
   const nextFix = (data.next_fixtures || [])[0];
   const nfEl = document.getElementById('wd-next-fixture');
   if (nfEl) {
     if (nextFix) {
       const fmtBadge = `<span class="badge badge-${(nextFix.format||'').toLowerCase()}">${nextFix.format || ''}</span>`;
+      const storyLine = nextFix.is_icc_event
+        ? `<span class="badge badge-upcoming">${escHtml(nextFix.icc_event_name || 'ICC Event')}</span>`
+        : (nextFix.series_name ? `<span class="nf-series">${escHtml(nextFix.series_name)}</span>` : '');
       nfEl.innerHTML = `
         <div class="nf-label">Next Fixture</div>
         <div class="nf-teams">${nextFix.team1_name || '?'} <span class="nf-vs">vs</span> ${nextFix.team2_name || '?'}</div>
         <div class="nf-meta">${fmtBadge} <span class="text-muted">${nextFix.scheduled_date || ''}</span>
-          <span class="text-muted">${nextFix.venue_name ? '@ ' + nextFix.venue_name : ''}</span>
+          <span class="text-muted">${nextFix.venue_name ? '@ ' + nextFix.venue_name : ''}</span> ${storyLine}
         </div>
         <div class="nf-actions">
           <button class="btn btn-primary btn-sm" onclick="simulateWorld('next_match')">▶ Simulate</button>
@@ -6335,6 +7140,13 @@ function _renderWorldOverview(data) {
     } else {
       nfEl.innerHTML = '<p class="text-muted">No upcoming fixtures.</p>';
     }
+  }
+
+  const seriesEl = document.getElementById('wd-series-list');
+  if (seriesEl) {
+    seriesEl.innerHTML = activeSeries.length
+      ? activeSeries.map(s => _seriesSummaryHtml(s)).join('')
+      : '<p class="text-muted">No active series or event blocks right now.</p>';
   }
 
   // Upcoming 2-week list
@@ -6398,11 +7210,35 @@ function _renderWorldOverview(data) {
 function _fixtureRowHtml(f) {
   const fmtBadge = `<span class="badge badge-${(f.format||'').toLowerCase()}">${f.format || ''}</span>`;
   const userMark = f.is_user_match ? '<span class="badge badge-play">▶ Play</span>' : '';
+  const storyMark = f.is_icc_event
+    ? `<span class="badge badge-upcoming">${escHtml(f.icc_event_name || 'ICC')}</span>`
+    : (f.series_name ? `<span class="wf-series">${escHtml(f.series_name)}</span>` : '');
   return `<div class="world-fixture-row ${f.is_user_match ? 'wf-play' : ''}">
     <span class="wf-date">${f.scheduled_date || ''}</span>
     ${fmtBadge}
     <span class="wf-teams">${f.team1_name || '?'} vs ${f.team2_name || '?'}</span>
+    ${storyMark}
     ${userMark}
+  </div>`;
+}
+
+function _seriesSummaryHtml(series) {
+  const isIcc = !!series.is_icc_event;
+  const label = isIcc ? (series.icc_event_name || 'ICC Event') : (series.format || 'Series');
+  const progress = `${series.matches_played || 0}/${series.total_matches || 0}`;
+  const teams = series.team2_name
+    ? `${series.team1_name || '?'} vs ${series.team2_name || '?'}`
+    : (series.series_name || 'Series');
+  return `<div class="world-series-row ${isIcc ? 'world-series-icc' : ''}">
+    <div class="world-series-main">
+      <div class="world-series-name">${escHtml(series.series_name || teams)}</div>
+      <div class="world-series-meta">
+        <span class="badge badge-${String(series.format || 'odi').toLowerCase()}">${escHtml(label)}</span>
+        <span class="text-muted">${escHtml(teams)}</span>
+        <span class="text-muted">${escHtml(series.start_date || '')}${series.end_date ? ' → ' + escHtml(series.end_date) : ''}</span>
+      </div>
+    </div>
+    <div class="world-series-progress">${progress}</div>
   </div>`;
 }
 
@@ -7324,7 +8160,7 @@ function _mapDemoDataToGraphic(type, d) {
 function _renderDemoInningsBreak(d, content) {
   content.innerHTML = `
     <div class="demo-innings-card">
-      <div class="ibg-batting-team">${escHtml(d.battingTeam)}</div>
+      <div class="ibg-batting-team">${renderTeamLabel(d.battingTeam, { compact: true })}</div>
       <div class="ibg-score">${escHtml(d.score)}</div>
       <div class="ibg-overs">${escHtml(d.overs)} overs</div>
       <div class="ibg-target-row">
@@ -7342,7 +8178,7 @@ function _renderDemoMatchResult(d, content) {
   content.innerHTML = `
     <div class="demo-result-card">
       <div class="result-header">
-        <div class="result-winner">${escHtml(d.winnerName)} WIN</div>
+        <div class="result-winner">${renderTeamLabel(d.winnerName, { compact: true })} WIN</div>
         <div class="result-margin">${escHtml(d.resultText)}</div>
       </div>
       <div class="result-scores">
@@ -7433,6 +8269,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const fmtSaved = localStorage.getItem('ribi_default_format');
     if (fmtSaved && ['Test', 'ODI', 'T20'].includes(fmtSaved)) {
       AppState.defaultFormat = fmtSaved;
+    }
+    const scoringSaved = localStorage.getItem('ribi_default_scoring_mode');
+    if (scoringSaved && ['classic', 'modern'].includes(scoringSaved)) {
+      AppState.defaultScoringMode = scoringSaved;
     }
     const venueSaved = localStorage.getItem('ribi_default_venue');
     if (venueSaved) {

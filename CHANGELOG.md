@@ -10,6 +10,27 @@ All notable changes to Roll It & Bowl It are documented here.
 
 ### Added
 
+**Scoring system choice**
+- Added `Classic` and `Modern` scoring modes to the engine, match setup, settings, and live match UI
+- Added first-run default scoring choice on the welcome screen
+- Added match-level persistence for `scoring_mode`
+
+**International / domestic split**
+- Play screen now supports `International` and `Domestic` setup modes
+- Domestic setup includes a league filter so large team pools stay usable
+- Domestic mode relabels formats as `First-Class`, `One-Day`, and `T20` while preserving engine compatibility
+
+**World structure choice**
+- World wizard now supports `International`, `Domestic`, and `Combined` saves
+- Domestic worlds can be generated from selected domestic competitions
+- Combined worlds run international calendars alongside selected domestic leagues
+- World detail screen now shows the world type in the header and overview
+
+**Expanded cricket data**
+- Added additional international and associate sides
+- Added seeded domestic and franchise competitions and squads
+- World scheduling updated to treat expanded international and associate sets more sensibly
+
 **Broadcast graphic system** (`static/app.js`, `static/style.css`)
 - TV-style full/partial overlay cards appear on 11 milestone types: WICKET, DUCK, FIFTY, CENTURY, ONE-FIFTY, DOUBLE CENTURY, FIVE-WICKET HAUL, TEN-WICKET HAUL, NEW ALMANACK RECORD, WORLD RECORD BEATEN, OVER COMPLETE
 - `GraphicQueue` — serialised priority queue (world record = 13 down to over complete = 1); over-complete cards skipped if anything higher-priority is pending
@@ -42,6 +63,12 @@ All notable changes to Roll It & Bowl It are documented here.
 - Honours board enriched view: two-panel cards showing in-game achievement alongside real-world benchmark, progress bar (clamped at 100%), gold "BEATEN" badge when the in-game record surpasses the real-world mark
 
 ### Fixed
+
+**Dice identity and setup clarity**
+- Restored a visible direct `3-run` scoring path through the new scoring-mode system
+- Added a permanent live dice guide that matches the active scoring system
+- Fixed England flag presentation to use the St George's Cross instead of the Union flag
+- Fixed world button copy from `Next My Match` to `My Next Match`
 
 **Almanack — Batting/Bowling tabs empty (BUG 1)**
 - Root cause: batting and bowling API endpoints returned `{'records': rows}` but the frontend read `data.rows`. Key renamed to `rows` in both endpoints.
@@ -154,4 +181,4 @@ Initial development release. Core game engine, full season simulation, live matc
 ### Technical
 
 - Python 3.14.3 (GCC 15.2.1), Flask 3.1.3, SQLite via built-in `sqlite3`
-- 103 automated tests passing: 5 engine, 5 sim controls, 4 world sim, 94 canon system
+- 118 automated tests passing in the current suite

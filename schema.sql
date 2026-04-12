@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS teams (
     home_venue_id INTEGER,
     is_real INTEGER DEFAULT 0,
     is_custom INTEGER DEFAULT 0,
+    team_type TEXT DEFAULT 'international',
+    league TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -133,6 +135,7 @@ CREATE TABLE IF NOT EXISTS matches (
     margin_wickets INTEGER,
     player_of_match_id INTEGER,
     status TEXT DEFAULT 'in_progress',
+    scoring_mode TEXT DEFAULT 'modern',
     match_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (series_id) REFERENCES series(id),
@@ -332,6 +335,7 @@ SELECT
     t.name as team_name,
     t.id as team_id,
     m.format,
+    COALESCE(m.canon_status, 'canon') as canon_status,
     COUNT(DISTINCT m.id) as matches,
     COUNT(bi.id) as innings,
     SUM(bi.not_out) as not_outs,
@@ -352,8 +356,9 @@ JOIN innings i ON bi.innings_id = i.id
 JOIN matches m ON i.match_id = m.id
 JOIN players p ON bi.player_id = p.id
 JOIN teams t ON p.team_id = t.id
-WHERE bi.status = 'dismissed' OR bi.not_out = 1
-GROUP BY p.id, m.format;
+WHERE (bi.status = 'dismissed' OR bi.not_out = 1)
+  AND COALESCE(m.canon_status, 'canon') = 'canon'
+GROUP BY p.id, m.format, COALESCE(m.canon_status, 'canon');
 
 CREATE VIEW IF NOT EXISTS bowling_averages AS
 SELECT
@@ -363,6 +368,7 @@ SELECT
     t.name as team_name,
     t.id as team_id,
     m.format,
+    COALESCE(m.canon_status, 'canon') as canon_status,
     COUNT(DISTINCT m.id) as matches,
     COUNT(bwi.id) as innings_bowled,
     SUM(bwi.overs) as overs,
@@ -382,7 +388,8 @@ JOIN matches m ON i.match_id = m.id
 JOIN players p ON bwi.player_id = p.id
 JOIN teams t ON p.team_id = t.id
 WHERE bwi.overs > 0
-GROUP BY p.id, m.format;
+  AND COALESCE(m.canon_status, 'canon') = 'canon'
+GROUP BY p.id, m.format, COALESCE(m.canon_status, 'canon');
 
 CREATE VIEW IF NOT EXISTS team_records_view AS
 SELECT
@@ -397,6 +404,7 @@ SELECT
 FROM teams t
 JOIN matches m ON (m.team1_id = t.id OR m.team2_id = t.id)
 WHERE m.status = 'complete'
+  AND COALESCE(m.canon_status, 'canon') = 'canon'
 GROUP BY t.id, m.format;
 
 CREATE VIEW IF NOT EXISTS partnership_records AS
@@ -416,4 +424,5 @@ FROM partnerships p
 JOIN players b1 ON p.batter1_id = b1.id
 JOIN players b2 ON p.batter2_id = b2.id
 JOIN innings i ON p.innings_id = i.id
-JOIN matches m ON i.match_id = m.id;
+JOIN matches m ON i.match_id = m.id
+WHERE COALESCE(m.canon_status, 'canon') = 'canon';

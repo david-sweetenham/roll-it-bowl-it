@@ -58,10 +58,13 @@ def test_outcome_frequency():
     six_pct = pct.get('six', 0)
     extras_pct = pct.get('wide', 0) + pct.get('no_ball', 0)
 
-    assert 12 <= wicket_pct <= 22, f'Wicket rate {wicket_pct:.1f}% not in [12%, 22%]'
-    assert 20 <= dot_pct <= 35, f'Dot rate {dot_pct:.1f}% not in [20%, 35%]'
+    three_pct = pct.get('three', 0)
+
+    assert 5 <= wicket_pct <= 15, f'Wicket rate {wicket_pct:.1f}% not in [5%, 15%]'
+    assert 1 <= dot_pct <= 8, f'Dot rate {dot_pct:.1f}% not in [1%, 8%]'
+    assert 10 <= three_pct <= 20, f'Three rate {three_pct:.1f}% not in [10%, 20%]'
     assert 10 <= four_pct <= 20, f'Four rate {four_pct:.1f}% not in [10%, 20%]'
-    assert 5 <= six_pct <= 15, f'Six rate {six_pct:.1f}% not in [5%, 15%]'
+    assert 10 <= six_pct <= 20, f'Six rate {six_pct:.1f}% not in [10%, 20%]'
     assert extras_pct < 15, f'Extras rate {extras_pct:.1f}% >= 15%'
 
 
@@ -85,8 +88,8 @@ def test_batter_rating():
         f'Rating 5 wicket rate ({wicket_rates[5]:.1f}%) not lower than '
         f'rating 1 ({wicket_rates[1]:.1f}%)'
     )
-    assert wicket_rates[5] < 10, f'Rating 5 wicket rate {wicket_rates[5]:.1f}% not < 10%'
-    assert wicket_rates[1] > 20, f'Rating 1 wicket rate {wicket_rates[1]:.1f}% not > 20%'
+    assert wicket_rates[5] < 6, f'Rating 5 wicket rate {wicket_rates[5]:.1f}% not < 6%'
+    assert wicket_rates[1] > 10, f'Rating 1 wicket rate {wicket_rates[1]:.1f}% not > 10%'
 
 
 # ── Test 3: Fast sim scorecard ────────────────────────────────────────────────
@@ -193,20 +196,21 @@ def test_dict_completeness():
 
 # ── Run all tests ─────────────────────────────────────────────────────────────
 
-print('=' * 60)
-print('game_engine.py test suite')
-print('=' * 60)
+if __name__ == '__main__':
+    print('=' * 60)
+    print('game_engine.py test suite')
+    print('=' * 60)
 
-run_test('Test 1 — Outcome frequency distribution', test_outcome_frequency)
-run_test('Test 2 — Batter rating effect', test_batter_rating)
-run_test('Test 3 — Fast sim scorecard', test_fast_sim)
-run_test('Test 4 — Commentary recency buffer', test_commentary_buffer)
-run_test('Test 5 — Dict completeness', test_dict_completeness)
+    run_test('Test 1 — Outcome frequency distribution', test_outcome_frequency)
+    run_test('Test 2 — Batter rating effect', test_batter_rating)
+    run_test('Test 3 — Fast sim scorecard', test_fast_sim)
+    run_test('Test 4 — Commentary recency buffer', test_commentary_buffer)
+    run_test('Test 5 — Dict completeness', test_dict_completeness)
 
-print()
-print('=' * 60)
-if all_passed:
-    print('All tests PASSED.')
-else:
-    print('Some tests FAILED — see above.')
-    sys.exit(1)
+    print()
+    print('=' * 60)
+    if all_passed:
+        print('All tests PASSED.')
+    else:
+        print('Some tests FAILED — see above.')
+        sys.exit(1)

@@ -5,15 +5,21 @@ Idempotent: does nothing if any teams already exist.
 
 
 def seed(db):
-    row = db.execute("SELECT COUNT(*) as cnt FROM teams").fetchone()
-    if row['cnt'] > 0:
-        seed_world_records(db)
-        return
     _insert_venues(db)
     _insert_teams(db)
     _insert_players(db)
     _insert_journal_prompts_meta(db)
     seed_world_records(db)
+
+    # Domestic and franchise competitions
+    from seed_domestic import england_county, australia_domestic, australia_bbl, ipl, cpl, psl
+    england_county.seed(db)
+    australia_domestic.seed(db)
+    australia_bbl.seed(db)
+    ipl.seed(db)
+    cpl.seed(db)
+    psl.seed(db)
+
     db.commit()
     print(f"Seed complete.")
 
@@ -41,11 +47,26 @@ def _insert_venues(db):
         ("Shere Bangla National Stadium","Dhaka",     "Bangladesh"),    # 16
         ("Sharjah Cricket Stadium",     "Sharjah",    "UAE"),           # 17
         ("Dubai International Stadium", "Dubai",      "UAE"),           # 18
+        ("Harare Sports Club",          "Harare",     "Zimbabwe"),
+        ("Queens Sports Club",          "Bulawayo",   "Zimbabwe"),
+        ("Malahide Cricket Club Ground","Dublin",     "Ireland"),
+        ("Civil Service Cricket Club",  "Belfast",    "Ireland"),
+        ("The Grange Club",             "Edinburgh",  "Scotland"),
+        ("VRA Ground",                  "Amstelveen", "Netherlands"),
+        ("Wanderers Cricket Ground",    "Windhoek",   "Namibia"),
+        ("Tribhuvan University Ground", "Kirtipur",   "Nepal"),
+        ("Al Amerat Cricket Ground",    "Muscat",     "Oman"),
+        ("Grand Prairie Stadium",       "Dallas",     "United States"),
+        ("Maple Leaf North-West Ground","King City",  "Canada"),
     ]
-    db.executemany(
-        "INSERT INTO venues (name, city, country) VALUES (?, ?, ?)",
-        venues
-    )
+    for name, city, country in venues:
+        exists = db.execute("SELECT id FROM venues WHERE name=?", (name,)).fetchone()
+        if exists:
+            continue
+        db.execute(
+            "INSERT INTO venues (name, city, country) VALUES (?, ?, ?)",
+            (name, city, country)
+        )
 
 
 def _venue_id(db, name):
@@ -68,8 +89,21 @@ def _insert_teams(db):
         ("Sri Lanka",    "SL",  "#003580", "R. Premadasa Stadium"),
         ("Bangladesh",   "BAN", "#006A4E", "Shere Bangla National Stadium"),
         ("Afghanistan",  "AFG", "#0033A0", "Sharjah Cricket Stadium"),
+        ("Zimbabwe",     "ZIM", "#d4af37", "Harare Sports Club"),
+        ("Ireland",      "IRE", "#169b62", "Malahide Cricket Club Ground"),
+        ("Scotland",     "SCO", "#005eb8", "The Grange Club"),
+        ("Netherlands",  "NED", "#f36c21", "VRA Ground"),
+        ("Namibia",      "NAM", "#003580", "Wanderers Cricket Ground"),
+        ("Nepal",        "NEP", "#dc143c", "Tribhuvan University Ground"),
+        ("UAE",          "UAE", "#c8102e", "Dubai International Stadium"),
+        ("Oman",         "OMA", "#b22222", "Al Amerat Cricket Ground"),
+        ("United States","USA", "#3c3b6e", "Grand Prairie Stadium"),
+        ("Canada",       "CAN", "#d52b1e", "Maple Leaf North-West Ground"),
     ]
     for name, code, colour, venue_name in teams:
+        exists = db.execute("SELECT id FROM teams WHERE name=?", (name,)).fetchone()
+        if exists:
+            continue
         venue_id = _venue_id(db, venue_name)
         db.execute(
             "INSERT INTO teams (name, short_code, badge_colour, home_venue_id, is_real) "
@@ -230,6 +264,136 @@ SQUADS = [
     ("Afghanistan", "Mujeeb Ur Rahman",9, 1, "right", "spin",  "off-break",             4),
     ("Afghanistan", "Noor Ahmad",     10, 1, "left",  "spin",  "left-arm wrist-spin",   4),
     ("Afghanistan", "Fazalhaq Farooqi",11,1,"left",  "pace",  "left-arm fast-medium",   4),
+
+    # ── ZIMBABWE ─────────────────────────────────────────────────────────────
+    ("Zimbabwe", "J. Gumbie",         1, 3, "left",  "none",  None,                   0),
+    ("Zimbabwe", "C. Ervine",         2, 4, "left",  "none",  None,                   0),
+    ("Zimbabwe", "S. Raza",           3, 5, "right", "spin",  "off-break",            3),
+    ("Zimbabwe", "T. Marumani",       4, 3, "left",  "none",  None,                   0),
+    ("Zimbabwe", "C. Madande",        5, 3, "right", "none",  None,                   0),
+    ("Zimbabwe", "R. Burl",           6, 3, "right", "spin",  "leg-break",            3),
+    ("Zimbabwe", "W. Madhevere",      7, 3, "right", "spin",  "off-break",            2),
+    ("Zimbabwe", "L. Jongwe",         8, 2, "right", "pace",  "right-arm medium",     3),
+    ("Zimbabwe", "B. Muzarabani",     9, 1, "right", "pace",  "right-arm fast",       4),
+    ("Zimbabwe", "R. Ngarava",       10, 1, "left",  "pace",  "left-arm fast-medium", 4),
+    ("Zimbabwe", "T. Gwandu",        11, 1, "right", "pace",  "right-arm medium",     3),
+
+    # ── IRELAND ──────────────────────────────────────────────────────────────
+    ("Ireland", "A. Balbirnie",       1, 4, "right", "none",  None,                   0),
+    ("Ireland", "P. Stirling",        2, 4, "right", "spin",  "off-break",            1),
+    ("Ireland", "L. Tucker",          3, 4, "right", "none",  None,                   0),
+    ("Ireland", "H. Tector",          4, 4, "right", "none",  None,                   0),
+    ("Ireland", "C. Campher",         5, 3, "right", "pace",  "right-arm medium",     3),
+    ("Ireland", "G. Dockrell",        6, 3, "left",  "spin",  "left-arm orthodox",    3),
+    ("Ireland", "C. Adair",           7, 3, "right", "pace",  "right-arm medium-fast",3),
+    ("Ireland", "A. McBrine",         8, 2, "right", "spin",  "off-break",            4),
+    ("Ireland", "M. Humphreys",       9, 1, "left",  "spin",  "left-arm orthodox",    3),
+    ("Ireland", "J. Little",         10, 1, "left",  "pace",  "left-arm fast-medium", 4),
+    ("Ireland", "M. Adair",          11, 2, "right", "pace",  "right-arm fast-medium",4),
+
+    # ── SCOTLAND ─────────────────────────────────────────────────────────────
+    ("Scotland", "G. Munsey",         1, 4, "left",  "none",  None,                   0),
+    ("Scotland", "M. Cross",          2, 3, "right", "none",  None,                   0),
+    ("Scotland", "B. McMullen",       3, 4, "right", "pace",  "right-arm medium",     3),
+    ("Scotland", "R. Berrington",     4, 4, "right", "none",  None,                   0),
+    ("Scotland", "M. Jones",          5, 4, "right", "none",  None,                   0),
+    ("Scotland", "M. Leask",          6, 3, "right", "spin",  "leg-break",            3),
+    ("Scotland", "C. Greaves",        7, 3, "right", "spin",  "leg-break",            3),
+    ("Scotland", "M. Watt",           8, 2, "left",  "spin",  "left-arm orthodox",    4),
+    ("Scotland", "B. Wheal",          9, 1, "right", "pace",  "right-arm fast-medium",4),
+    ("Scotland", "C. Sole",          10, 1, "right", "pace",  "right-arm medium-fast",4),
+    ("Scotland", "S. Sharif",        11, 1, "right", "pace",  "right-arm medium-fast",3),
+
+    # ── NETHERLANDS ──────────────────────────────────────────────────────────
+    ("Netherlands", "M. O'Dowd",      1, 4, "right", "none",  None,                   0),
+    ("Netherlands", "V. Singh",       2, 3, "left",  "none",  None,                   0),
+    ("Netherlands", "W. Barresi",     3, 3, "right", "none",  None,                   0),
+    ("Netherlands", "B. de Leede",    4, 4, "right", "pace",  "right-arm medium",     3),
+    ("Netherlands", "S. Edwards",     5, 3, "right", "none",  None,                   0),
+    ("Netherlands", "T. Nidamanuru",  6, 3, "right", "none",  None,                   0),
+    ("Netherlands", "R. van der Merwe",7,3, "left",  "spin",  "left-arm orthodox",    4),
+    ("Netherlands", "T. Pringle",     8, 2, "left",  "spin",  "left-arm orthodox",    3),
+    ("Netherlands", "P. van Meekeren",9, 1, "right", "pace",  "right-arm fast-medium",4),
+    ("Netherlands", "L. van Beek",   10, 1, "right", "pace",  "right-arm medium-fast",4),
+    ("Netherlands", "A. Dutt",       11, 1, "right", "spin",  "off-break",            4),
+
+    # ── NAMIBIA ──────────────────────────────────────────────────────────────
+    ("Namibia", "M. van Lingen",      1, 3, "left",  "none",  None,                   0),
+    ("Namibia", "J. Smit",            2, 3, "right", "pace",  "right-arm medium",     2),
+    ("Namibia", "N. Davin",           3, 3, "right", "none",  None,                   0),
+    ("Namibia", "G. Erasmus",         4, 4, "right", "spin",  "off-break",            3),
+    ("Namibia", "J.J. Smit",          5, 3, "left",  "pace",  "left-arm medium-fast", 3),
+    ("Namibia", "Z. Green",           6, 3, "right", "none",  None,                   0),
+    ("Namibia", "D. Wiese",           7, 4, "right", "pace",  "right-arm fast-medium",4),
+    ("Namibia", "J. Loftie-Eaton",    8, 3, "right", "spin",  "off-break",            2),
+    ("Namibia", "R. Trumpelmann",     9, 1, "left",  "pace",  "left-arm fast-medium", 4),
+    ("Namibia", "B. Scholtz",        10, 1, "left",  "spin",  "left-arm orthodox",    4),
+    ("Namibia", "T. Lungameni",      11, 1, "right", "pace",  "right-arm fast-medium",3),
+
+    # ── NEPAL ────────────────────────────────────────────────────────────────
+    ("Nepal", "K. Bhurtel",           1, 4, "right", "none",  None,                   0),
+    ("Nepal", "A. Sheikh",            2, 3, "right", "none",  None,                   0),
+    ("Nepal", "G. Jha",               3, 3, "right", "pace",  "right-arm medium",     2),
+    ("Nepal", "R. Paudel",            4, 4, "right", "none",  None,                   0),
+    ("Nepal", "D. Airee",             5, 3, "right", "spin",  "leg-break",            2),
+    ("Nepal", "K. Malla",             6, 3, "left",  "spin",  "off-break",            2),
+    ("Nepal", "S. Kami",              7, 2, "right", "pace",  "right-arm fast-medium",4),
+    ("Nepal", "A. Sah",               8, 2, "right", "none",  None,                   0),
+    ("Nepal", "S. Lamichhane",        9, 2, "right", "spin",  "leg-break",            5),
+    ("Nepal", "K. Karan",            10, 1, "right", "pace",  "right-arm fast-medium",4),
+    ("Nepal", "L. Rajbanshi",        11, 1, "left",  "spin",  "left-arm orthodox",    4),
+
+    # ── UAE ──────────────────────────────────────────────────────────────────
+    ("UAE", "M. Waseem",              1, 4, "left",  "none",  None,                   0),
+    ("UAE", "V. Aravind",             2, 3, "right", "none",  None,                   0),
+    ("UAE", "A. Khan",                3, 3, "right", "none",  None,                   0),
+    ("UAE", "A. Sharafu",             4, 4, "right", "none",  None,                   0),
+    ("UAE", "A. Naseer",              5, 3, "left",  "pace",  "left-arm medium-fast", 3),
+    ("UAE", "B. Hameed",              6, 3, "right", "spin",  "leg-break",            3),
+    ("UAE", "Aayan Khan",             7, 2, "left",  "spin",  "left-arm orthodox",    4),
+    ("UAE", "J. Siddique",            8, 2, "right", "pace",  "right-arm medium-fast",3),
+    ("UAE", "K. Sharma",              9, 1, "left",  "spin",  "left-arm orthodox",    3),
+    ("UAE", "A. Javed",              10, 1, "right", "pace",  "right-arm fast-medium",4),
+    ("UAE", "M. Jawadullah",         11, 1, "left",  "pace",  "left-arm fast-medium", 4),
+
+    # ── OMAN ─────────────────────────────────────────────────────────────────
+    ("Oman", "K. Prajapati",          1, 3, "left",  "none",  None,                   0),
+    ("Oman", "J. Singh",              2, 4, "right", "none",  None,                   0),
+    ("Oman", "A. Ilyas",              3, 4, "right", "spin",  "off-break",            2),
+    ("Oman", "S. Khan",               4, 3, "right", "pace",  "right-arm medium",     2),
+    ("Oman", "Z. Maqsood",            5, 4, "left",  "spin",  "left-arm orthodox",    4),
+    ("Oman", "A. Kaleem",             6, 3, "left",  "spin",  "left-arm orthodox",    3),
+    ("Oman", "M. Nadeem",             7, 3, "left",  "spin",  "left-arm orthodox",    3),
+    ("Oman", "N. Khan",               8, 2, "right", "pace",  "right-arm medium-fast",3),
+    ("Oman", "B. Khan",               9, 1, "left",  "pace",  "left-arm fast-medium", 4),
+    ("Oman", "K. Ali",               10, 1, "right", "spin",  "off-break",            3),
+    ("Oman", "F. Butt",              11, 1, "left",  "pace",  "left-arm fast-medium", 4),
+
+    # ── UNITED STATES ────────────────────────────────────────────────────────
+    ("United States", "S. Jahangir",  1, 3, "right", "none",  None,                   0),
+    ("United States", "A. Jones",     2, 4, "right", "none",  None,                   0),
+    ("United States", "M. Patel",     3, 4, "right", "none",  None,                   0),
+    ("United States", "A. Gous",      4, 4, "right", "none",  None,                   0),
+    ("United States", "H. Singh",     5, 3, "left",  "spin",  "left-arm orthodox",    3),
+    ("United States", "N. Kenjige",   6, 2, "left",  "spin",  "left-arm orthodox",    4),
+    ("United States", "C. Anderson",  7, 3, "left",  "pace",  "left-arm fast-medium", 3),
+    ("United States", "A. Khan",      8, 2, "right", "pace",  "right-arm fast",       5),
+    ("United States", "S. Netravalkar",9,1, "left",  "pace",  "left-arm fast-medium", 5),
+    ("United States", "J. Singh",    10, 1, "right", "pace",  "right-arm fast-medium",3),
+    ("United States", "S. Taylor",   11, 2, "right", "spin",  "off-break",            2),
+
+    # ── CANADA ───────────────────────────────────────────────────────────────
+    ("Canada", "A. Kumar",            1, 3, "right", "none",  None,                   0),
+    ("Canada", "N. Kirton",           2, 4, "left",  "none",  None,                   0),
+    ("Canada", "P. Kumar",            3, 3, "right", "pace",  "right-arm medium",     2),
+    ("Canada", "A. Johnson",          4, 4, "right", "none",  None,                   0),
+    ("Canada", "S. Movva",            5, 3, "right", "none",  None,                   0),
+    ("Canada", "D. Heyliger",         6, 3, "right", "pace",  "right-arm medium-fast",4),
+    ("Canada", "S. Zafar",            7, 3, "left",  "spin",  "left-arm orthodox",    4),
+    ("Canada", "A. Sana",             8, 2, "right", "pace",  "right-arm medium-fast",4),
+    ("Canada", "K. Nitish",           9, 2, "right", "spin",  "off-break",            2),
+    ("Canada", "J. Gordon",          10, 1, "right", "pace",  "right-arm fast-medium",3),
+    ("Canada", "C. Kallicharan",     11, 2, "left",  "none",  None,                   0),
 ]
 
 
@@ -239,6 +403,12 @@ def _insert_players(db):
         team_id = _team_id(db, team_name)
         if team_id is None:
             print(f"  WARNING: team '{team_name}' not found for player '{name}'")
+            continue
+        exists = db.execute(
+            "SELECT id FROM players WHERE team_id=? AND name=?",
+            (team_id, name)
+        ).fetchone()
+        if exists:
             continue
         db.execute(
             "INSERT INTO players "

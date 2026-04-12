@@ -1,57 +1,56 @@
-# Roll It & Bowl It (UNDER CONSTRUCTION)
+# Roll It & Bowl It
 
-**Dice Cricket Done Digitally** — a full-featured cricket simulation game powered by physical dice mechanics, running as a local web app on your machine.
+**Dice Cricket Done Digitally** — a local-first cricket simulation built around visible dice rules, long-form stats, and a world that keeps its own history.
 
-I built this because I wanted the tactile tension of dice cricket but with proper scorecards, standings, and a persistent world that keeps ticking over. You get the genuine uncertainty of rolling a die at every critical moment — will the appeal succeed? is the batter out? — wrapped in a match engine that tracks everything a real cricket season needs: run rates, partnerships, maiden overs, milestones, records.
+The project is designed to keep the old-school feel of tabletop dice cricket while adding the things pen-and-paper versions struggle with: full scorecards, persistent records, world calendars, domestic leagues, broadcast-friendly presentation, and a proper statistical archive.
 
 ---
 
 ## What it does
 
-- **Live match play** with a 4-stage dice system (HOWZAT! Engine) that models deliveries, appeals, dismissal types, and catch locations
-- **Two rolling modes**: Auto-Roll resolves all dice instantly; Manual Roll lets you press each stage yourself and feel every appeal
-- **Full season simulation**: schedule matches, fast-sim unplayed games, let the AI run whole seasons unattended
-- **Ten international teams** (England, Australia, India, Pakistan, New Zealand, South Africa, West Indies, Sri Lanka, Bangladesh, Afghanistan) with rated batters and bowlers
-- **Eighteen venues** with home-ground advantages
-- **Persistent world**: standings, averages, career records, head-to-head results all update as matches are played
-- **Realistic cricket calendar**: FTP-style scheduling with proper home seasons, bilateral tours, and ICC events (Champions Trophy, WTC Final, T20 World Cup) — or random rotation for faster setup
-- **Dice Cricketers' Almanack**: full career batting and bowling statistics, partnership records, honours board with real-world benchmark comparisons and progress bars
-- **Tension detection**: the game notices when you're in a tight finish or on a century approach and nudges you toward Manual mode for the atmosphere
-- **Broadcast mode**: slower animations, dramatic pauses, designed for streaming
+- **Live match play** with a multi-stage HOWZAT dice engine for appeals, dismissals, and catch locations
+- **Two scoring systems**:
+  `Classic` keeps the die literal: `1, 2, 3, 4, 6` score exactly that, `5` triggers the appeal chain
+  `Modern` keeps the same face meanings but lightly tones down some boundary results in longer formats
+- **Two roll modes**:
+  `Auto` resolves every stage for speed
+  `Manual` lets you press through each appeal stage yourself
+- **International and domestic cricket**:
+  national sides, counties, states, and franchise leagues can now be separated at setup time
+- **Persistent worlds** with `International`, `Domestic`, or `Combined` structures
+- **Realistic or random calendars** depending on how simulation-heavy you want the save to be
+- **The Dice Cricketers' Almanack** with career stats, honours, records, and canon filtering
+- **Broadcast mode** and story graphics built for recorded play and long-form series
 
 ---
 
-## The HOWZAT! Engine
+## Core Dice Rules
 
-Every delivery runs through up to four dice stages:
+Every delivery starts with a visible Stage 1 roll:
+
+| Face | Classic | Modern |
+|------|---------|--------|
+| **1** | 1 run | 1 run |
+| **2** | 2 runs | 2 runs |
+| **3** | 3 runs | 3 runs |
+| **4** | 4 runs | usually 4, sometimes cut back in longer formats |
+| **5** | HOWZAT appeal chain | HOWZAT appeal chain |
+| **6** | 6 runs | usually 6, sometimes cut back in longer formats |
+
+After a `5`, the ball can move through the appeal and dismissal stages:
 
 | Stage | Die roll decides |
 |-------|-----------------|
-| **Stage 1** | Delivery type — dot, runs (1–6), wide, no-ball, wicket-possible |
-| **Stage 2** | Appeal outcome — is the batter out or not? |
-| **Stage 3** | Not-out resolution — what actually happened (defended, drove, edged safe…) |
-| **Stage 4** | Dismissal type — bowled, caught, lbw, run out, stumped… |
-| **Stage 4b** | Catch location — if caught, who took it and where |
+| **Stage 2** | Appeal outcome — out or not out |
+| **Stage 3** | Not-out resolution — dot, bye, leg-bye, wide, no-ball |
+| **Stage 4** | Dismissal type — bowled, lbw, caught, run out, stumped |
+| **Stage 4b** | Catch location — if caught, where it went |
 
-Stages 2–4 only trigger when the delivery warrants them. A clean boundary never needs an appeal; a snicked edge to the keeper always does.
-
-### Wicket probability by batter rating
-
-Real rates measured over 5,000 deliveries per rating in automated tests:
-
-| Batter rating | Dismissed per applicable ball |
-|--------------|-------------------------------|
-| 1 (weakest)  | 27.2% |
-| 2            | 21.2% |
-| 3            | 16.2% |
-| 4            | 11.2% |
-| 5 (best)     | 6.2%  |
-
-The threshold mechanic: a rating-5 batter needs the Stage 2 roll to be ≥ 6 to be out; a rating-1 batter is out on ≥ 2. The single die step between each rating accounts for the smooth ~5% gradient.
+That gives the game its identity: literal run faces for scoring, multi-roll drama for wickets.
 
 ---
 
-## Quick start
+## Quick Start
 
 ```bash
 # Clone and set up
@@ -67,11 +66,28 @@ python start.py
 # Open http://127.0.0.1:5001 in your browser
 ```
 
-The database is created and seeded automatically on first run. Teams, players, venues, and a full season schedule are generated from `seed_data.py`.
+The database is created and seeded automatically on first run. The seed now includes international sides and major domestic competitions.
 
 ---
 
-## Rolling modes
+## Match Setup
+
+The Play screen now lets you choose:
+
+- **Cricket Type**: `International` or `Domestic`
+- **Format**: `Test/ODI/T20` in international mode, or `First-Class/One-Day/T20` in domestic mode
+- **Scoring System**: `Classic` or `Modern`
+- **Domestic League**: optional filter when domestic mode is active
+
+That means you can quickly set up:
+
+- England vs New Zealand in a Test
+- Surrey vs Yorkshire in a First-Class match
+- Mumbai Indians vs Chennai Super Kings in T20
+
+without mixing all teams into one picker.
+
+## Rolling Modes
 
 ### Auto-Roll (default)
 Every dice stage resolves the moment you click **Roll** (or press Space/R). The die face animates, the result appears, and the ball is immediately recorded. Great for fast play and simming through innings you care less about.
@@ -151,10 +167,10 @@ roll-it-bowl-it/
 
 ```bash
 source .venv/bin/activate
-pytest tests/ -v
+pytest -q
 ```
 
-All 103 tests pass against the current codebase. The canon system tests exercise all major API routes with a live SQLite database.
+The current suite passes end to end and covers engine behavior, simulation controls, world simulation, and canon/stat filtering.
 
 ### UAT suite (calendar engine)
 
@@ -204,11 +220,15 @@ The output is `dist/RollItBowlIt` (Linux/Mac) or `dist/RollItBowlIt.exe` (Window
 
 ---
 
-## Formats supported
+## World Modes
 
-- **T20** — 20 overs per side
-- **ODI** — 50 overs per side
-- **Test** — up to 5 days, two innings per side
+World creation now supports three structures:
+
+- **International**: national teams only, international calendar focus
+- **Domestic**: league and franchise cricket only
+- **Combined**: international cricket plus selected domestic competitions in the same save
+
+In realistic worlds, domestic competitions can be layered into the calendar using the domestic league selector in the wizard.
 
 ---
 

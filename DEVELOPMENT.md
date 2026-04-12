@@ -85,11 +85,16 @@ DEBUG = True
 
 ## The dice engine
 
-**`game_engine.py` is off-limits for modification.** It is the stable core of the simulation and is covered by the engine tests. All dice logic — stage resolution, free hits, batter thresholds, dismissal type probabilities — lives here.
+`game_engine.py` is the core simulation layer. It now supports two scoring modes:
+
+- `classic`
+- `modern`
+
+Both modes share the same HOWZAT appeal chain, but Stage 1 scoring resolution differs slightly.
 
 ### What the engine exposes
 
-The engine's main entry point takes a delivery request (batter rating, bowler rating, format, over number, over type, free hit flag) and returns a `delivery` dict:
+The engine's main entry point takes a delivery request and returns a `delivery` dict:
 
 ```python
 {
@@ -109,6 +114,21 @@ The engine's main entry point takes a delivery request (batter rating, bowler ra
 
 The presence of `stage2_roll` (not `None`) is the correct test for whether a delivery went through the appeal system. Do not use `stage1_roll == 1` as a proxy — both stage1=1 and stage1=2 can trigger appeals depending on delivery type.
 
+### Scoring modes
+
+`Classic`
+- `1=1`
+- `2=2`
+- `3=3`
+- `4=4`
+- `5=appeal`
+- `6=6`
+
+`Modern`
+- same visible mapping
+- keeps the same appeal chain on `5`
+- in longer formats, some `4` and `6` outcomes can be moderated
+
 ### Batter out thresholds
 
 | Rating | Out if Stage 2 roll ≥ |
@@ -125,13 +145,14 @@ Each step is one pip on the die, producing the ~5% gradient confirmed in automat
 
 ## Database
 
-**`database.py` is off-limits for modification.** All DB access goes through this layer.
+All DB access goes through `database.py`.
 
 Schema is in `schema.sql` (25+ tables). Key tables:
 
 - `matches` — fixtures, format, venue, status
 - `innings`, `balls` — ball-by-ball records
 - `players`, `teams` — roster and squad data
+- `teams.team_type`, `teams.league` — separates international and domestic/franchise teams
 - `season_standings` — points, NRR, wins/losses
 - `career_batting`, `career_bowling` — aggregate stats
 - `records` — historical highs (highest score, best figures, etc.)
@@ -159,6 +180,12 @@ The DB file is `ribi.db` in the project root. Delete it and restart to reset eve
 |-------|--------|---------|
 | `/api/world/sim-day` | POST | Simulate one day of fixtures |
 | `/api/world/sim-season` | POST | Simulate entire season |
+
+### World creation
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/worlds` | POST | Create a world with `world_scope`, `calendar_style`, selected teams, and optional domestic leagues |
+| `/api/domestic-leagues` | GET | Return available domestic competitions for wizard/UI filtering |
 
 ### Statistics
 | Route | Method | Purpose |
@@ -208,6 +235,13 @@ The DB file is `ribi.db` in the project root. Delete it and restart to reset eve
 ## Frontend architecture
 
 `static/app.js` is a single ~2000-line vanilla JS file. No framework, no build step. The key structures:
+
+Important setup state now includes:
+
+- `AppState.defaultScoringMode`
+- `AppState._playCricketScope`
+- `AppState._playDomesticLeague`
+- `WorldUI.wizardScope`
 
 ### MatchUI object
 
@@ -341,7 +375,7 @@ Auto → Manual switching is immediate. Manual → Auto is queued to the end of 
 ## Tests
 
 ```bash
-pytest tests/ -v              # all 103 unit/integration tests
+pytest -q                     # current automated suite
 pytest tests/test_engine.py   # 5 engine tests
 pytest tests/test_canon_system.py -v   # 94 system tests
 ```
