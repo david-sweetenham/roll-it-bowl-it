@@ -90,6 +90,13 @@
         <div id="home-dashboard" class="home-dashboard">
           <div class="spinner"></div>
         </div>
+        <div class="home-demo-bar">
+          <span class="home-demo-label">New to Roll It &amp; Bowl It?</span>
+          <div class="home-demo-btns">
+            <button class="btn btn-secondary btn-sm" onclick="DemoMode.start(true)">🎬 Preview the Game</button>
+            <button class="btn btn-secondary btn-sm" onclick="DemoMode.startScreenshotMode()">📸 Screenshot Mode</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1284,6 +1291,15 @@
             </div>
           </div>
 
+          <div class="settings-section">
+            <h3>Demo Mode</h3>
+            <p class="about-desc">Preview every broadcast graphic, animation, and UI state without playing a real match.</p>
+            <div class="home-quick-actions">
+              <button class="btn btn-secondary" onclick="DemoMode.start(true)">🎬 Run Demo Mode</button>
+              <button class="btn btn-secondary" onclick="DemoMode.startScreenshotMode()">📸 Screenshot Mode</button>
+            </div>
+          </div>
+
           <div class="settings-section" id="settings-legal-section">
             <h3>About &amp; Legal</h3>
             <hr class="settings-rule">
@@ -1293,6 +1309,61 @@
           </div>
 
         </div>
+      </div>
+    </div>
+
+    <!-- DEMO MODE SCREEN -->
+    <div id="screen-demo" class="screen">
+      <div class="demo-shell">
+
+        <!-- Header bar -->
+        <div class="demo-header">
+          <div class="demo-header-brand">🏏 <strong>Roll It &amp; Bowl It</strong> <span class="demo-sep">—</span> Feature Preview</div>
+          <div class="demo-header-center">
+            <span id="demo-scene-title" class="demo-scene-title"></span>
+            <span id="demo-scene-counter" class="demo-scene-counter"></span>
+          </div>
+          <div class="demo-header-actions">
+            <button class="demo-btn demo-btn-screenshot" id="demo-btn-screenshot" onclick="DemoMode.startScreenshotMode()" title="Screenshot Mode">📸</button>
+            <button class="demo-btn demo-btn-exit" onclick="DemoMode.end()">✕ Exit</button>
+          </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="demo-progress-wrap">
+          <div id="demo-progress-bar" class="demo-progress-bar"></div>
+        </div>
+
+        <!-- Dot navigator -->
+        <div id="demo-dots" class="demo-dots"></div>
+
+        <!-- Main content area -->
+        <div id="demo-content" class="demo-content"></div>
+
+        <!-- Bottom controls -->
+        <div class="demo-controls">
+          <div class="demo-controls-nav">
+            <button class="btn btn-secondary demo-nav-btn" onclick="DemoMode.previous()">◀ Prev</button>
+            <button class="btn btn-secondary demo-nav-btn" id="demo-auto-btn" onclick="DemoMode.toggleAutoPlay()">▶ Auto</button>
+            <button class="btn btn-primary demo-nav-btn" onclick="DemoMode.next()">Next ▶</button>
+          </div>
+          <div class="demo-jump">
+            <span class="demo-jump-label">Jump to:</span>
+            <button class="btn btn-sm btn-secondary" onclick="DemoMode.jumpTo(2)">Dice</button>
+            <button class="btn btn-sm btn-secondary" onclick="DemoMode.jumpTo(8)">Graphics</button>
+            <button class="btn btn-sm btn-secondary" onclick="DemoMode.jumpTo(20)">Almanack</button>
+            <button class="btn btn-sm btn-secondary" onclick="DemoMode.jumpTo(21)">Features</button>
+          </div>
+        </div>
+
+        <!-- Screenshot mode info bar (hidden normally) -->
+        <div id="demo-screenshot-bar" class="demo-screenshot-bar hidden">
+          📸 Screenshot Mode — Press → for next scene, ← for previous, Esc to exit
+        </div>
+
+        <!-- Screenshot watermark (hidden normally) -->
+        <div id="demo-watermark" class="demo-watermark hidden">Roll It &amp; Bowl It</div>
+
       </div>
     </div>
 

@@ -185,8 +185,8 @@ function clearError() {
 // ── Screen Router ─────────────────────────────────────────────────────────────
 
 function showScreen(name) {
-  // Guard: warn if leaving an active match
-  if (AppState.currentScreen === 'match' && name !== 'match') {
+  // Guard: warn if leaving an active match (not when entering demo)
+  if (AppState.currentScreen === 'match' && name !== 'match' && name !== 'demo') {
     const matchId = getMatchId();
     const matchStatus = MatchUI.lastState?.match?.status;
     if (matchId && matchStatus === 'in_progress') {
@@ -237,6 +237,7 @@ function onScreenLoad(name) {
     case 'player-detail': break;  // loaded by loadPlayerDetail()
     case 'team-detail':   break;  // loaded by loadTeamDetail()
     case 'venue-detail':  break;  // loaded by loadVenueDetail()
+    case 'demo':          break;  // loaded by DemoMode.start()
   }
 }
 
@@ -3560,6 +3561,15 @@ function initKeyboard() {
     // Ignore when a blocking overlay is open
     if (document.querySelector('.milestone-toast-dim, .record-overlay-dim')) return;
 
+    // Demo mode — arrow navigation
+    if (DemoMode.active) {
+      if (e.key === 'ArrowRight') { e.preventDefault(); DemoMode.next(); return; }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); DemoMode.previous(); return; }
+      if (e.key === 'Escape')     { e.preventDefault(); DemoMode.end(); return; }
+      // S is rebound in demo mode to not clash with Sound toggle
+      return; // absorb all other keys in demo
+    }
+
     const onMatch = AppState.currentScreen === 'match';
 
     switch (e.key) {
@@ -3726,8 +3736,12 @@ const GraphicQueue = {
   },
 
   _show(graphic) {
-    // Suppress all graphics in 'instant' animation speed mode
-    if (AppState.animationSpeed === 'instant') { this._next(); return; }
+    // Suppress all graphics in 'instant' animation speed mode (not in demo)
+    if (AppState.animationSpeed === 'instant' && !DemoMode.active) { this._next(); return; }
+    // In screenshot mode, hold indefinitely (very long timer)
+    if (DemoMode.screenshotMode) {
+      // handled below — just don't auto-dismiss
+    }
 
     const timing = getGraphicTiming(graphic.type);
     if (timing.hold === 0) { this._next(); return; }
@@ -3759,8 +3773,10 @@ const GraphicQueue = {
     // Play sound
     SoundEngine.playGraphic(graphic.type);
 
-    // Auto-dismiss after hold
-    this._clearTimer = setTimeout(() => this._dismiss(), timing.hold);
+    // Auto-dismiss after hold (not in screenshot mode — holds indefinitely)
+    if (!DemoMode.screenshotMode) {
+      this._clearTimer = setTimeout(() => this._dismiss(), timing.hold);
+    }
   },
 
   _dismiss() {
@@ -6770,6 +6786,613 @@ function populateSettingsLegal() {
   if (shortEl) shortEl.textContent = DISCLAIMER_TEXT.short;
 }
 
+// ── Demo Mode ─────────────────────────────────────────────────────────────────
+
+const DEMO_SCENES = [
+  // 0
+  { id: 'intro', title: 'Welcome to Roll It & Bowl It', type: 'title_card', duration: 3000,
+    data: { headline: 'Roll It & Bowl It', subtitle: 'Dice Cricket Done Digitally', tagline: 'Powered by the HOWZAT! Engine' } },
+  // 1
+  { id: 'match_screen', title: 'The Live Match Screen', type: 'match_state', duration: 4000, screenshot_worthy: true, screenshot_label: 'Live Match Screen',
+    data: { team1: 'England', team2: 'Australia', format: 'Test', venue: "Lord's, London", series: 'The Ashes — 2nd Test',
+      score: '247/4', overs: '67.3', rr: '3.66',
+      batters: [
+        { name: 'J. Root',   runs: 97, balls: 134, fours: 11, sixes: 1, sr: 72.4, batting: true },
+        { name: 'B. Stokes', runs: 43, balls: 61,  fours: 4,  sixes: 2, sr: 70.5, batting: false }
+      ],
+      bowler: { name: 'P. Cummins', overs: '14.3', maidens: 2, runs: 58, wickets: 2, econ: 3.97 },
+      commentary: [
+        '67.3 • Cummins to Root — pushed back firmly. No run.',
+        '67.2 • Root drives imperiously through the covers. FOUR!',
+        '67.1 • Short of a length, Root rocks back and pulls for TWO.',
+        '66.6 • Stokes clips it off his pads to square leg. Single.',
+      ] } },
+  // 2
+  { id: 'die_normal', title: 'Stage 1 — The Ball', type: 'dice_demo', duration: 2500,
+    data: { label: 'The Ball', result: 5, flash: 'green', outcome_text: 'FOUR! Root drives through the covers!' } },
+  // 3
+  { id: 'die_howzat', title: 'Stage 1 — HOWZAT!', type: 'dice_demo', duration: 2000,
+    data: { label: 'The Ball', result: 1, flash: 'red', outcome_text: 'HOWZAT! Australia appeal as one!' } },
+  // 4
+  { id: 'die_appeal', title: 'Stage 2 — The Umpire Considers', type: 'dice_demo', duration: 2000,
+    data: { label: 'Appeal!', result: 2, flash: 'blue', outcome_text: 'NOT OUT — the finger stays down. Root survives!' } },
+  // 5
+  { id: 'die_extras', title: 'Stage 3 — What Happened?', type: 'dice_demo', duration: 2000,
+    data: { label: 'Extras', result: 3, flash: 'teal', outcome_text: 'Leg bye — clips the pad and rolls away. One extra.' } },
+  // 6
+  { id: 'die_out', title: 'Stage 2 — OUT!', type: 'dice_demo', duration: 2000,
+    data: { label: 'Appeal!', result: 6, flash: 'red', outcome_text: 'OUT! The finger goes up — Root has to go!' } },
+  // 7
+  { id: 'die_dismissal', title: 'Stage 4 — The Dismissal', type: 'dice_demo', duration: 2000,
+    data: { label: 'Dismissal', result: 3, flash: 'purple', outcome_text: 'CAUGHT — taken at slip! Root walks for 97.' } },
+  // 8
+  { id: 'graphic_wicket', title: 'Broadcast Graphic — Wicket', type: 'graphic', duration: 4000,
+    data: { graphic_type: 'wicket', batterName: 'J. Root', bowlerName: 'P. Cummins',
+      runs: 97, balls: 134, dismissalType: 'caught', wicketNumber: 5, fowScore: 247 } },
+  // 9
+  { id: 'graphic_duck', title: 'Broadcast Graphic — Duck', type: 'graphic', duration: 4500,
+    data: { graphic_type: 'duck', batterName: 'M. Wood', bowlerName: 'M. Starc', balls: 1, dismissalType: 'bowled' } },
+  // 10
+  { id: 'graphic_fifty', title: 'Broadcast Graphic — Half Century', type: 'graphic', duration: 5000,
+    data: { graphic_type: 'fifty', playerName: 'B. Stokes', teamName: 'England',
+      runs: 50, balls: 67, strikeRate: 74.6, matchContext: "England v Australia · The Ashes · Lord's" } },
+  // 11
+  { id: 'graphic_century', title: 'Broadcast Graphic — Century', type: 'graphic', duration: 7000, screenshot_worthy: true, screenshot_label: 'Century Graphic',
+    data: { graphic_type: 'century', playerName: 'J. Root', teamName: 'England',
+      runs: 100, balls: 142, strikeRate: 70.4, matchContext: "England v Australia · The Ashes · Lord's" } },
+  // 12
+  { id: 'graphic_double_century', title: 'Broadcast Graphic — Double Century', type: 'graphic', duration: 8000,
+    data: { graphic_type: 'double_century', playerName: 'J. Root', teamName: 'England',
+      runs: 200, balls: 287, strikeRate: 69.7, matchContext: "England v Australia · The Ashes · Lord's" } },
+  // 13
+  { id: 'graphic_fivefer', title: 'Broadcast Graphic — Five Wicket Haul', type: 'graphic', duration: 6000,
+    data: { graphic_type: 'five_fer', playerName: 'J.M. Anderson', teamName: 'England',
+      wickets: 5, runs: 32, overs: '14.3', economy: 2.21 } },
+  // 14
+  { id: 'graphic_ten_wicket', title: 'Broadcast Graphic — Ten Wickets in the Match', type: 'graphic', duration: 8000,
+    data: { graphic_type: 'ten_wicket_haul', playerName: 'J.M. Anderson', teamName: 'England',
+      inn1Figures: '5/32', inn2Figures: '5/41', totalFigures: '10/73' } },
+  // 15
+  { id: 'graphic_almanack_record', title: 'Broadcast Graphic — New Almanack Record', type: 'graphic', duration: 6000,
+    data: { graphic_type: 'almanack_record', recordLabel: 'Highest Individual Score — Test',
+      newValue: '203*', holderName: 'J. Root', teamName: 'England',
+      previousValue: '187*', previousHolder: 'B. Stokes' } },
+  // 16
+  { id: 'graphic_world_record', title: 'Broadcast Graphic — Real World Record Beaten!', type: 'graphic', duration: 10000, screenshot_worthy: true, screenshot_label: 'World Record Beaten',
+    data: { graphic_type: 'world_record', recordLabel: 'Highest Individual Score — Test',
+      newValue: '412*', holderName: 'J. Root', teamName: 'England',
+      realWorldValue: '400*', realWorldHolder: 'B.C. Lara',
+      realWorldContext: 'West Indies v England · Antigua · 2004' } },
+  // 17
+  { id: 'graphic_over', title: 'Over Complete Lower-Third', type: 'graphic', duration: 3000,
+    data: { graphic_type: 'over_complete', overNumber: 14, bowlerName: 'P. Cummins',
+      figures: '0-0-8-0', teamScore: '187/3', currentRR: '3.97', requiredRR: null } },
+  // 18
+  { id: 'graphic_innings_break', title: 'Innings Break Graphic', type: 'graphic', duration: 6000,
+    data: { graphic_type: 'innings_break', battingTeam: 'Australia', score: '247 all out',
+      overs: '68.3', target: 248, requiredRR: '3.62', oversAvailable: '90',
+      topScorer: 'S. Smith  89 (167b)', bestBowling: 'J.M. Anderson  4/52' } },
+  // 19
+  { id: 'graphic_result', title: 'Match Result Graphic', type: 'graphic', duration: 6000,
+    data: { graphic_type: 'match_result', winnerName: 'England', resultText: 'by 6 wickets',
+      score1: 'Australia  247 all out', score2: 'England  248/4',
+      playerOfMatch: 'J. Root', pomDetail: '203* (287b) & 0/22' } },
+  // 20
+  { id: 'almanack_preview', title: "The Dice Cricketers' Almanack", type: 'almanack_preview', duration: 5000, screenshot_worthy: true, screenshot_label: 'The Almanack',
+    data: { headline: "The Dice Cricketers' Almanack",
+      subtitle: 'Every match. Every run. Every wicket. Forever.',
+      stats: [
+        { label: 'Matches Recorded', value: '247' },
+        { label: 'Runs Scored', value: '312,847' },
+        { label: 'Wickets Taken', value: '8,934' },
+        { label: 'Centuries', value: '312' },
+        { label: 'World Records Broken', value: '3' },
+      ] } },
+  // 21
+  { id: 'rolling_modes', title: 'Auto-Roll and Manual Roll', type: 'feature_card', duration: 5000,
+    data: { headline: 'Two Ways to Play',
+      features: [
+        { icon: '⚡', title: 'Auto-Roll', description: 'Sit back and watch. Perfect for recording and AI vs AI spectator mode.' },
+        { icon: '🎲', title: 'Manual Roll', description: 'Press each die separately. Feel every appeal. Switch to Manual for a tight finish.' },
+      ] } },
+  // 22
+  { id: 'world_mode', title: 'Cricket World Mode', type: 'feature_card', duration: 5000,
+    data: { headline: 'Cricket World Mode',
+      features: [
+        { icon: '🌍', title: 'A Living Cricket World', description: 'Real calendar, realistic tours, ICC tournaments. Designed to run forever.' },
+        { icon: '📅', title: 'Real Scheduling Logic', description: "England don't tour Australia in July. India rest during monsoon season. The Ashes every two years." },
+      ] } },
+  // 23
+  { id: 'outro', title: 'Get Started', type: 'title_card', duration: 4000,
+    data: { headline: 'Roll It & Bowl It', subtitle: 'Start playing in under 60 seconds', cta: 'Play Now →' } },
+];
+
+// Auto-timer for demo
+let _demoAutoTimer = null;
+function _clearDemoTimer() {
+  if (_demoAutoTimer) { clearTimeout(_demoAutoTimer); _demoAutoTimer = null; }
+}
+
+const DemoMode = {
+  active:         false,
+  currentScene:   0,
+  autoPlay:       false,
+  screenshotMode: false,
+  _prevScreen:    'home',
+  _ssIndices:     [],   // screenshot-worthy scene indices
+
+  start(autoPlay = false) {
+    this.active       = true;
+    this.screenshotMode = false;
+    this.currentScene = 0;
+    this.autoPlay     = autoPlay;
+    this._prevScreen  = AppState.currentScreen || 'home';
+    GraphicQueue.clear();
+    showScreen('demo');
+    this._buildDots();
+    this._updateAutoBtn();
+    document.getElementById('demo-watermark')?.classList.add('hidden');
+    document.getElementById('demo-screenshot-bar')?.classList.add('hidden');
+    document.querySelector('.demo-shell')?.classList.remove('screenshot-mode');
+    document.getElementById('demo-btn-screenshot')?.classList.remove('hidden');
+    this.renderScene(0);
+    this._fetchRealData();
+  },
+
+  startScreenshotMode() {
+    this._ssIndices = DEMO_SCENES.reduce((acc, s, i) => { if (s.screenshot_worthy) acc.push(i); return acc; }, []);
+    this.screenshotMode = true;
+    this.active         = true;
+    this.autoPlay       = false;
+    this.currentScene   = this._ssIndices[0] || 0;
+    this._prevScreen    = AppState.currentScreen || 'home';
+    GraphicQueue.clear();
+    showScreen('demo');
+    this._buildDots();
+    this._updateAutoBtn();
+    document.getElementById('demo-watermark')?.classList.remove('hidden');
+    document.getElementById('demo-screenshot-bar')?.classList.remove('hidden');
+    document.getElementById('demo-btn-screenshot')?.classList.add('hidden');
+    document.querySelector('.demo-shell')?.classList.add('screenshot-mode');
+    this.renderScene(this.currentScene);
+  },
+
+  next() {
+    _clearDemoTimer();
+    if (this.screenshotMode) {
+      const pos = this._ssIndices.indexOf(this.currentScene);
+      const next = this._ssIndices[pos + 1];
+      if (next !== undefined) { this.renderScene(next); } else { this.end(); }
+      return;
+    }
+    if (this.currentScene < DEMO_SCENES.length - 1) {
+      this.renderScene(this.currentScene + 1);
+    } else {
+      this.end();
+    }
+  },
+
+  previous() {
+    _clearDemoTimer();
+    if (this.screenshotMode) {
+      const pos = this._ssIndices.indexOf(this.currentScene);
+      const prev = this._ssIndices[pos - 1];
+      if (prev !== undefined) this.renderScene(prev);
+      return;
+    }
+    if (this.currentScene > 0) this.renderScene(this.currentScene - 1);
+  },
+
+  jumpTo(index) {
+    _clearDemoTimer();
+    this.renderScene(index);
+  },
+
+  renderScene(index) {
+    _clearDemoTimer();
+    GraphicQueue.clear();
+    this.currentScene = index;
+    const scene = DEMO_SCENES[index];
+    if (!scene) return;
+
+    document.getElementById('demo-scene-title').textContent   = scene.title;
+    document.getElementById('demo-scene-counter').textContent = `${index + 1} of ${DEMO_SCENES.length}`;
+
+    this._updateProgress();
+
+    // Render scene content
+    switch (scene.type) {
+      case 'title_card':       renderDemoTitleCard(scene.data);     break;
+      case 'match_state':      renderDemoMatchScreen(scene.data);   break;
+      case 'dice_demo':        renderDemoDice(scene.data);          break;
+      case 'graphic':          renderDemoGraphic(scene.data);       break;
+      case 'almanack_preview': renderDemoAlmanack(scene.data);      break;
+      case 'feature_card':     renderDemoFeatureCard(scene.data);   break;
+    }
+
+    // Auto-advance
+    if (this.autoPlay && !this.screenshotMode && scene.duration < 99999) {
+      _demoAutoTimer = setTimeout(() => this.next(), scene.duration);
+    }
+  },
+
+  _updateProgress() {
+    const pct = (this.currentScene / (DEMO_SCENES.length - 1)) * 100;
+    const bar = document.getElementById('demo-progress-bar');
+    if (bar) bar.style.width = `${pct}%`;
+    document.querySelectorAll('.demo-dot').forEach((dot, i) => {
+      dot.classList.toggle('active',  i === this.currentScene);
+      dot.classList.toggle('visited', i < this.currentScene);
+    });
+  },
+
+  end() {
+    this.active         = false;
+    this.screenshotMode = false;
+    _clearDemoTimer();
+    GraphicQueue.clear();
+    history.replaceState(null, '', location.pathname);
+    showScreen(this._prevScreen || 'home');
+  },
+
+  toggleAutoPlay() {
+    this.autoPlay = !this.autoPlay;
+    this._updateAutoBtn();
+    if (this.autoPlay) {
+      const scene = DEMO_SCENES[this.currentScene];
+      if (scene && scene.duration < 99999) {
+        _demoAutoTimer = setTimeout(() => this.next(), scene.duration);
+      }
+    } else {
+      _clearDemoTimer();
+    }
+  },
+
+  _updateAutoBtn() {
+    const btn = document.getElementById('demo-auto-btn');
+    if (!btn) return;
+    btn.textContent = this.autoPlay ? '⏸ Pause' : '▶ Auto';
+    btn.classList.toggle('active', this.autoPlay);
+  },
+
+  _buildDots() {
+    const container = document.getElementById('demo-dots');
+    if (!container) return;
+    container.innerHTML = '';
+    DEMO_SCENES.forEach((scene, i) => {
+      const dot = document.createElement('button');
+      dot.className   = 'demo-dot';
+      dot.title       = scene.title;
+      dot.onclick     = () => this.jumpTo(i);
+      container.appendChild(dot);
+    });
+  },
+
+  async _fetchRealData() {
+    try {
+      const data = await api('GET', '/api/demo/data');
+      if (!data || !data.has_real_data) return;
+      // Update almanack preview scene (index 20) with real stats
+      const almScene = DEMO_SCENES[20];
+      if (almScene && almScene.data && almScene.data.stats) {
+        almScene.data.stats = [
+          { label: 'Matches Recorded', value: data.match_count.toLocaleString() },
+          { label: 'Runs Scored',      value: data.total_runs.toLocaleString() },
+          { label: 'Wickets Taken',    value: data.total_wickets.toLocaleString() },
+          { label: 'Centuries',        value: (data.centuries || '—').toLocaleString() },
+          { label: 'Top Score', value: data.top_score ? `${data.top_score.runs} (${data.top_score.name})` : '—' },
+        ];
+        // If currently showing the almanack scene, re-render it
+        if (this.currentScene === 20) this.renderScene(20);
+      }
+    } catch (_) {}
+  },
+};
+
+// ── Demo scene renderers ──────────────────────────────────────────────────────
+
+function renderDemoTitleCard(data) {
+  const content = document.getElementById('demo-content');
+  if (!content) return;
+  content.innerHTML = `
+    <div class="demo-title-card">
+      <span class="demo-tc-logo">🏏</span>
+      <h2 class="demo-tc-headline">${escHtml(data.headline)}</h2>
+      ${data.subtitle ? `<p class="demo-tc-subtitle">${escHtml(data.subtitle)}</p>` : ''}
+      ${data.tagline  ? `<p class="demo-tc-tagline">${escHtml(data.tagline)}</p>`  : ''}
+      ${data.cta      ? `<button class="demo-tc-cta" onclick="DemoMode.end()">${escHtml(data.cta)}</button>` : ''}
+    </div>`;
+}
+
+function renderDemoMatchScreen(data) {
+  const content = document.getElementById('demo-content');
+  if (!content) return;
+
+  const battersHtml = (data.batters || []).map(b => `
+    <div class="batter-row">
+      <div class="batter-name${b.batting ? ' on-strike' : ''}">${escHtml(b.name)}</div>
+      <div class="batter-stats">${b.runs} (${b.balls}b) ${b.fours}x4 ${b.sixes}x6 SR:${b.sr}</div>
+    </div>`).join('');
+
+  const bwl = data.bowler || {};
+  const commentHtml = (data.commentary || []).map(c =>
+    `<div class="commentary-line">${escHtml(c)}</div>`).join('');
+
+  // Render die pips for face 5 statically
+  const pips5 = '<div class="die-pips" style="display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)">' + DIE_PIPS[5] + '</div>';
+
+  content.innerHTML = `
+    <div class="demo-match-mockup">
+      <div class="match-topbar">
+        <span class="match-title">${escHtml(data.team1)} vs ${escHtml(data.team2)} · ${escHtml(data.format)} · ${escHtml(data.venue)}</span>
+        <span class="match-context">${escHtml(data.series)}</span>
+      </div>
+      <div class="match-scoreboard">
+        <div class="scoreboard-main">
+          <span class="sb-team">${escHtml(data.team1)}</span>
+          <span class="sb-score">${escHtml(data.score)}</span>
+          <span class="sb-overs">${escHtml(data.overs)} ov</span>
+          <span class="sb-rr">RR: ${escHtml(data.rr)}</span>
+        </div>
+      </div>
+      <div class="match-play-area">
+        <div class="match-players-panel">
+          <div class="players-label">BATTING</div>
+          ${battersHtml}
+          <div class="players-label mt-16">BOWLING</div>
+          <div class="bowler-row">
+            <div class="bowler-name">${escHtml(bwl.name || '')}</div>
+            <div class="bowler-stats">${escHtml(bwl.overs||'')}-${bwl.maidens||0}-${bwl.runs||0}-${bwl.wickets||0} Econ:${bwl.econ||0}</div>
+          </div>
+        </div>
+        <div class="match-dice-panel">
+          <div id="demo-match-die" class="die-face demo-static-die" data-face="5">${pips5}</div>
+          <div class="die-stage-label"></div>
+          <div class="dice-btns">
+            <button class="btn btn-primary btn-large" disabled>🎲 Roll Ball</button>
+          </div>
+        </div>
+        <div class="match-commentary-panel">
+          <div class="commentary-header">COMMENTARY</div>
+          <div class="commentary-feed">${commentHtml}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDemoDice(data) {
+  const content = document.getElementById('demo-content');
+  if (!content) return;
+
+  const pipsQ = '<span style="font-size:28px;color:var(--text-muted)">?</span>';
+  content.innerHTML = `
+    <div class="demo-dice-scene">
+      <div class="demo-dice-label">${escHtml(data.label)}</div>
+      <div class="demo-die-wrap">
+        <div id="demo-die-el" class="demo-die-el" data-face="0">
+          <div class="demo-die-pips" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%">${pipsQ}</div>
+        </div>
+        <div id="demo-die-stage" class="demo-die-stage">ROLLING…</div>
+      </div>
+      <div id="demo-dice-outcome" class="demo-dice-outcome" style="opacity:0">${escHtml(data.outcome_text)}</div>
+    </div>`;
+
+  _animateDemoDie(data.result, data.flash, data.outcome_text);
+}
+
+async function _animateDemoDie(targetFace, flashColor, outcomeText) {
+  const dieEl     = document.getElementById('demo-die-el');
+  const stageEl   = document.getElementById('demo-die-stage');
+  const outcomeEl = document.getElementById('demo-dice-outcome');
+  if (!dieEl) return;
+
+  const totalMs  = 900;
+  const flickers = 12;
+  const interval = totalMs / flickers;
+
+  function _setPips(el, face) {
+    const pipsEl = el.querySelector('.demo-die-pips');
+    if (!pipsEl) return;
+    if (face === 0) {
+      pipsEl.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%';
+      pipsEl.innerHTML = '<span style="font-size:28px;color:var(--text-muted)">?</span>';
+    } else {
+      pipsEl.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);width:100%;height:100%';
+      pipsEl.innerHTML = DIE_PIPS[face] || '';
+    }
+    el.dataset.face = face;
+  }
+
+  // In screenshot mode: skip animation, jump to result
+  if (DemoMode.screenshotMode) {
+    _setPips(dieEl, targetFace);
+    if (stageEl) stageEl.textContent = '';
+    if (outcomeEl) { outcomeEl.textContent = outcomeText; outcomeEl.style.opacity = '1'; }
+    return;
+  }
+
+  for (let i = 0; i < flickers; i++) {
+    _setPips(dieEl, Math.ceil(Math.random() * 6));
+    await sleep(interval);
+    // Stop if demo changed scenes
+    if (!DemoMode.active || document.getElementById('demo-die-el') !== dieEl) return;
+  }
+
+  _setPips(dieEl, targetFace);
+  if (stageEl) stageEl.textContent = '';
+
+  // Colour flash
+  const flashMap = { green: '#2ecc71', red: '#e74c3c', blue: '#3498db', teal: '#1abc9c', purple: '#9b59b6' };
+  if (flashColor && flashMap[flashColor]) {
+    dieEl.style.boxShadow = `0 0 28px ${flashMap[flashColor]}, 0 0 8px ${flashMap[flashColor]}`;
+    dieEl.style.borderColor = flashMap[flashColor];
+    setTimeout(() => {
+      if (dieEl.isConnected) { dieEl.style.boxShadow = ''; dieEl.style.borderColor = ''; }
+    }, 900);
+  }
+
+  await sleep(250);
+  if (!DemoMode.active || document.getElementById('demo-dice-outcome') !== outcomeEl) return;
+  if (outcomeEl) { outcomeEl.textContent = outcomeText; outcomeEl.style.opacity = '1'; }
+}
+
+function renderDemoGraphic(data) {
+  const { graphic_type } = data;
+  const content = document.getElementById('demo-content');
+  if (!content) return;
+
+  // Special cases — rendered inline (not via GraphicQueue overlay)
+  if (graphic_type === 'innings_break') {
+    _renderDemoInningsBreak(data, content);
+    return;
+  }
+  if (graphic_type === 'match_result') {
+    _renderDemoMatchResult(data, content);
+    return;
+  }
+
+  // All other types go through the real GraphicQueue (identical to in-game rendering)
+  // Show background context in demo content while overlay plays
+  const typeLabels = {
+    wicket: 'Wicket', duck: 'Duck', fifty: 'Half Century', century: 'CENTURY!',
+    one_fifty: '150', double_century: 'Double Century', five_fer: 'Five Wicket Haul',
+    ten_wicket_haul: 'Ten Wickets in the Match', almanack_record: 'Almanack Record',
+    world_record: 'Real World Record Beaten', over_complete: 'Over Complete',
+  };
+  const displayLabel = typeLabels[graphic_type] || graphic_type;
+
+  content.innerHTML = `
+    <div class="demo-graphic-stage">
+      <div class="demo-graphic-stage-title">${escHtml(displayLabel)}</div>
+      <div class="demo-graphic-stage-sub">Broadcast graphic</div>
+      <div class="demo-graphic-stage-hint">▲ Playing above — same code as a real match</div>
+    </div>`;
+
+  // Map demo scene data to GraphicQueue format and enqueue
+  const gfx = _mapDemoDataToGraphic(graphic_type, data);
+  if (gfx) {
+    GraphicQueue.clear();
+    GraphicQueue.add(gfx);
+  }
+}
+
+function _mapDemoDataToGraphic(type, d) {
+  switch (type) {
+    case 'wicket':
+      return { type: 'wicket', batterName: d.batterName, bowlerName: d.bowlerName,
+        runs: d.runs, balls: d.balls, dismissalType: d.dismissalType,
+        wicketNum: d.wicketNumber, fowScore: d.fowScore };
+    case 'duck':
+      return { type: 'duck', batterName: d.batterName, bowlerName: d.bowlerName,
+        balls: d.balls, dismissalType: d.dismissalType };
+    case 'fifty':
+      return { type: 'fifty', playerName: d.playerName, teamName: d.teamName,
+        runs: d.runs, balls: d.balls, matchContext: d.matchContext };
+    case 'century':
+      return { type: 'century', playerName: d.playerName, teamName: d.teamName,
+        runs: d.runs, balls: d.balls, matchContext: d.matchContext };
+    case 'double_century':
+      return { type: 'double_century', playerName: d.playerName, teamName: d.teamName,
+        runs: d.runs, balls: d.balls, matchContext: d.matchContext };
+    case 'five_fer':
+      return { type: 'five_fer', playerName: d.playerName, teamName: d.teamName,
+        figures: `${d.wickets}/${d.runs}`, overs: d.overs, econ: String(d.economy) };
+    case 'ten_wicket_haul':
+      return { type: 'ten_wicket', playerName: d.playerName, teamName: d.teamName,
+        figures: d.totalFigures };
+    case 'almanack_record':
+      return { type: 'almanack_record', typeLabel: d.recordLabel, newValue: d.newValue,
+        playerName: d.holderName, previousValue: d.previousValue, previousHolder: d.previousHolder };
+    case 'world_record':
+      return { type: 'world_record', typeLabel: d.recordLabel, newValue: d.newValue,
+        playerName: d.holderName, worldRecord: d.realWorldValue, worldRecordHolder: d.realWorldHolder };
+    case 'over_complete': {
+      const parts = (d.figures || '0-0-0-0').split('-');
+      return { type: 'over_complete', overNumber: d.overNumber, bowlerName: d.bowlerName,
+        wickets: parseInt(parts[3]||0), maidens: parseInt(parts[1]||0), runs: parseInt(parts[2]||0),
+        teamScore: d.teamScore, rr: d.currentRR, rrr: d.requiredRR };
+    }
+    default: return null;
+  }
+}
+
+function _renderDemoInningsBreak(d, content) {
+  content.innerHTML = `
+    <div class="demo-innings-card">
+      <div class="ibg-batting-team">${escHtml(d.battingTeam)}</div>
+      <div class="ibg-score">${escHtml(d.score)}</div>
+      <div class="ibg-overs">${escHtml(d.overs)} overs</div>
+      <div class="ibg-target-row">
+        <div class="ibg-target">Target: <strong>${d.target}</strong></div>
+        <div class="ibg-rrr">Required RR: ${escHtml(d.requiredRR)} from ${escHtml(d.oversAvailable)} overs</div>
+      </div>
+      <div class="ibg-stat-row">
+        <div>Top Scorer: <span>${escHtml(d.topScorer)}</span></div>
+        <div>Best Bowling: <span>${escHtml(d.bestBowling)}</span></div>
+      </div>
+    </div>`;
+}
+
+function _renderDemoMatchResult(d, content) {
+  content.innerHTML = `
+    <div class="demo-result-card">
+      <div class="result-header">
+        <div class="result-winner">${escHtml(d.winnerName)} WIN</div>
+        <div class="result-margin">${escHtml(d.resultText)}</div>
+      </div>
+      <div class="result-scores">
+        <div class="result-score-line">${escHtml(d.score1)}</div>
+        <div class="result-score-line">${escHtml(d.score2)}</div>
+      </div>
+      <div class="result-pom">Player of the Match: <strong>${escHtml(d.playerOfMatch)}</strong> — ${escHtml(d.pomDetail)}</div>
+    </div>`;
+}
+
+function renderDemoAlmanack(data) {
+  const content = document.getElementById('demo-content');
+  if (!content) return;
+
+  const statsHtml = (data.stats || []).map(s => `
+    <div class="demo-alm-stat">
+      <div class="demo-alm-stat-value">${escHtml(s.value)}</div>
+      <div class="demo-alm-stat-label">${escHtml(s.label)}</div>
+    </div>`).join('');
+
+  const yr = new Date().getFullYear();
+  content.innerHTML = `
+    <div class="demo-almanack-preview">
+      <div class="alm-masthead">
+        <div class="alm-masthead-rule"><span class="alm-masthead-rule-inner">══════════════</span></div>
+        <h2 class="alm-masthead-title">The Dice Cricketers&#8217; Almanack</h2>
+        <div class="alm-masthead-rule"><span class="alm-masthead-rule-inner">══════════════</span></div>
+        <p class="alm-masthead-sub">${escHtml(data.subtitle)}</p>
+        <div class="alm-masthead-footer">
+          <span class="alm-masthead-volume">Volume I</span>
+          <span class="alm-masthead-est">Est. ${yr}</span>
+        </div>
+      </div>
+      <div class="demo-alm-stats">${statsHtml}</div>
+    </div>`;
+}
+
+function renderDemoFeatureCard(data) {
+  const content = document.getElementById('demo-content');
+  if (!content) return;
+
+  const featuresHtml = (data.features || []).map(f => `
+    <div class="demo-fc-item">
+      <span class="demo-fc-icon">${f.icon}</span>
+      <div class="demo-fc-title">${escHtml(f.title)}</div>
+      <div class="demo-fc-desc">${escHtml(f.description)}</div>
+    </div>`).join('');
+
+  content.innerHTML = `
+    <div class="demo-feature-card">
+      <h2 class="demo-fc-headline">${escHtml(data.headline)}</h2>
+      <div class="demo-fc-grid">${featuresHtml}</div>
+    </div>`;
+}
+
 // ── DOMContentLoaded ──────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -6836,5 +7459,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (_) {}
 
-  showScreen(showWelcome ? 'welcome' : 'home');
+  // Hash routing for demo modes
+  if (location.hash === '#demo') {
+    history.replaceState(null, '', location.pathname);
+    showScreen(showWelcome ? 'welcome' : 'home');
+    DemoMode.start(true);
+  } else if (location.hash === '#demo-screenshot') {
+    history.replaceState(null, '', location.pathname);
+    showScreen(showWelcome ? 'welcome' : 'home');
+    DemoMode.startScreenshotMode();
+  } else {
+    showScreen(showWelcome ? 'welcome' : 'home');
+  }
+
+  // hashchange for demo (e.g. shared link opened while app already loaded)
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#demo') {
+      history.replaceState(null, '', location.pathname);
+      DemoMode.start(true);
+    } else if (location.hash === '#demo-screenshot') {
+      history.replaceState(null, '', location.pathname);
+      DemoMode.startScreenshotMode();
+    }
+  });
 });

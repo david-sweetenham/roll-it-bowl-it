@@ -3791,6 +3791,49 @@ def archive_old_matches():
         database.close_db(db)
 
 
+# ── Demo Mode ─────────────────────────────────────────────────────────────────
+
+@app.route('/api/demo/data')
+def get_demo_data():
+    """Return real stats to enrich the demo if matches have been played."""
+    try:
+        db = database.get_db()
+        row = db.execute("SELECT COUNT(*) as cnt FROM matches WHERE status='completed'").fetchone()
+        match_count = row['cnt'] if row else 0
+
+        if match_count > 0:
+            total_runs = (db.execute("SELECT COALESCE(SUM(total_runs),0) as t FROM innings").fetchone() or {}).get('t', 0)
+            total_wickets = (db.execute("SELECT COALESCE(SUM(total_wickets),0) as t FROM innings").fetchone() or {}).get('t', 0)
+            centuries = db.execute(
+                "SELECT COUNT(*) as cnt FROM batter_innings WHERE runs >= 100"
+            ).fetchone()
+            century_count = centuries['cnt'] if centuries else 0
+            top_row = db.execute("""
+                SELECT p.name, bi.runs, bi.balls_faced, t.name as team
+                FROM batter_innings bi
+                JOIN players p ON bi.player_id = p.id
+                JOIN innings i ON bi.innings_id = i.id
+                JOIN matches m ON i.match_id = m.id
+                JOIN teams t ON p.team_id = t.id
+                ORDER BY bi.runs DESC LIMIT 1
+            """).fetchone()
+            top_score = dict(top_row) if top_row else None
+            database.close_db(db)
+            return jsonify({
+                'has_real_data': True,
+                'match_count': int(match_count),
+                'total_runs': int(total_runs),
+                'total_wickets': int(total_wickets),
+                'centuries': int(century_count),
+                'top_score': top_score,
+            })
+
+        database.close_db(db)
+        return jsonify({'has_real_data': False})
+    except Exception as e:
+        return jsonify({'has_real_data': False, 'error': str(e)})
+
+
 # ── Disclaimer ────────────────────────────────────────────────────────────────
 
 @app.route('/api/disclaimer')

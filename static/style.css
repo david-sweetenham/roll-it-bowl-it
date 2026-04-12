@@ -4462,3 +4462,654 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
 .settings-legal-btn {
   font-size: var(--fs-sm);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   DEMO MODE
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Home screen demo bar ──────────────────────────────────── */
+
+.home-demo-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(46,204,113,0.06);
+  border: 1px solid rgba(46,204,113,0.18);
+  border-radius: var(--radius);
+}
+
+.home-demo-label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 160px;
+}
+
+.home-demo-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Demo screen shell ─────────────────────────────────────── */
+
+#screen-demo.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.demo-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #080f20;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Screenshot mode adds crop guide */
+.demo-shell.screenshot-mode .demo-content {
+  outline: 2px solid rgba(255,220,0,0.7);
+  outline-offset: -2px;
+}
+
+/* ── Demo header ───────────────────────────────────────────── */
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.demo-header-brand {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.demo-header-brand strong { color: var(--text); }
+
+.demo-sep { opacity: 0.4; margin: 0 4px; }
+
+.demo-header-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.demo-scene-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.demo-scene-counter {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.demo-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.demo-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+.demo-btn:hover { color: var(--text); border-color: rgba(127,179,211,0.4); }
+.demo-btn-exit:hover { color: var(--danger); border-color: var(--danger); }
+
+/* ── Progress bar ──────────────────────────────────────────── */
+
+.demo-progress-wrap {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+
+.demo-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+/* ── Dot navigator ─────────────────────────────────────────── */
+
+.demo-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.demo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+  border: none;
+  padding: 0;
+  flex-shrink: 0;
+}
+.demo-dot:hover   { background: rgba(255,255,255,0.35); transform: scale(1.2); }
+.demo-dot.visited { background: rgba(46,204,113,0.35); }
+.demo-dot.active  { background: var(--accent); transform: scale(1.3); }
+
+/* ── Main content area ─────────────────────────────────────── */
+
+.demo-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  position: relative;
+}
+
+/* ── Bottom controls ───────────────────────────────────────── */
+
+.demo-controls {
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.03);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.demo-controls-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.demo-nav-btn {
+  min-width: 80px;
+}
+
+#demo-auto-btn.active {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
+}
+
+.demo-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.demo-jump-label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* ── Screenshot mode bar & watermark ──────────────────────── */
+
+.demo-screenshot-bar {
+  background: rgba(255,220,0,0.12);
+  border-top: 1px solid rgba(255,220,0,0.3);
+  color: rgba(255,220,0,0.9);
+  text-align: center;
+  font-size: var(--fs-xs);
+  padding: 5px 0;
+  flex-shrink: 0;
+}
+
+.demo-watermark {
+  position: absolute;
+  bottom: 62px;
+  right: 14px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.12);
+  pointer-events: none;
+  letter-spacing: 0.05em;
+  z-index: 10;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCENE CONTENT RENDERERS
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Title card ────────────────────────────────────────────── */
+
+.demo-title-card {
+  text-align: center;
+  max-width: 600px;
+  width: 100%;
+  animation: demo-fade-up 0.5s ease-out both;
+}
+
+@keyframes demo-fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.demo-tc-logo { font-size: 52px; margin-bottom: 12px; display: block; }
+
+.demo-tc-headline {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px;
+  animation: demo-fade-up 0.5s 0.15s ease-out both;
+}
+
+.demo-tc-subtitle {
+  font-size: var(--fs-lg);
+  color: var(--text-muted);
+  margin: 0 0 14px;
+  animation: demo-fade-up 0.5s 0.3s ease-out both;
+}
+
+.demo-tc-tagline {
+  font-size: var(--fs-base);
+  color: var(--accent);
+  margin: 0 0 24px;
+  animation: demo-fade-up 0.5s 0.45s ease-out both;
+}
+
+.demo-tc-cta {
+  display: inline-block;
+  padding: 12px 32px;
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+  font-size: var(--fs-base);
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: none;
+  animation: demo-fade-up 0.5s 0.6s ease-out both;
+}
+.demo-tc-cta:hover { opacity: 0.88; }
+
+/* ── Match mockup ──────────────────────────────────────────── */
+
+.demo-match-mockup {
+  width: 100%;
+  max-width: 900px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: demo-fade-up 0.4s ease-out both;
+}
+
+.demo-match-mockup .match-topbar { position: static; }
+.demo-match-mockup .match-scoreboard { position: static; }
+
+.demo-match-mockup .match-play-area {
+  min-height: 200px;
+}
+
+.demo-match-mockup .commentary-feed {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.demo-static-die {
+  cursor: default !important;
+}
+
+.demo-match-mockup .dice-btns .btn { opacity: 0.45; cursor: default; }
+
+/* ── Dice scene ────────────────────────────────────────────── */
+
+.demo-dice-scene {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+  animation: demo-fade-up 0.4s ease-out both;
+  width: 100%;
+  max-width: 400px;
+}
+
+.demo-dice-label {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.demo-die-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Demo die is larger than the match die */
+.demo-die-el {
+  width: 100px;
+  height: 100px;
+  background: var(--surface2);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 12px;
+  gap: 6px;
+  transition: box-shadow 0.4s ease;
+}
+
+.demo-die-el .pip {
+  width: 100%;
+  height: 100%;
+  background: var(--text);
+  border-radius: 50%;
+}
+
+.demo-die-el[data-face="0"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.demo-die-stage {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.demo-dice-outcome {
+  font-size: var(--fs-base);
+  color: var(--text);
+  font-weight: 600;
+  max-width: 340px;
+  line-height: 1.5;
+  transition: opacity 0.4s ease;
+  min-height: 2em;
+}
+
+.demo-dice-explain {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 340px;
+  line-height: 1.5;
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--accent);
+}
+
+/* ── Graphic stage (for overlay graphics) ──────────────────── */
+
+.demo-graphic-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  max-width: 480px;
+  width: 100%;
+  animation: demo-fade-up 0.4s ease-out both;
+}
+
+.demo-graphic-stage-title {
+  font-size: var(--fs-lg);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.demo-graphic-stage-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.demo-graphic-stage-hint {
+  font-size: var(--fs-xs);
+  color: rgba(46,204,113,0.7);
+  padding: 6px 12px;
+  background: rgba(46,204,113,0.07);
+  border-radius: 20px;
+  border: 1px solid rgba(46,204,113,0.2);
+}
+
+/* ── Innings break inline card ─────────────────────────────── */
+
+.demo-innings-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 28px 24px;
+  text-align: center;
+  animation: demo-fade-up 0.45s ease-out both;
+}
+
+.demo-innings-card .ibg-batting-team {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.demo-innings-card .ibg-score {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--accent2);
+  margin-bottom: 6px;
+}
+
+.demo-innings-card .ibg-overs {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.demo-innings-card .ibg-target-row {
+  background: rgba(255,255,255,0.05);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.demo-innings-card .ibg-target {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.demo-innings-card .ibg-rrr {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.demo-innings-card .ibg-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-top: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.demo-innings-card .ibg-stat-row span {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ── Match result inline card ──────────────────────────────── */
+
+.demo-result-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: demo-fade-up 0.5s ease-out both;
+}
+
+.demo-result-card .result-header {
+  padding: 20px;
+  background: rgba(46,204,113,0.12);
+  text-align: center;
+}
+
+.demo-result-card .result-winner {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.demo-result-card .result-margin {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.demo-result-card .result-scores {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.demo-result-card .result-score-line {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.demo-result-card .result-pom {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.demo-result-card .result-pom strong { color: var(--gold); }
+
+/* ── Almanack preview ──────────────────────────────────────── */
+
+.demo-almanack-preview {
+  width: 100%;
+  max-width: 560px;
+  animation: demo-fade-up 0.4s ease-out both;
+}
+
+.demo-almanack-preview .alm-masthead {
+  background: var(--almanack-bg-tint);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 16px;
+}
+
+.demo-alm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.demo-alm-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  text-align: center;
+}
+
+.demo-alm-stat-value {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--almanack-gold);
+  font-family: var(--font-score);
+}
+
+.demo-alm-stat-label {
+  font-size: var(--fs-xs);
+  color: var(--almanack-text-muted);
+  margin-top: 3px;
+}
+
+/* ── Feature card ──────────────────────────────────────────── */
+
+.demo-feature-card {
+  width: 100%;
+  max-width: 640px;
+  animation: demo-fade-up 0.4s ease-out both;
+}
+
+.demo-fc-headline {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.demo-fc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 500px) {
+  .demo-fc-grid { grid-template-columns: 1fr; }
+}
+
+.demo-fc-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.demo-fc-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.demo-fc-title {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.demo-fc-desc {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
