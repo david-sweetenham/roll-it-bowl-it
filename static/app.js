@@ -869,6 +869,8 @@ const MatchUI = {
   _pendingRollModeSwitch: null,     // queued mode switch to apply after current ball
   _dismissedSuggestions:  [],       // suggestion keys dismissed this innings
   _storyState:            { key: '', primaryTone: 'neutral', alertedKey: '' },
+  _liveWagonShots:        [],       // recent shot lines for the mini live wagon wheel
+  _liveWagonInningsId:    null,     // current innings being shown on the mini wheel
 };
 
 // ── DiceState Machine ─────────────────────────────────────────────────────────
@@ -1215,6 +1217,12 @@ function updateLiveView(state) {
 
   const inn    = state.current_innings;
   const match  = state.match || AppState.activeMatch;
+
+  if (!inn || MatchUI._liveWagonInningsId !== state.current_innings_id) {
+    MatchUI._liveWagonInningsId = state.current_innings_id || null;
+    MatchUI._liveWagonShots = [];
+  }
+  renderLiveWagonWheel();
 
   // Scoreboard
   if (inn) {
@@ -1599,6 +1607,165 @@ function getCurrentMatchScoringMode() {
     || getDefaultScoringMode();
 }
 
+function _liveWagonCanvas() {
+  const canvas = document.getElementById('canvas-live-wagon');
+  return canvas ? { canvas, ctx: canvas.getContext('2d') } : null;
+}
+
+function _drawLiveWagonBase(ctx, W, H) {
+  const cx = W / 2;
+  const cy = H / 2;
+  const boundaryR = Math.min(W, H) * 0.42;
+  const circleR = boundaryR * 0.62;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1e0b';
+  ctx.fillRect(0, 0, W, H);
+  ctx.beginPath();
+  ctx.arc(cx, cy, boundaryR, 0, Math.PI * 2);
+  ctx.fillStyle = '#102810';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, circleR, 0, Math.PI * 2);
+  ctx.fillStyle = '#143114';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, boundaryR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+  ctx.save();
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, circleR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1.1;
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = 'rgba(190,155,80,0.22)';
+  ctx.fillRect(cx - 5, cy - 34, 10, 68);
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fill();
+}
+
+function _wagonOutcomeColour(outcomeType) {
+  return {
+    single: 'rgba(100,200,255,0.78)',
+    two: 'rgba(100,200,255,0.88)',
+    three: 'rgba(255,200,100,0.88)',
+    four: 'rgba(100,255,100,1.00)',
+    six: 'rgba(255,215,0,1.00)',
+    wicket: 'rgba(255,60,60,0.92)',
+    dot: 'rgba(255,255,255,0.32)',
+  }[outcomeType] || 'rgba(180,220,255,0.55)';
+}
+
+function _wagonOutcomeLength(outcomeType, boundaryR) {
+  return {
+    dot: 20,
+    single: 34,
+    two: 52,
+    three: 66,
+    four: boundaryR,
+    six: boundaryR + 18,
+    wicket: 40,
+  }[outcomeType] ?? 34;
+}
+
+function renderLiveWagonWheel() {
+  const c = _liveWagonCanvas();
+  if (!c) return;
+  const { canvas, ctx } = c;
+  const W = canvas.width;
+  const H = canvas.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const boundaryR = Math.min(W, H) * 0.42;
+  _drawLiveWagonBase(ctx, W, H);
+
+  for (const shot of MatchUI._liveWagonShots.slice(-10)) {
+    if (shot.shot_angle == null) continue;
+    const rad = shot.shot_angle * Math.PI / 180;
+    const dx = -Math.sin(rad);
+    const dy = -Math.cos(rad);
+    const len = _wagonOutcomeLength(shot.outcome_type, boundaryR);
+    const ex = cx + dx * len;
+    const ey = cy + dy * len;
+    const col = _wagonOutcomeColour(shot.outcome_type);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = (shot.outcome_type === 'four' || shot.outcome_type === 'six' || shot.outcome_type === 'wicket') ? 2.4 : 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ex, ey, shot.outcome_type === 'wicket' ? 4 : 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+  }
+}
+
+function animateLiveWagonShot(delivery) {
+  if (!delivery || delivery.shot_angle == null) {
+    renderLiveWagonWheel();
+    return;
+  }
+  const c = _liveWagonCanvas();
+  if (!c) return;
+  const { canvas, ctx } = c;
+  const W = canvas.width;
+  const H = canvas.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const boundaryR = Math.min(W, H) * 0.42;
+  const rad = delivery.shot_angle * Math.PI / 180;
+  const dx = -Math.sin(rad);
+  const dy = -Math.cos(rad);
+  const len = _wagonOutcomeLength(delivery.outcome_type, boundaryR);
+  const ex = cx + dx * len;
+  const ey = cy + dy * len;
+  const col = _wagonOutcomeColour(delivery.outcome_type);
+  const startMs = performance.now();
+  const duration = animMs(AppState.broadcastMode ? 850 : 520, AppState.broadcastMode ? 420 : 260, 0);
+
+  const frame = now => {
+    renderLiveWagonWheel();
+    if (duration === 0) {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ex, ey, delivery.outcome_type === 'wicket' ? 4 : 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      return;
+    }
+    const p = Math.min(1, (now - startMs) / duration);
+    const mx = cx + (ex - cx) * p;
+    const my = cy + (ey - cy) * p;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(mx, my);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = (delivery.outcome_type === 'four' || delivery.outcome_type === 'six' || delivery.outcome_type === 'wicket') ? 2.4 : 1.5;
+    ctx.stroke();
+    if (p >= 1) {
+      ctx.beginPath();
+      ctx.arc(ex, ey, delivery.outcome_type === 'wicket' ? 4 : 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      return;
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
 function updateHowzatLegend(scoringMode = getCurrentMatchScoringMode()) {
   const mode = scoringMode === 'classic' ? 'classic' : 'modern';
   const modeEl = document.getElementById('howzat-legend-mode');
@@ -1855,6 +2022,17 @@ async function _completeBall(res, delivery) {
       updateLiveView(fresh);
       _drawInningsArcFromState(fresh);
     }
+  }
+
+  if (delivery.shot_angle != null && !['wide', 'no_ball', 'bye', 'leg_bye'].includes(delivery.outcome_type)) {
+    MatchUI._liveWagonShots.push({
+      shot_angle: delivery.shot_angle,
+      outcome_type: delivery.outcome_type,
+    });
+    MatchUI._liveWagonShots = MatchUI._liveWagonShots.slice(-10);
+    animateLiveWagonShot(delivery);
+  } else {
+    renderLiveWagonWheel();
   }
 
   // Queue broadcast graphics (fire-and-forget — never blocks Roll button)
