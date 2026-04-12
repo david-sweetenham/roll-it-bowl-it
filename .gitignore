@@ -1,0 +1,38 @@
+# Personal config and secrets
+config_dev.py
+
+# Database (contains match/player data — never commit)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Build artefacts
+dist/
+build/
+*.spec.bak
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local settings
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

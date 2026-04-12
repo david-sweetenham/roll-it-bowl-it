@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roll It &amp; Bowl It — Dice Cricket</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav id="main-nav">
+    <div class="nav-logo">
+      <span class="nav-logo-icon">🏏</span>
+      <span class="nav-logo-text">Roll It &amp; Bowl It</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="#" class="nav-link" data-screen="home">Home</a></li>
+      <li><a href="#" class="nav-link" data-screen="play">Play</a></li>
+      <li><a href="#" class="nav-link" data-screen="teams">Teams</a></li>
+      <li><a href="#" class="nav-link" data-screen="venues">Venues</a></li>
+      <li><a href="#" class="nav-link" data-screen="almanack">Almanack</a></li>
+      <li><a href="#" class="nav-link" data-screen="series">Series</a></li>
+      <li><a href="#" class="nav-link" data-screen="world">World</a></li>
+      <li><a href="#" class="nav-link" data-screen="journal">Journal</a></li>
+    </ul>
+    <div class="nav-controls">
+      <button id="btn-broadcast" class="nav-btn" title="Toggle Broadcast Mode (B)">📺 Broadcast<span class="kbd-hint">[B]</span></button>
+      <button id="btn-sound" class="nav-btn active" title="Toggle Sound (S)">🔊 Sound<span class="kbd-hint">[S]</span></button>
+      <button id="btn-darkmode" class="nav-btn" title="Toggle Dark/Light Mode (D)">☀️ Light<span class="kbd-hint">[D]</span></button>
+      <button id="btn-settings" class="nav-btn" title="Settings">⚙️</button>
+    </div>
+  </nav>
+
+  <!-- API LOADING BAR -->
+  <div id="api-loading-bar" class="hidden"></div>
+
+  <!-- ERROR BANNER -->
+  <div id="error-banner" class="error-banner hidden">
+    <span id="error-message"></span>
+    <button id="error-close" onclick="clearError()">×</button>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <main id="main-content">
+
+    <!-- WELCOME (first-run) -->
+    <div id="screen-welcome" class="screen">
+      <div class="welcome-inner">
+        <div class="welcome-logo">
+          <h1>Roll It &amp; Bowl It</h1>
+          <p class="welcome-subtitle">Dice Cricket Done Digitally</p>
+        </div>
+        <p class="welcome-tagline">A complete cricket universe, decided by dice. Roll for glory.</p>
+        <div class="welcome-cards">
+          <div class="welcome-card" onclick="showScreen('play')">
+            <div class="welcome-card-icon">🏏</div>
+            <h3>Single Match</h3>
+            <p>Pick two teams, choose a format, and play. No setup needed.</p>
+          </div>
+          <div class="welcome-card" onclick="showScreen('series')">
+            <div class="welcome-card-icon">🏆</div>
+            <h3>Series or Tournament</h3>
+            <p>Set up a bilateral series or a full World Cup.</p>
+          </div>
+          <div class="welcome-card" onclick="showScreen('world')">
+            <div class="welcome-card-icon">🌍</div>
+            <h3>Cricket World</h3>
+            <p>Create a living cricket world. Build your own history.</p>
+          </div>
+        </div>
+        <div class="welcome-whatis">
+          <button class="welcome-whatis-toggle" onclick="toggleWelcomeInfo(this)">▸ What is this?</button>
+          <div class="welcome-whatis-body hidden">
+            <p>Roll It &amp; Bowl It is a cricket simulation powered by virtual dice. Every delivery is decided by a multi-stage roll — turning each ball into a moment of genuine suspense.</p>
+            <p>Build your own cricket universe by creating teams, venues, and players. Manage series, tournaments, and world calendars. Every match is recorded in The Almanack — a full statistical archive of every run, wicket, and milestone.</p>
+            <p>Play one match or simulate an entire cricket year. Records fall, careers take shape, and rivalries emerge. The game grows with you.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOME -->
+    <div id="screen-home" class="screen">
+      <div class="screen-inner">
+        <div class="home-hero-compact">
+          <h2 class="home-title-compact">Roll It &amp; Bowl It</h2>
+          <div id="home-status" class="home-status">Connecting...</div>
+        </div>
+        <div id="home-dashboard" class="home-dashboard">
+          <div class="spinner"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PLAY (match setup) -->
+    <div id="screen-play" class="screen">
+      <div class="screen-inner">
+        <h2>New Match</h2>
+        <p class="screen-subtitle">Set up your match below.</p>
+        <div id="play-setup-form">
+          <div class="form-section">
+            <label class="form-label">Format</label>
+            <div class="format-toggles">
+              <button class="format-btn active" data-format="T20">
+                <span class="fmt-name">T20</span>
+                <span class="fmt-overs">20 overs per side</span>
+                <span class="fmt-desc">Fast-paced, big hitting, decided in an evening</span>
+              </button>
+              <button class="format-btn" data-format="ODI">
+                <span class="fmt-name">ODI</span>
+                <span class="fmt-overs">50 overs per side</span>
+                <span class="fmt-desc">The tactical balance of strategy and power</span>
+              </button>
+              <button class="format-btn" data-format="Test">
+                <span class="fmt-name">Test</span>
+                <span class="fmt-overs">2 innings each</span>
+                <span class="fmt-desc">The ultimate examination — declare or fight to the last</span>
+              </button>
+            </div>
+          </div>
+          <div class="form-section two-col">
+            <div>
+              <label class="form-label">Team 1</label>
+              <div id="team1-selector" class="team-selector">Loading teams...</div>
+            </div>
+            <div>
+              <label class="form-label">Team 2</label>
+              <div id="team2-selector" class="team-selector">Loading teams...</div>
+            </div>
+          </div>
+          <div class="form-section">
+            <label class="form-label">Venue</label>
+            <select id="venue-select" class="form-select"><option>Loading venues...</option></select>
+          </div>
+          <div class="form-section">
+            <label class="form-label">Match Date</label>
+            <input type="date" id="match-date" class="form-input">
+          </div>
+          <button id="btn-start-match" class="btn btn-primary btn-large" disabled>Choose Mode →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODE SELECTION MODAL -->
+    <div id="mode-select-modal" class="mode-modal-dim hidden" role="dialog" aria-modal="true">
+      <div class="mode-modal-card">
+        <div class="mode-modal-title">Choose Match Mode</div>
+        <div class="mode-cards">
+          <div class="mode-card" id="mode-card-ai" onclick="selectMode('ai_vs_ai')">
+            <div class="mode-card-icon">🤖</div>
+            <div class="mode-card-title">AI vs AI</div>
+            <div class="mode-card-sub">Spectator</div>
+            <div class="mode-card-desc">Sit back and watch. Perfect for exploring outcomes and recording results.</div>
+            <button class="btn btn-secondary mode-card-btn">Watch</button>
+          </div>
+          <div class="mode-card" id="mode-card-human" onclick="selectMode('human_vs_ai')">
+            <div class="mode-card-icon">🧑</div>
+            <div class="mode-card-title">Single Player</div>
+            <div class="mode-card-sub">Human vs AI</div>
+            <div class="mode-card-desc">You manage one team, AI manages the other. Choose bowlers, declare, and captain your side.</div>
+            <button class="btn btn-primary mode-card-btn">Play</button>
+          </div>
+          <div class="mode-card" id="mode-card-hvh" onclick="selectMode('human_vs_human')">
+            <div class="mode-card-icon">🤝</div>
+            <div class="mode-card-title">Two Player</div>
+            <div class="mode-card-sub">Human vs Human</div>
+            <div class="mode-card-desc">Pass and play. Both captains make all decisions — hand over between innings.</div>
+            <button class="btn btn-primary mode-card-btn">Play</button>
+          </div>
+        </div>
+        <!-- Canon status toggle -->
+        <div class="canon-row" id="mode-canon-row">
+          <span class="canon-row-label">Count in statistics?</span>
+          <div class="canon-row-btns">
+            <button class="canon-btn" id="canon-btn-yes" onclick="setCanonChoice('canon')">Yes &mdash; Canon</button>
+            <button class="canon-btn canon-btn-active" id="canon-btn-no" onclick="setCanonChoice('exhibition')">No &mdash; Exhibition</button>
+          </div>
+        </div>
+        <button class="btn btn-ghost mode-modal-cancel" onclick="closeModeModal()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- HUMAN TEAM CHOICE (shown for Human vs AI) -->
+    <div id="human-team-modal" class="mode-modal-dim hidden" role="dialog" aria-modal="true">
+      <div class="mode-modal-card mode-modal-card--narrow">
+        <div class="mode-modal-title">Which team do you want to captain?</div>
+        <div class="mode-team-choice">
+          <button class="btn btn-secondary btn-large mode-team-btn" id="btn-mode-team1" onclick="confirmHumanTeam(1)"></button>
+          <button class="btn btn-secondary btn-large mode-team-btn" id="btn-mode-team2" onclick="confirmHumanTeam(2)"></button>
+        </div>
+        <button class="btn btn-ghost" style="margin-top:16px" onclick="backToModeSelect()">← Back</button>
+      </div>
+    </div>
+
+    <!-- BOWLING CHANGE PANEL -->
+    <div id="bowling-change-dim" class="mode-modal-dim hidden">
+      <div class="bowling-panel">
+        <div class="bowling-panel-header">
+          <div class="bowling-panel-title" id="bowling-panel-title">Choose Bowler</div>
+          <div class="bowling-panel-sub" id="bowling-panel-sub"></div>
+        </div>
+        <div id="bowling-panel-list" class="bowling-panel-list"></div>
+        <div class="bowling-panel-footer">
+          <button class="btn btn-secondary" onclick="bowlingPanelAiChoose()">🤖 Let AI Decide</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- HANDOVER CARD (Human vs Human between innings) -->
+    <div id="handover-dim" class="mode-modal-dim hidden">
+      <div class="handover-card">
+        <div class="handover-label">INNINGS BREAK</div>
+        <div id="handover-innings-text" class="handover-innings-text"></div>
+        <div id="handover-target-text" class="handover-target-text"></div>
+        <div class="handover-instruction">Hand the device to the</div>
+        <div id="handover-team-name" class="handover-team-name"></div>
+        <div class="handover-instruction">captain</div>
+        <button class="btn btn-primary btn-large handover-btn" id="btn-handover-ready" onclick="closeHandoverCard()"></button>
+      </div>
+    </div>
+
+    <!-- MATCH (live play) -->
+    <div id="screen-match" class="screen">
+
+      <!-- TOSS SUB-SCREEN -->
+      <div id="match-toss-screen" class="match-sub hidden">
+        <div class="toss-card">
+          <div id="toss-title" class="toss-title">The Toss</div>
+          <div class="toss-teams">
+            <div id="toss-team1" class="toss-team"></div>
+            <div class="toss-vs">vs</div>
+            <div id="toss-team2" class="toss-team"></div>
+          </div>
+          <div id="toss-coin" class="toss-coin">
+            <div class="coin-inner">
+              <div class="coin-face coin-bat"><span class="coin-emoji">🏏</span><span class="coin-label">BAT</span></div>
+              <div class="coin-face coin-ball">
+                <svg class="coin-cricket-ball" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+                  <!-- Ball body -->
+                  <circle cx="28" cy="28" r="26" fill="#cc1a00"/>
+                  <circle cx="28" cy="28" r="26" fill="none" stroke="#881100" stroke-width="1.5"/>
+                  <!-- Equatorial seam: S-curve running left-to-right through the centre -->
+                  <path d="M 2 28 C 12 22, 22 22, 28 28 C 34 34, 44 34, 54 28"
+                        fill="none" stroke="white" stroke-width="2.1" stroke-linecap="round"/>
+                  <!-- Left half — seam curves upward. Stitching perpendicular to seam. -->
+                  <!-- above seam -->
+                  <line x1="10" y1="21" x2="10" y2="24" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="17" y1="19" x2="17" y2="22" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="23" y1="20" x2="23" y2="23" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <!-- below seam -->
+                  <line x1="10" y1="27" x2="10" y2="30" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="17" y1="25" x2="17" y2="28" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="23" y1="25" x2="23" y2="28" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <!-- Right half — seam curves downward. -->
+                  <!-- above seam -->
+                  <line x1="33" y1="28" x2="33" y2="31" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="39" y1="29" x2="39" y2="32" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="46" y1="27" x2="46" y2="30" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <!-- below seam -->
+                  <line x1="33" y1="33" x2="33" y2="36" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="39" y1="34" x2="39" y2="37" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="46" y1="32" x2="46" y2="35" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+                <span class="coin-label">BALL</span>
+              </div>
+            </div>
+          </div>
+          <button id="btn-flip-coin" class="btn btn-primary btn-large">Flip Coin</button>
+          <div id="toss-call-result" class="toss-call-result hidden"></div>
+          <div id="toss-result" class="toss-result hidden"></div>
+          <div id="toss-choice-area" class="toss-choice-area hidden">
+            <p id="toss-winner-line" class="toss-winner-line"></p>
+            <div class="toss-choices">
+              <button class="btn btn-secondary" onclick="confirmToss('bat')">🏏 Bat First</button>
+              <button class="btn btn-secondary" onclick="confirmToss('field')">🔴 Field First</button>
+            </div>
+          </div>
+          <div id="toss-lpc" class="toss-lpc hidden">Let's play cricket!</div>
+        </div>
+      </div>
+
+      <!-- INNINGS TRANSITION SUB-SCREEN -->
+      <div id="match-innings-transition" class="match-sub hidden">
+        <div class="innings-transition-card">
+          <div id="innings-transition-text" class="innings-transition-text"></div>
+          <div id="innings-transition-target" class="innings-transition-target"></div>
+        </div>
+      </div>
+
+      <!-- RESULT SUB-SCREEN -->
+      <div id="match-result-screen" class="match-sub hidden">
+        <div class="result-card">
+          <div id="result-headline" class="result-headline"></div>
+          <div id="result-subline" class="result-subline"></div>
+          <div id="result-innings-summary" class="result-innings-summary"></div>
+          <div id="result-records" class="result-records hidden"></div>
+          <div class="result-form">
+            <label class="form-label">Player of the Match</label>
+            <select id="result-pom" class="form-select"></select>
+            <label class="form-label mt-16">Match Notes</label>
+            <textarea id="result-notes" class="form-input" rows="4" placeholder="Your match report..."></textarea>
+            <button id="btn-suggest-prompt" class="btn-suggest-prompt" onclick="suggestJournalPrompt()">💡 Suggest a prompt</button>
+            <button id="btn-save-almanack" class="btn btn-primary btn-large mt-16" onclick="saveMatchToAlmanack()">
+              📖 Save to The Almanack
+            </button>
+            <div id="result-saved-msg" class="result-saved-msg hidden">
+              <span class="result-saved-gold">✓ Saved to The Dice Cricketers' Almanack</span>
+            </div>
+            <div id="result-nav-btns" class="result-nav-btns hidden">
+              <button class="btn btn-primary" onclick="showScreen('play')">Play Another</button>
+              <button class="btn btn-secondary" onclick="showResultScorecard()">Full Scorecard</button>
+              <button class="btn btn-secondary" onclick="showScreen('almanack')">Browse Almanack</button>
+              <button class="btn btn-secondary" onclick="showScreen('home')">Home</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LIVE PLAY VIEW -->
+      <div id="match-live" class="hidden">
+
+        <!-- Top bar -->
+        <div id="match-topbar" class="match-topbar">
+          <span id="match-title" class="match-title"></span>
+          <span id="match-context" class="match-context"></span>
+          <span id="match-mode-badge" class="match-mode-badge hidden"></span>
+          <div id="roll-mode-toggle" class="roll-mode-toggle hidden">
+            <span class="roll-mode-label">Rolling:</span>
+            <button id="btn-mode-auto" class="roll-mode-btn active" onclick="setRollMode('auto')" title="All dice resolve automatically">⚡ Auto</button>
+            <button id="btn-mode-manual" class="roll-mode-btn" onclick="setRollMode('manual')" title="Press each die roll separately — feel every appeal">🎲 Manual</button>
+            <span id="roll-mode-forced-label" class="roll-mode-forced hidden">Auto only in spectator mode</span>
+          </div>
+        </div>
+
+        <!-- Tension suggestion banner -->
+        <div id="tension-suggestion" class="tension-suggestion hidden">
+          <span id="tension-suggestion-text" onclick="tensionSuggestionClick()"></span>
+          <button class="tension-suggestion-dismiss" onclick="dismissTensionSuggestion()" title="Dismiss">×</button>
+        </div>
+
+        <!-- Human vs Human: current team banner -->
+        <div id="hvh-team-banner" class="hvh-team-banner hidden"></div>
+
+        <!-- Human vs AI: AI indicator -->
+        <div id="ai-indicator" class="ai-indicator hidden"></div>
+
+        <!-- AI vs AI: playback controls -->
+        <div id="ai-playback-controls" class="ai-playback-controls hidden">
+          <div class="ai-pb-btns">
+            <button class="btn btn-secondary btn-sm" onclick="aiPlaybackPause()" id="btn-ai-pause">⏸ Pause</button>
+            <button class="btn btn-secondary btn-sm hidden" onclick="aiPlaybackResume()" id="btn-ai-resume">▶ Resume</button>
+            <button class="btn btn-secondary btn-sm" onclick="simulateTo('over')">⏭ Skip Over</button>
+            <button class="btn btn-secondary btn-sm" onclick="simulateTo('innings')">⏩ Fast Sim</button>
+          </div>
+          <div class="ai-pb-speed">
+            Speed:
+            <button class="ai-speed-btn" data-speed="slow" onclick="setAiSpeed('slow')">Slow</button>
+            <button class="ai-speed-btn active" data-speed="normal" onclick="setAiSpeed('normal')">Normal</button>
+            <button class="ai-speed-btn" data-speed="fast" onclick="setAiSpeed('fast')">Fast</button>
+            <button class="ai-speed-btn" data-speed="instant" onclick="setAiSpeed('instant')">Instant</button>
+          </div>
+        </div>
+
+        <!-- Scoreboard -->
+        <div id="match-scoreboard" class="match-scoreboard">
+          <div class="scoreboard-main">
+            <span id="sb-team" class="sb-team"></span>
+            <span id="sb-score" class="sb-score">0/0</span>
+            <span id="sb-overs" class="sb-overs">0.0 ov</span>
+            <span id="sb-rr" class="sb-rr">RR: —</span>
+          </div>
+          <div id="sb-chase" class="sb-chase hidden">
+            <span id="sb-target"></span>
+            <span id="sb-required"></span>
+          </div>
+          <div class="sb-arc-wrap">
+            <canvas id="canvas-innings-arc" width="200" height="120"></canvas>
+          </div>
+        </div>
+
+        <!-- Main play area: batters/bowler | dice | commentary -->
+        <div class="match-play-area">
+
+          <!-- Left: batters + bowler -->
+          <div class="match-players-panel">
+            <div class="players-label">BATTING</div>
+            <div id="batter1-row" class="batter-row"></div>
+            <div id="batter2-row" class="batter-row"></div>
+            <div class="players-label mt-16">BOWLING</div>
+            <div id="bowler-row" class="bowler-row"></div>
+          </div>
+
+          <!-- Centre: die + buttons -->
+          <div class="match-dice-panel">
+
+            <!-- Free hit banner -->
+            <div id="free-hit-banner" class="free-hit-banner hidden">⚡ FREE HIT — CANNOT BE OUT!</div>
+
+            <!-- Manual HOWZAT display (shown during HOWZAT state) -->
+            <div id="manual-howzat-display" class="manual-howzat-display hidden">
+              <div id="howzat-title" class="howzat-title">HOWZAT!</div>
+              <div id="howzat-appeal-team" class="howzat-appeal-team"></div>
+            </div>
+
+            <div id="die-face" class="die-face" data-face="0">
+              <div class="die-pips"></div>
+            </div>
+            <div id="die-stage-label" class="die-stage-label"></div>
+
+            <!-- Standard action buttons -->
+            <div class="dice-btns">
+              <button id="btn-roll" class="btn btn-primary btn-large" onclick="rollBall()">🎲 Roll Ball<span class="kbd-hint">[Space]</span></button>
+              <button id="btn-fast-sim" class="btn btn-secondary" onclick="fastSimMatch()">⚡ Fast Sim<span class="kbd-hint">[F]</span></button>
+              <button id="btn-declare" class="btn btn-secondary hidden" onclick="declareInnings()">📋 Declare</button>
+              <button id="btn-complete-match" class="btn btn-gold hidden" onclick="completeMatchManual()">🏁 Complete Match</button>
+            </div>
+
+            <!-- Manual mode contextual action buttons -->
+            <div id="manual-action-btns" class="manual-action-btns hidden">
+              <button id="btn-appeal" class="btn btn-howzat hidden" onclick="manualAppeal()">📢 Appeal!<span class="kbd-hint">[A]</span></button>
+              <button id="btn-continue-notout" class="btn btn-success hidden" onclick="manualContinue()">▶ Continue<span class="kbd-hint">[C]</span></button>
+              <button id="btn-dismissal" class="btn btn-danger hidden" onclick="manualDismissal()">🏏 Dismissal<span class="kbd-hint">[D]</span></button>
+              <button id="btn-caught-where" class="btn btn-warning hidden" onclick="manualCaughtWhere()">🫴 Caught Where?</button>
+            </div>
+            <div class="sim-btn-group" id="sim-controls">
+              <span class="sim-btn-label">Sim to:</span>
+              <button class="btn btn-sim" onclick="simulateTo('wicket')" title="Simulate to next wicket">Wicket</button>
+              <button class="btn btn-sim" onclick="simulateTo('over')" title="Simulate to end of over">Over</button>
+              <button class="btn btn-sim" onclick="simulateTo('session')" title="Simulate to end of session">Session</button>
+              <button class="btn btn-sim" id="btn-sim-day" onclick="simulateTo('day')" title="Simulate to end of day (Test only)">Day</button>
+              <button class="btn btn-sim" onclick="simulateTo('innings')" title="Simulate to end of innings">Innings</button>
+              <button class="btn btn-sim" onclick="simulateTo('match')" title="Simulate entire remaining match">Match</button>
+            </div>
+          </div>
+
+          <!-- Right: commentary -->
+          <div class="match-commentary-panel">
+            <div class="commentary-header">COMMENTARY</div>
+            <div id="commentary-feed" class="commentary-feed"></div>
+          </div>
+
+        </div>
+
+        <!-- Tabs -->
+        <div class="match-tabs-area">
+          <div class="match-tabs">
+            <button class="tab-btn active" data-tab="scorecard" onclick="switchMatchTab('scorecard')">Scorecard</button>
+            <button class="tab-btn" data-tab="wagon-wheel" onclick="switchMatchTab('wagon-wheel')">Wagon Wheel</button>
+            <button class="tab-btn" data-tab="over-grid" onclick="switchMatchTab('over-grid')">Over Grid</button>
+          </div>
+          <div id="match-tab-scorecard" class="match-tab-content">
+            <div id="scorecard-content">Select an innings to view scorecard.</div>
+            <div id="canvas-post-match" class="canvas-post-match hidden">
+              <div class="canvas-section-label">Manhattan — Runs Per Over</div>
+              <div class="canvas-wrap"><canvas id="canvas-manhattan"></canvas></div>
+              <div class="canvas-section-label" style="margin-top:16px">Run Rate</div>
+              <div class="canvas-wrap"><canvas id="canvas-runrate"></canvas></div>
+            </div>
+          </div>
+          <div id="match-tab-wagon-wheel" class="match-tab-content hidden">
+            <div class="canvas-wrap canvas-square">
+              <canvas id="canvas-wagon-wheel" width="400" height="400"></canvas>
+            </div>
+          </div>
+          <div id="match-tab-over-grid" class="match-tab-content hidden">
+            <div class="canvas-wrap canvas-scroll">
+              <canvas id="canvas-over-grid"></canvas>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /#match-live -->
+
+    </div><!-- /#screen-match -->
+
+    <!-- TEAMS -->
+    <div id="screen-teams" class="screen">
+      <div class="screen-inner">
+        <h2>Teams</h2>
+        <p class="screen-subtitle">All international squads.</p>
+        <div id="teams-list" class="teams-grid">Loading...</div>
+      </div>
+    </div>
+
+    <!-- TEAM DETAIL -->
+    <div id="screen-team-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('teams')">← Back to Teams</button>
+
+        <div class="profile-header">
+          <div class="team-badge-circle" id="team-detail-badge">T</div>
+          <div class="profile-header-info">
+            <h2 id="team-detail-name">Team Profile</h2>
+            <div class="profile-meta" id="team-detail-meta"></div>
+          </div>
+        </div>
+
+        <div id="team-format-records" style="margin-top:16px"></div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>Head to Head</h3>
+          <div class="h2h-controls">
+            vs <select id="h2h-opponent-select" onchange="loadH2H()">
+              <option value="">Select opponent…</option>
+            </select>
+          </div>
+          <div id="h2h-results" style="margin-top:10px"></div>
+        </div>
+
+        <div class="performers-grid" style="margin-top:16px">
+          <div class="card">
+            <h3>Top Run Scorers</h3>
+            <div id="team-top-scorers"></div>
+          </div>
+          <div class="card">
+            <h3>Top Wicket Takers</h3>
+            <div id="team-top-bowlers"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>Squad</h3>
+          <div id="team-squad-table"></div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>Recent Results</h3>
+          <div id="team-recent-results"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PLAYER DETAIL -->
+    <div id="screen-player-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" id="player-detail-back" onclick="showScreen('teams')">← Back</button>
+
+        <div class="profile-header">
+          <div class="profile-badge" id="player-badge">P</div>
+          <div class="profile-header-info">
+            <h2 id="player-detail-name">Player Profile</h2>
+            <div class="profile-meta" id="player-detail-meta"></div>
+            <div class="profile-ratings" id="player-detail-ratings"></div>
+          </div>
+        </div>
+
+        <div class="stat-cards" id="player-career-cards" style="margin-top:16px"></div>
+
+        <div class="tab-bar" id="player-format-tabs" style="margin-top:16px">
+          <button class="tab-btn active" onclick="switchPlayerTab('all',this)">All</button>
+          <button class="tab-btn" onclick="switchPlayerTab('Test',this)">Test</button>
+          <button class="tab-btn" onclick="switchPlayerTab('ODI',this)">ODI</button>
+          <button class="tab-btn" onclick="switchPlayerTab('T20',this)">T20</button>
+        </div>
+        <div id="player-format-stats" style="margin-top:10px"></div>
+
+        <div class="player-split-row" style="margin-top:16px">
+          <div class="wagon-wheel-wrap card">
+            <h3 style="margin-top:0">Wagon Wheel</h3>
+            <canvas id="wagon-wheel-canvas" width="300" height="300"></canvas>
+            <div class="wagon-wheel-legend">
+              <span class="ww-dot ww-dot-dot"></span>Dot &nbsp;
+              <span class="ww-dot ww-dot-single"></span>1–3 &nbsp;
+              <span class="ww-dot ww-dot-four"></span>4 &nbsp;
+              <span class="ww-dot ww-dot-six"></span>6
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <h3>Batting Innings</h3>
+          <div id="player-innings-table"></div>
+          <div class="pagination-wrap" id="player-innings-pages"></div>
+        </div>
+
+        <div id="player-bowling-section" class="hidden" style="margin-top:16px">
+          <h3>Bowling Spells</h3>
+          <div id="player-bowling-table"></div>
+          <div class="pagination-wrap" id="player-bowling-pages"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VENUES -->
+    <div id="screen-venues" class="screen">
+      <div class="screen-inner">
+        <h2>Venues</h2>
+        <p class="screen-subtitle">Grounds around the world.</p>
+        <div id="venues-list">Loading...</div>
+      </div>
+    </div>
+
+    <!-- VENUE DETAIL -->
+    <div id="screen-venue-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('venues')">← Back to Venues</button>
+
+        <div class="profile-header">
+          <div class="profile-badge profile-badge-venue">V</div>
+          <div class="profile-header-info">
+            <h2 id="venue-detail-name">Venue Profile</h2>
+            <div class="profile-meta" id="venue-detail-meta"></div>
+          </div>
+        </div>
+
+        <div class="stat-cards" id="venue-stat-cards" style="margin-top:16px"></div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>Average 1st Innings Score</h3>
+          <div id="venue-avg-first-innings"></div>
+        </div>
+
+        <div class="venue-records-grid" id="venue-records" style="margin-top:16px"></div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>Recent Matches</h3>
+          <div id="venue-recent-matches"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ALMANACK -->
+    <div id="screen-almanack" class="screen">
+      <div class="screen-inner">
+        <h2>The Dice Cricketers' Almanack</h2>
+        <p class="screen-subtitle">The complete statistical record of every match ever played.</p>
+
+        <!-- Search -->
+        <div class="alm-search-wrap">
+          <input id="alm-search-input" type="text" class="alm-search-input"
+                 placeholder="Search players, teams, matches…"
+                 oninput="almSearchDebounce(this.value)" autocomplete="off" />
+          <div id="alm-search-dropdown" class="alm-search-dropdown hidden"></div>
+        </div>
+
+        <!-- Tab bar -->
+        <div class="tab-bar" id="alm-tab-bar">
+          <button class="tab-btn active" onclick="switchAlmTab('batting',this)">Batting</button>
+          <button class="tab-btn" onclick="switchAlmTab('bowling',this)">Bowling</button>
+          <button class="tab-btn" onclick="switchAlmTab('allrounders',this)">All-rounders</button>
+          <button class="tab-btn" onclick="switchAlmTab('teams',this)">Teams</button>
+          <button class="tab-btn" onclick="switchAlmTab('matches',this)">Matches</button>
+          <button class="tab-btn" onclick="switchAlmTab('partnerships',this)">Partnerships</button>
+          <button class="tab-btn" onclick="switchAlmTab('honours',this)">Honours</button>
+          <button class="tab-btn alm-manage-tab" onclick="switchAlmTab('manage',this)">Manage</button>
+        </div>
+
+        <!-- Collapsible filters (hidden for honours tab) -->
+        <div id="alm-filter-panel" class="alm-filter-panel">
+          <div class="alm-filter-header" onclick="toggleAlmFilters()">
+            <span>Filters</span>
+            <span id="alm-filter-chevron" class="alm-chevron">▸</span>
+          </div>
+          <div id="alm-filter-body" class="alm-filter-body hidden">
+            <div class="alm-filter-grid">
+              <div class="alm-filter-cell">
+                <label>Format</label>
+                <div class="alm-fmt-toggles">
+                  <button class="alm-fmt-btn active" data-fmt="Test"   onclick="almToggleFmt(this)">Test</button>
+                  <button class="alm-fmt-btn active" data-fmt="ODI"    onclick="almToggleFmt(this)">ODI</button>
+                  <button class="alm-fmt-btn active" data-fmt="T20"    onclick="almToggleFmt(this)">T20</button>
+                </div>
+              </div>
+              <div class="alm-filter-cell">
+                <label>Mode</label>
+                <div class="alm-fmt-toggles">
+                  <button class="alm-fmt-btn alm-mode-btn active" data-mode="ai_vs_ai"        onclick="almToggleMode(this)">Auto</button>
+                  <button class="alm-fmt-btn alm-mode-btn active" data-mode="human_vs_ai"     onclick="almToggleMode(this)">Solo</button>
+                  <button class="alm-fmt-btn alm-mode-btn active" data-mode="human_vs_human"  onclick="almToggleMode(this)">2P</button>
+                </div>
+              </div>
+              <div class="alm-filter-cell">
+                <label>Team</label>
+                <select id="alm-f-team">
+                  <option value="">All teams</option>
+                </select>
+              </div>
+              <div class="alm-filter-cell">
+                <label>Player name</label>
+                <input id="alm-f-player" type="text" placeholder="Contains…"
+                       onkeydown="if(event.key==='Enter') applyAlmFilters()" />
+              </div>
+              <div class="alm-filter-cell">
+                <label>Min innings</label>
+                <input id="alm-f-mininnings" type="number" min="1" placeholder="e.g. 5" />
+              </div>
+              <div class="alm-filter-cell">
+                <label>Date from</label>
+                <input id="alm-f-datefrom" type="date" />
+              </div>
+              <div class="alm-filter-cell">
+                <label>Date to</label>
+                <input id="alm-f-dateto" type="date" />
+              </div>
+            </div>
+            <div class="alm-filter-actions">
+              <button class="btn btn-primary" onclick="applyAlmFilters()">Apply</button>
+              <button class="btn btn-secondary" onclick="resetAlmFilters()">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Toolbar: count + pagination + export -->
+        <div class="alm-toolbar" id="alm-toolbar">
+          <span id="alm-count-label" class="alm-count"></span>
+          <div class="alm-toolbar-right">
+            <button class="btn btn-sm btn-secondary" id="alm-prev"
+                    onclick="almPage(-1)" disabled>← Prev</button>
+            <button class="btn btn-sm btn-secondary" id="alm-next"
+                    onclick="almPage(1)">Next →</button>
+            <button class="btn btn-sm btn-secondary" onclick="exportAlmCSV()"
+                    id="alm-export-btn" title="Download CSV">⬇ CSV</button>
+          </div>
+        </div>
+
+        <!-- Table / content area -->
+        <div id="alm-table-area">
+          <p class="empty-state">Play some matches first to build your Almanack.</p>
+        </div>
+
+        <!-- Manage tab area (hidden unless manage tab active) -->
+        <div id="alm-manage-area" class="hidden">
+
+          <!-- Manage filter bar -->
+          <div class="manage-filter-bar">
+            <select id="manage-status-filter" class="form-select manage-select" onchange="loadAlmManage()">
+              <option value="">All statuses</option>
+              <option value="canon">Canon only</option>
+              <option value="exhibition">Exhibition only</option>
+              <option value="deleted">Deleted only</option>
+            </select>
+            <select id="manage-format-filter" class="form-select manage-select" onchange="loadAlmManage()">
+              <option value="">All formats</option>
+              <option value="Test">Test</option>
+              <option value="ODI">ODI</option>
+              <option value="T20">T20</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="loadAlmManage()">Refresh</button>
+          </div>
+
+          <!-- Bulk action bar (appears when rows checked) -->
+          <div id="manage-bulk-bar" class="manage-bulk-bar hidden">
+            <span id="manage-bulk-count" class="manage-bulk-count">0 selected</span>
+            <button class="btn btn-sm btn-secondary" onclick="almManageBulkAction('canon')">Set Canon</button>
+            <button class="btn btn-sm" style="background:rgba(251,191,36,.2);color:#fbbf24;border:1px solid rgba(251,191,36,.4)" onclick="almManageBulkAction('exhibition')">Set Exhibition</button>
+            <button class="btn btn-sm btn-danger" onclick="almManageBulkAction('deleted')">Delete</button>
+            <button class="btn btn-sm btn-ghost" onclick="almManageClearSelection()">Clear</button>
+          </div>
+
+          <!-- Match management table -->
+          <div id="manage-table-wrap"></div>
+
+          <!-- Audit log panel -->
+          <div class="audit-panel">
+            <div class="audit-panel-header" onclick="toggleAuditLog()">
+              <span>Audit Log</span>
+              <span id="audit-chevron" class="alm-chevron">▸</span>
+            </div>
+            <div id="audit-log-body" class="hidden">
+              <div id="audit-log-content"><p class="text-muted" style="padding:12px">Loading…</p></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- EDIT RESULT MODAL -->
+    <div id="edit-result-modal" class="mode-modal-dim hidden" role="dialog" aria-modal="true">
+      <div class="mode-modal-card mode-modal-card--narrow">
+        <div class="mode-modal-title">Edit Match Result</div>
+        <div class="edit-result-meta" id="er-match-meta"></div>
+        <div class="er-form">
+          <div class="er-field">
+            <label class="er-label">Result type</label>
+            <select id="er-result-type" class="form-select">
+              <option value="runs">Won by runs</option>
+              <option value="wickets">Won by wickets</option>
+              <option value="draw">Draw</option>
+              <option value="tie">Tie</option>
+              <option value="no_result">No result</option>
+            </select>
+          </div>
+          <div class="er-field" id="er-winner-field">
+            <label class="er-label">Winning team</label>
+            <select id="er-winning-team" class="form-select">
+              <option value="">None</option>
+            </select>
+          </div>
+          <div class="er-field" id="er-margin-field">
+            <label class="er-label">Margin</label>
+            <div style="display:flex;gap:8px">
+              <input type="number" id="er-margin-runs" class="form-input" placeholder="Runs" min="0" style="flex:1">
+              <input type="number" id="er-margin-wickets" class="form-input" placeholder="Wickets" min="0" max="10" style="flex:1">
+            </div>
+          </div>
+          <div class="er-field">
+            <label class="er-label">Player of the Match</label>
+            <select id="er-pom" class="form-select">
+              <option value="">None</option>
+            </select>
+          </div>
+          <div class="er-field">
+            <label class="er-label">Reason / note</label>
+            <input type="text" id="er-note" class="form-input" placeholder="Why are you editing this result?">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="closeEditResultModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveEditResult()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SERIES -->
+    <div id="screen-series" class="screen">
+      <div class="screen-inner">
+        <h2>Series &amp; Tournaments</h2>
+        <p class="screen-subtitle">Bilateral series and multi-team tournaments.</p>
+
+        <div class="series-section-tabs">
+          <button class="tab-btn active" data-stab="series" onclick="switchSeriesTab('series')">Series</button>
+          <button class="tab-btn" data-stab="tournaments" onclick="switchSeriesTab('tournaments')">Tournaments</button>
+        </div>
+
+        <!-- SERIES tab -->
+        <div id="stab-series">
+          <div id="series-list"><div class="spinner"></div></div>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="showSeriesCreateForm()">+ New Series</button>
+
+          <div id="series-create-form" class="card form-card hidden" style="margin-top:16px">
+            <h3>Create Series</h3>
+            <label>Series Name
+              <input type="text" id="sc-name" placeholder="e.g. England vs Australia 2026" />
+            </label>
+            <label>Format
+              <select id="sc-format">
+                <option value="T20">T20</option>
+                <option value="ODI">ODI</option>
+                <option value="Test">Test</option>
+              </select>
+            </label>
+            <label>Team 1
+              <select id="sc-team1"></select>
+            </label>
+            <label>Team 2
+              <select id="sc-team2"></select>
+            </label>
+            <label>Number of Matches
+              <select id="sc-num">
+                <option value="2">2</option>
+                <option value="3" selected>3</option>
+                <option value="5">5</option>
+                <option value="7">7</option>
+              </select>
+            </label>
+            <label>Start Date <input type="date" id="sc-date" /></label>
+            <label>Venues (hold Ctrl/Cmd to select multiple)
+              <select id="sc-venues" multiple size="4"></select>
+            </label>
+            <div class="form-row" style="margin-top:12px">
+              <button class="btn btn-primary" onclick="submitCreateSeries()">Create</button>
+              <button class="btn" onclick="hideSeriesCreateForm()">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TOURNAMENTS tab -->
+        <div id="stab-tournaments" class="hidden">
+          <div id="tournaments-list"><div class="spinner"></div></div>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="showTournamentCreateForm()">+ New Tournament</button>
+
+          <div id="tournament-create-form" class="card form-card hidden" style="margin-top:16px">
+            <h3>Create Tournament</h3>
+            <label>Tournament Name
+              <input type="text" id="tc-name" placeholder="e.g. ICC World Cup 2027" />
+            </label>
+            <label>Type
+              <select id="tc-type" onchange="updateTournamentTeamCount()">
+                <option value="world_cup">World Cup (10 teams, 2 groups)</option>
+                <option value="t20_world_cup">T20 World Cup (8 teams, 2 groups)</option>
+                <option value="tri_series">Tri-Series (3 teams)</option>
+              </select>
+            </label>
+            <label>Format
+              <select id="tc-format">
+                <option value="ODI">ODI</option>
+                <option value="T20">T20</option>
+                <option value="Test">Test</option>
+              </select>
+            </label>
+            <label>Start Date <input type="date" id="tc-date" /></label>
+            <label id="tc-teams-label">Select 10 Teams (hold Ctrl/Cmd)
+              <select id="tc-teams" multiple size="8"></select>
+            </label>
+            <label>Venues (hold Ctrl/Cmd to select multiple)
+              <select id="tc-venues" multiple size="4"></select>
+            </label>
+            <div class="form-row" style="margin-top:12px">
+              <button class="btn btn-primary" onclick="submitCreateTournament()">Create</button>
+              <button class="btn" onclick="hideTournamentCreateForm()">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SERIES DETAIL -->
+    <div id="screen-series-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('series')">← Back to Series</button>
+        <h2 id="series-detail-name">Series Detail</h2>
+        <div id="series-score-banner" class="series-score-banner hidden"></div>
+        <div id="series-fixtures-list"></div>
+      </div>
+    </div>
+
+    <!-- TOURNAMENT DETAIL -->
+    <div id="screen-tournament-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('series')">← Back to Series</button>
+        <h2 id="tournament-detail-name">Tournament Detail</h2>
+        <div id="tournament-stage-badge" class="stage-badge"></div>
+
+        <div id="tournament-standings" style="margin-top:16px"></div>
+
+        <div id="tournament-advance-wrap" class="hidden" style="margin-top:16px">
+          <button class="btn btn-primary" onclick="advanceTournament()">Advance to Next Stage →</button>
+        </div>
+
+        <div id="tournament-bracket" style="margin-top:16px"></div>
+
+        <div id="tournament-fixtures-wrap" style="margin-top:16px">
+          <h3>Fixtures</h3>
+          <div id="tournament-fixtures-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD -->
+    <div id="screen-world" class="screen">
+      <div class="screen-inner">
+        <h2>Cricket World</h2>
+        <p class="screen-subtitle">Create a living cricket universe and simulate the calendar.</p>
+
+        <div id="worlds-list"></div>
+
+        <button class="btn btn-primary" id="btn-show-create-world" onclick="showWorldWizard()">+ Create World</button>
+
+        <!-- 4-step creation wizard -->
+        <div id="world-wizard" class="world-wizard hidden">
+          <div class="wizard-steps" id="wizard-steps-bar">
+            <div class="wizard-step active" id="ws-step-1">1 Name</div>
+            <div class="wizard-step" id="ws-step-2">2 Schedule</div>
+            <div class="wizard-step" id="ws-step-3">3 Teams</div>
+            <div class="wizard-step" id="ws-step-4">4 Create</div>
+          </div>
+
+          <!-- Step 1: Name -->
+          <div id="wizard-page-1" class="wizard-page">
+            <h3>Step 1 — Name your World</h3>
+            <input id="wc-name" type="text" class="form-input" placeholder="e.g. Dynasty 2025" autocomplete="off" />
+            <div class="wizard-nav">
+              <button class="btn btn-secondary" onclick="hideWorldWizard()">Cancel</button>
+              <button class="btn btn-primary" onclick="wizardNext(1)">Next →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Schedule -->
+          <div id="wizard-page-2" class="wizard-page hidden">
+            <h3>Step 2 — Schedule</h3>
+            <label class="form-label">Start Date</label>
+            <input id="wc-start" type="date" class="form-input" value="2025-01-01" />
+            <label class="form-label" style="margin-top:14px">Calendar Density</label>
+            <div class="density-radio-group">
+              <label class="density-opt">
+                <input type="radio" name="wc-density" value="busy" />
+                <span class="density-card">
+                  <strong>Busy</strong>
+                  <small>~2 day gap, packed schedule</small>
+                </span>
+              </label>
+              <label class="density-opt">
+                <input type="radio" name="wc-density" value="moderate" checked />
+                <span class="density-card">
+                  <strong>Moderate</strong>
+                  <small>~4–5 day gap, balanced</small>
+                </span>
+              </label>
+              <label class="density-opt">
+                <input type="radio" name="wc-density" value="relaxed" />
+                <span class="density-card">
+                  <strong>Relaxed</strong>
+                  <small>~7–10 day gap, leisurely</small>
+                </span>
+              </label>
+            </div>
+            <div class="wizard-nav">
+              <button class="btn btn-secondary" onclick="wizardBack(2)">← Back</button>
+              <button class="btn btn-primary" onclick="wizardNext(2)">Next →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Team selection -->
+          <div id="wizard-page-3" class="wizard-page hidden">
+            <h3>Step 3 — Select Teams <span class="text-muted">(min 4)</span></h3>
+            <div class="wizard-team-actions">
+              <button class="btn btn-secondary btn-sm" onclick="wizardSelectAllTeams()">Select All</button>
+              <span id="wizard-team-count" class="text-muted" style="font-size:var(--fs-sm)">0 selected</span>
+            </div>
+            <label class="form-label" style="margin-top:10px">Your Team (optional)</label>
+            <select id="wc-my-team" class="form-input">
+              <option value="">None — AI only</option>
+            </select>
+            <div id="wizard-team-badges" class="wizard-team-grid" style="margin-top:12px"></div>
+            <div class="wizard-nav">
+              <button class="btn btn-secondary" onclick="wizardBack(3)">← Back</button>
+              <button class="btn btn-primary" onclick="wizardNext(3)">Next →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Summary + Create -->
+          <div id="wizard-page-4" class="wizard-page hidden">
+            <h3>Step 4 — Summary</h3>
+            <div id="wizard-summary" class="wizard-summary"></div>
+            <div class="wizard-nav">
+              <button class="btn btn-secondary" onclick="wizardBack(4)">← Back</button>
+              <button class="btn btn-primary" id="wizard-create-btn" onclick="submitWorldWizard()">Create World</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD DETAIL -->
+    <div id="screen-world-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('world')">← Worlds</button>
+        <div class="world-header">
+          <div>
+            <h2 id="wd-name">World</h2>
+            <span id="wd-date-badge" class="stage-badge"></span>
+            <span id="wd-density-badge" class="badge" style="margin-left:6px"></span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="openWorldCalendar()">📅 Full Calendar</button>
+        </div>
+
+        <div class="world-progress" style="margin-top:10px">
+          <span id="wd-done">0 played</span>
+          <div class="world-progress-bar"><div id="wd-progress-fill" class="world-progress-fill"></div></div>
+          <span id="wd-left">0 remaining</span>
+        </div>
+
+        <!-- Sim controls -->
+        <div class="world-sim-controls">
+          <span class="sim-btn-label">Simulate to:</span>
+          <button class="btn btn-sim" onclick="simulateWorld('next_match')">Next Match</button>
+          <button class="btn btn-sim" onclick="simulateWorld('end_of_series')">End of Series</button>
+          <button class="btn btn-sim" onclick="simulateWorld('next_my_match')">Next My Match</button>
+          <input type="date" id="wd-sim-date" class="sim-date-input" />
+          <button class="btn btn-sim" onclick="simulateWorld('date')">Sim to Date</button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tab-bar" style="margin-top:14px">
+          <button class="tab-btn active" onclick="switchWorldTab('overview',this)">Overview</button>
+          <button class="tab-btn" onclick="switchWorldTab('rankings',this)">Rankings</button>
+          <button class="tab-btn" onclick="switchWorldTab('records',this)">Records</button>
+        </div>
+
+        <!-- OVERVIEW TAB -->
+        <div id="wd-tab-overview">
+          <!-- Next fixture card -->
+          <div id="wd-next-fixture" class="next-fixture-card" style="margin-top:12px"></div>
+
+          <!-- Two-column: upcoming fortnight | mini rankings -->
+          <div class="wd-overview-grid" style="margin-top:14px">
+            <div>
+              <h3 style="margin:0 0 8px">Next 2 Weeks</h3>
+              <div id="wd-upcoming-list"></div>
+            </div>
+            <div>
+              <h3 style="margin:0 0 8px">Rankings</h3>
+              <div id="wd-mini-rankings"></div>
+            </div>
+          </div>
+
+          <!-- Recent results -->
+          <div style="margin-top:16px">
+            <h3>Recent Results</h3>
+            <div id="wd-recent-results"></div>
+          </div>
+
+          <!-- World records -->
+          <div style="margin-top:16px">
+            <h3>World Records</h3>
+            <div id="wd-records-overview"></div>
+          </div>
+        </div>
+
+        <!-- RANKINGS TAB -->
+        <div id="wd-tab-rankings" class="hidden">
+          <div id="wd-rankings-content"></div>
+        </div>
+
+        <!-- RECORDS TAB -->
+        <div id="wd-tab-records" class="hidden">
+          <div id="wd-records-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD SIM REPORT -->
+    <div id="screen-world-sim-report" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" id="wsim-back-btn" onclick="showScreen('world-detail')">← Back to World</button>
+        <h2>Simulation Report</h2>
+        <div id="wsim-header" class="wsim-header"></div>
+        <div id="wsim-notable" class="wsim-notable"></div>
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchSimTab('results',this)">Results</button>
+          <button class="tab-btn" onclick="switchSimTab('rankings',this)">Rankings</button>
+        </div>
+        <div id="wsim-tab-results">
+          <div id="wsim-results-list"></div>
+        </div>
+        <div id="wsim-tab-rankings" class="hidden">
+          <div id="wsim-rankings-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD CALENDAR -->
+    <div id="screen-world-calendar" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('world-detail')">← Back to World</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <h2 id="wcal-title">World Calendar</h2>
+          <div class="wcal-filter-bar">
+            <button class="wcal-filter-btn active" onclick="switchCalFilter('all',this)">All</button>
+            <button class="wcal-filter-btn" onclick="switchCalFilter('scheduled',this)">Upcoming</button>
+            <button class="wcal-filter-btn" onclick="switchCalFilter('complete',this)">Played</button>
+            <button class="wcal-filter-btn" onclick="switchCalFilter('skipped',this)">Skipped</button>
+          </div>
+        </div>
+        <div id="wcal-months"></div>
+      </div>
+    </div>
+
+    <!-- JOURNAL -->
+    <div id="screen-journal" class="screen">
+      <div class="screen-inner">
+        <h2>Match Journal</h2>
+        <div class="journal-controls">
+          <input type="text" id="journal-search" class="journal-search-bar" placeholder="Search journal entries..." oninput="journalSearchInput()">
+          <div class="journal-filter-row">
+            <button class="journal-filter-btn active" data-fmt="" onclick="setJournalFormat('',this)">All</button>
+            <button class="journal-filter-btn" data-fmt="Test" onclick="setJournalFormat('Test',this)">Test</button>
+            <button class="journal-filter-btn" data-fmt="ODI" onclick="setJournalFormat('ODI',this)">ODI</button>
+            <button class="journal-filter-btn" data-fmt="T20" onclick="setJournalFormat('T20',this)">T20</button>
+          </div>
+        </div>
+        <div id="journal-entries"></div>
+        <div id="journal-pagination" class="pagination-wrap"></div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div id="screen-settings" class="screen">
+      <div class="screen-inner">
+        <h2>Settings</h2>
+        <div class="settings-sections">
+
+          <div class="settings-section">
+            <h3>Appearance</h3>
+            <div class="setting-row">
+              <label>Dark Mode</label>
+              <button id="settings-darkmode" class="toggle-btn active" onclick="toggleDarkMode()">On</button>
+            </div>
+            <div class="setting-row">
+              <label>Broadcast Mode</label>
+              <button id="settings-broadcast" class="toggle-btn" onclick="toggleBroadcastMode()">Off</button>
+            </div>
+            <div class="setting-row">
+              <label>Animation Speed</label>
+              <div class="animation-speed-group">
+                <label class="anim-radio"><input type="radio" name="anim-speed" value="normal" onchange="setAnimationSpeed('normal')" checked> Normal</label>
+                <label class="anim-radio"><input type="radio" name="anim-speed" value="fast" onchange="setAnimationSpeed('fast')"> Fast</label>
+                <label class="anim-radio"><input type="radio" name="anim-speed" value="instant" onchange="setAnimationSpeed('instant')"> Instant</label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label>Sound Effects</label>
+              <button id="settings-sound" class="toggle-btn active" onclick="toggleSound()">On</button>
+            </div>
+            <div class="setting-row">
+              <label>Record Pop-ups</label>
+              <button id="settings-record-popups" class="toggle-btn" onclick="toggleRecordPopups()">Off</button>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Gameplay</h3>
+            <div class="setting-row">
+              <label>Default Format</label>
+              <select id="settings-default-format" class="select-input" onchange="setDefaultFormat(this.value)">
+                <option value="T20">T20</option>
+                <option value="ODI">ODI</option>
+                <option value="Test">Test</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label>Default Venue</label>
+              <select id="settings-default-venue" class="select-input" onchange="setDefaultVenue(this.value)">
+                <option value="">— Any —</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Data Management</h3>
+            <div id="db-stats" class="db-stats-grid">Loading...</div>
+            <div class="data-mgmt-actions">
+              <button class="btn btn-secondary" onclick="loadDbStats()">Refresh Stats</button>
+              <button class="btn btn-secondary" onclick="downloadAlmanack()">Download Almanack</button>
+              <button class="btn btn-secondary" onclick="downloadBackup()">Download Backup</button>
+            </div>
+            <div class="setting-row restore-row">
+              <label>Restore from backup</label>
+              <input type="file" id="restore-file-input" accept=".json" style="display:none" onchange="handleRestoreFile(this)">
+              <button class="btn btn-warning" onclick="document.getElementById('restore-file-input').click()">Choose File &amp; Restore</button>
+            </div>
+            <div class="setting-row archive-row">
+              <label>Archive deliveries older than</label>
+              <div class="archive-controls">
+                <input type="number" id="archive-days" class="input-small" value="30" min="1" max="9999">
+                <span class="text-muted">days</span>
+                <button class="btn btn-secondary" onclick="archiveMatches()">Archive Now</button>
+              </div>
+            </div>
+            <div id="archive-result" class="archive-result hidden"></div>
+          </div>
+
+          <div class="settings-section">
+            <h3>About</h3>
+            <div class="about-block">
+              <div class="about-version">Roll It &amp; Bowl It — Version 1.0</div>
+              <p class="about-tech">Built with Python, Flask, SQLite, and vanilla JavaScript. No frameworks harmed.</p>
+              <p class="about-desc">Dice cricket is a tabletop tradition — each delivery is decided by rolling physical dice, combining chance with cricket logic. Roll It &amp; Bowl It brings that experience to the screen: every ball triggers a multi-stage virtual roll that determines whether it's a dot, a boundary, or a wicket.</p>
+              <p class="about-desc">Beyond single matches, the game gives you a full cricket universe: create teams and players, run bilateral series and World Cups, build a living world calendar, and watch an Almanack of records accumulate over time. The dice decide the moment; you decide the era.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- SESSION BAR -->
+  <div id="session-bar">
+    <span id="session-bar-text">Session: 0 matches • 0 runs • 0 wickets • 0 sixes</span>
+  </div>
+
+  <script src="/static/canvas.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
