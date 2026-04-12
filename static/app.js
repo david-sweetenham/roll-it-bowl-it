@@ -871,6 +871,7 @@ const MatchUI = {
   _storyState:            { key: '', primaryTone: 'neutral', alertedKey: '' },
   _liveWagonShots:        [],       // recent shot lines for the mini live wagon wheel
   _liveWagonInningsId:    null,     // current innings being shown on the mini wheel
+  _liveWagonOverNumber:   null,     // over currently being shown on the mini wheel
 };
 
 // ── DiceState Machine ─────────────────────────────────────────────────────────
@@ -1220,6 +1221,10 @@ function updateLiveView(state) {
 
   if (!inn || MatchUI._liveWagonInningsId !== state.current_innings_id) {
     MatchUI._liveWagonInningsId = state.current_innings_id || null;
+    MatchUI._liveWagonOverNumber = state.over_number ?? null;
+    MatchUI._liveWagonShots = [];
+  } else if (MatchUI._liveWagonOverNumber !== (state.over_number ?? null)) {
+    MatchUI._liveWagonOverNumber = state.over_number ?? null;
     MatchUI._liveWagonShots = [];
   }
   renderLiveWagonWheel();
@@ -5017,19 +5022,21 @@ function _detectAndQueueGraphics(res, delivery, preBallState, freshState) {
     if (existing >= 0) MatchUI.recordsBroken[existing] = rec;
     else MatchUI.recordsBroken.push(rec);
 
-    const typeLabel = RECORD_LABELS[rec.type] || rec.type.toUpperCase().replace(/_/g, ' ');
-    const isWorld   = !!(rec.is_world_record);
+    if (AppState.recordPopups) {
+      const typeLabel = RECORD_LABELS[rec.type] || rec.type.toUpperCase().replace(/_/g, ' ');
+      const isWorld   = !!(rec.is_world_record);
 
-    gfx.push({
-      type: isWorld ? 'world_record' : 'almanack_record',
-      typeLabel,
-      newValue:          rec.new_value,
-      playerName:        rec.player_name         || '',
-      previousValue:     rec.previous_value      ?? null,
-      previousHolder:    rec.previous_holder     || null,
-      worldRecord:       rec.world_record_value  ?? null,
-      worldRecordHolder: rec.world_record_holder || null,
-    });
+      gfx.push({
+        type: isWorld ? 'world_record' : 'almanack_record',
+        typeLabel,
+        newValue:          rec.new_value,
+        playerName:        rec.player_name         || '',
+        previousValue:     rec.previous_value      ?? null,
+        previousHolder:    rec.previous_holder     || null,
+        worldRecord:       rec.world_record_value  ?? null,
+        worldRecordHolder: rec.world_record_holder || null,
+      });
+    }
   }
 
   // ── Over complete ──────────────────────────────────────────────
@@ -6884,6 +6891,9 @@ const WorldUI = {
   wizardAllTeams:  [],
   wizardInternationalTeams: [],
   wizardDomesticTeams: [],
+  wizardDomesticLeagues: new Set(),
+  wizardDomesticLeagueOptions: [],
+  wizardScope:     'international',
   calendarFilter:  'all',
   _worldData:      null,
   _seriesData:     [],
