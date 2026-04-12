@@ -1167,6 +1167,9 @@ async function _completeBall(res, delivery) {
   const matchId = getMatchId();
   const btn = document.getElementById('btn-roll');
 
+  // Capture pre-ball state for graphic construction (before any state update)
+  const preBallState = MatchUI.lastState;
+
   // Sound
   const ot = delivery.outcome_type;
   SoundEngine.play(ot);
@@ -1182,24 +1185,17 @@ async function _completeBall(res, delivery) {
   await appendCommentaryLine(res, delivery);
 
   // Refresh state
+  let fresh = null;
   if (res.match_state) {
-    const fresh = await api('GET', `/api/matches/${matchId}`);
+    fresh = await api('GET', `/api/matches/${matchId}`);
     if (fresh) {
       updateLiveView(fresh);
       _drawInningsArcFromState(fresh);
     }
   }
 
-  // Milestones
-  for (const ms of (res.milestones || [])) {
-    await showMilestoneToast(ms);
-  }
-
-  // Records
-  for (const rec of (res.records_broken || [])) {
-    SoundEngine.play('record');
-    await showRecordOverlay(rec);
-  }
+  // Queue broadcast graphics (fire-and-forget — never blocks Roll button)
+  _detectAndQueueGraphics(res, delivery, preBallState, fresh);
 
   // Background tint
   applyMatchTintFromDelivery(ot);
@@ -1210,6 +1206,8 @@ async function _completeBall(res, delivery) {
   // Innings complete
   if (res.innings_complete && !res.match_complete) {
     _stopAiAutoPlay();
+    // Clear any playing graphic before the innings break takes over
+    GraphicQueue.clear();
     // Reset dismissed suggestions — new innings, fresh slate
     MatchUI._dismissedSuggestions = [];
     document.getElementById('tension-suggestion')?.classList.add('hidden');
@@ -1224,6 +1222,7 @@ async function _completeBall(res, delivery) {
   if (res.match_complete) {
     _setDiceState(DiceState.MATCH_END);
     _stopAiAutoPlay();
+    GraphicQueue.clear();
     AppState.sessionStats.matches += 1;
     updateSessionBar();
     await showResultScreen(matchId);
@@ -1651,6 +1650,7 @@ async function simulateTo(target) {
 
   if (res.innings_complete && !res.match_complete) {
     _stopAiAutoPlay();
+    GraphicQueue.clear();
     const newState = MatchUI.lastState;
     // Find the innings that just completed — use the highest innings_number among
     // complete innings, not the first, to avoid showing the 1st innings score when
@@ -1664,6 +1664,7 @@ async function simulateTo(target) {
 
   if (res.match_complete) {
     _stopAiAutoPlay();
+    GraphicQueue.clear();
     AppState.sessionStats.matches += 1;
     updateSessionBar();
     await showResultScreen(matchId);
@@ -2242,22 +2243,97 @@ async function showInningsTransition(completedInnings, target) {
   live.classList.add('hidden');
   el.classList.remove('hidden');
 
-  let text = 'END OF INNINGS';
-  if (completedInnings) {
-    const n = completedInnings.innings_number;
-    const ord = ['1ST','2ND','3RD','4TH'][n-1] || `${n}TH`;
-    text = `END OF ${ord} INNINGS — ${completedInnings.batting_team_name}: ` +
-           formatScore(completedInnings.total_runs, completedInnings.total_wickets);
+  // Build enhanced innings break card content
+  // Card may have been renamed on a prior innings — select by either class
+  const card = el.querySelector('.innings-transition-card, .innings-break-graphic');
+  if (card && completedInnings) {
+    const n   = completedInnings.innings_number;
+    const ord = ['1ST','2ND','3RD','4TH'][n - 1] || `${n}TH`;
+    const scoreStr = formatScore(completedInnings.total_runs, completedInnings.total_wickets);
+    const ovsStr   = completedInnings.overs_completed != null
+      ? `(${formatOvers(completedInnings.overs_completed)} ov)` : '';
+
+    // Top scorer and best bowling from current MatchUI state if available
+    const inningsData = (MatchUI.lastState?.innings || []).find(i => i.innings_number === n);
+    let topScorerHtml = '', bestBowlingHtml = '';
+    if (inningsData?.batters?.length) {
+      const top = [...inningsData.batters]
+        .filter(b => b.status !== 'yet_to_bat')
+        .sort((a, b) => (b.runs || 0) - (a.runs || 0))[0];
+      if (top) {
+        const notOut = top.not_out || top.status === 'batting' ? '*' : '';
+        topScorerHtml = `<div>Top scorer: <strong>${escHtml(top.player_name || '')} ${top.runs || 0}${notOut} (${top.balls_faced || 0}b)</strong></div>`;
+      }
+    }
+    if (inningsData?.bowlers?.length) {
+      const best = [...inningsData.bowlers]
+        .filter(b => (b.overs || 0) > 0 || (b.balls || 0) > 0)
+        .sort((a, b) => {
+          const wa = b.wickets || 0, wb = a.wickets || 0;
+          if (wa !== wb) return wa - wb;
+          return (a.runs_conceded || 0) - (b.runs_conceded || 0);
+        })[0];
+      if (best) {
+        bestBowlingHtml = `<div>Best bowling: <strong>${escHtml(best.player_name || '')} ${best.wickets || 0}/${best.runs_conceded || 0}</strong></div>`;
+      }
+    }
+
+    // Determine required rate if target set
+    let rrrHtml = '';
+    if (target) {
+      const freshMatch = MatchUI.lastState?.match || {};
+      const maxOvers   = { T20: 20, ODI: 50, Test: null }[freshMatch.format] ?? null;
+      if (maxOvers) {
+        const rrr = (target / maxOvers).toFixed(2);
+        rrrHtml = `<div class="ibg-rrr">Required RR: ${rrr} from ${maxOvers} overs</div>`;
+      }
+    }
+
+    card.className = 'innings-break-graphic';
+    card.innerHTML = `
+      <div class="ibg-title">INNINGS BREAK</div>
+      <div class="ibg-team">${escHtml(completedInnings.batting_team_name)}</div>
+      <div class="ibg-score">${scoreStr}</div>
+      <div class="ibg-overs">${ovsStr}</div>
+      ${target ? `<div class="ibg-target">${escHtml(completedInnings.batting_team_name === (MatchUI.lastState?.current_innings?.batting_team_name || '') ? '' : 'Target')}: ${target}</div>` : ''}
+      ${rrrHtml}
+      <div class="ibg-stats">${topScorerHtml}${bestBowlingHtml}</div>
+      ${AppState.broadcastMode ? '<div class="ibg-continue-hint">Click anywhere to continue</div>' : ''}`;
+  } else if (card) {
+    card.className = 'innings-transition-card';
+    let text = 'END OF INNINGS';
+    if (completedInnings) {
+      const n   = completedInnings.innings_number;
+      const ord = ['1ST','2ND','3RD','4TH'][n - 1] || `${n}TH`;
+      text = `END OF ${ord} INNINGS — ${completedInnings.batting_team_name}: ` +
+             formatScore(completedInnings.total_runs, completedInnings.total_wickets);
+    }
+    card.innerHTML = `
+      <div class="innings-transition-text">${escHtml(text)}</div>
+      <div class="innings-transition-target">${target ? `Target: ${target}` : ''}</div>`;
   }
-  document.getElementById('innings-transition-text').textContent = text;
-  document.getElementById('innings-transition-target').textContent =
-    target ? `Target: ${target}` : '';
 
-  const hold = animMs(AppState.broadcastMode ? 3000 : 2000, AppState.broadcastMode ? 800 : 500, 0);
-  if (hold > 0) await sleep(hold);
+  // In broadcast mode the card stays until clicked; otherwise auto-advance
+  const isBroadcast = AppState.broadcastMode;
+  const maxHold = animMs(isBroadcast ? 99999 : 8000, isBroadcast ? 800 : 2000, 0);
 
-  el.classList.add('hidden');
-  live.classList.remove('hidden');
+  if (maxHold === 0) {
+    el.classList.add('hidden');
+    live.classList.remove('hidden');
+  } else if (isBroadcast) {
+    // Click or 8s timeout
+    await new Promise(resolve => {
+      const tid = setTimeout(resolve, 8000);
+      const onClick = () => { clearTimeout(tid); el.removeEventListener('click', onClick); resolve(); };
+      el.addEventListener('click', onClick);
+    });
+    el.classList.add('hidden');
+    live.classList.remove('hidden');
+  } else {
+    await sleep(maxHold);
+    el.classList.add('hidden');
+    live.classList.remove('hidden');
+  }
 
   // Refresh state after new innings starts
   const fresh = await api('GET', `/api/matches/${getMatchId()}`);
@@ -2501,9 +2577,17 @@ async function fastSimMatch() {
   const btn = document.getElementById('btn-fast-sim');
   btn.disabled = true;
 
+  // Graphics don't run during fast sim — clear any pending
+  GraphicQueue.clear();
+
   const matchId = getMatchId();
   const res = await api('POST', `/api/matches/${matchId}/fast-sim`);
   if (!res) { btn.disabled = false; return; }
+
+  // Show fast-sim summary card before result screen
+  if (res.sim_digest) {
+    await showFastSimSummary(res);
+  }
 
   AppState.sessionStats.matches += 1;
   updateSessionBar();
@@ -3528,6 +3612,562 @@ function initKeyboard() {
   });
 }
 
+// ── Broadcast Graphic System ──────────────────────────────────────────────────
+
+// Team colour map for match-result headline tint
+const TEAM_COLORS = {
+  'England':       '#003f7f',
+  'Australia':     '#c8922a',
+  'India':         '#138808',
+  'Pakistan':      '#01411c',
+  'New Zealand':   '#1a1a1a',
+  'South Africa':  '#007a4d',
+  'West Indies':   '#7b0c1f',
+  'Sri Lanka':     '#003087',
+  'Bangladesh':    '#006a4e',
+  'Afghanistan':   '#002366',
+};
+
+const GRAPHIC_TIMING = {
+  normal: {
+    wicket:          { hold: 3000, animIn: 300, animOut: 300 },
+    duck:            { hold: 3500, animIn: 400, animOut: 300 },
+    fifty:           { hold: 4000, animIn: 400, animOut: 400 },
+    century:         { hold: 6000, animIn: 500, animOut: 400 },
+    one_fifty:       { hold: 5000, animIn: 500, animOut: 400 },
+    double_century:  { hold: 8000, animIn: 600, animOut: 400 },
+    five_fer:        { hold: 5000, animIn: 400, animOut: 400 },
+    ten_wicket:      { hold: 8000, animIn: 500, animOut: 400 },
+    almanack_record: { hold: 5000, animIn: 400, animOut: 400 },
+    world_record:    { hold: 10000, animIn: 600, animOut: 500 },
+    over_complete:   { hold: 2000, animIn: 200, animOut: 200 },
+  },
+  broadcast: {
+    wicket:          { hold: 5000, animIn: 400, animOut: 400 },
+    duck:            { hold: 5000, animIn: 500, animOut: 400 },
+    fifty:           { hold: 6000, animIn: 500, animOut: 500 },
+    century:         { hold: 8000, animIn: 600, animOut: 500 },
+    one_fifty:       { hold: 7000, animIn: 600, animOut: 500 },
+    double_century:  { hold: 12000, animIn: 700, animOut: 500 },
+    five_fer:        { hold: 7000, animIn: 500, animOut: 500 },
+    ten_wicket:      { hold: 10000, animIn: 600, animOut: 500 },
+    almanack_record: { hold: 8000, animIn: 500, animOut: 500 },
+    world_record:    { hold: 15000, animIn: 700, animOut: 600 },
+    over_complete:   { hold: 3000, animIn: 300, animOut: 300 },
+  },
+};
+
+function getGraphicTiming(type) {
+  const mode = AppState.broadcastMode ? 'broadcast' : 'normal';
+  return GRAPHIC_TIMING[mode][type] || { hold: 3000, animIn: 300, animOut: 300 };
+}
+
+function getGraphicPriority(type) {
+  const p = {
+    world_record: 13, almanack_record: 12, double_century: 11,
+    ten_wicket: 10, century: 9, five_fer: 8, one_fifty: 7,
+    duck: 6, wicket: 5, fifty: 4,
+    over_complete: 1,
+  };
+  return p[type] || 0;
+}
+
+const GraphicQueue = {
+  queue: [],
+  isPlaying: false,
+  _currentEl: null,
+  _clearTimer: null,
+
+  add(graphic) {
+    // Over-complete: skip if queue already has anything (lower priority)
+    if (graphic.type === 'over_complete' && this.queue.length > 0) return;
+    this.queue.push(graphic);
+    if (!this.isPlaying) this._next();
+  },
+
+  _next() {
+    if (this.queue.length === 0) {
+      this.isPlaying = false;
+      this._hideAll();
+      return;
+    }
+    // Skip over_complete if higher-priority items follow
+    while (this.queue.length > 1 && this.queue[0].type === 'over_complete') {
+      this.queue.shift();
+    }
+    this.isPlaying = true;
+    const graphic = this.queue.shift();
+    this._show(graphic);
+  },
+
+  _show(graphic) {
+    // Suppress all graphics in 'instant' animation speed mode
+    if (AppState.animationSpeed === 'instant') { this._next(); return; }
+
+    const timing = getGraphicTiming(graphic.type);
+    if (timing.hold === 0) { this._next(); return; }
+
+    const el = this._render(graphic);
+    if (!el) { this._next(); return; }
+
+    const overlay = document.getElementById('graphic-overlay');
+    if (!overlay) { this._next(); return; }
+    overlay.innerHTML = '';
+    overlay.appendChild(el);
+    overlay.style.display = '';
+    this._currentEl = el;
+
+    // Backdrop for card-style graphics
+    const needsBackdrop = [
+      'fifty','century','one_fifty','double_century',
+      'five_fer','ten_wicket','almanack_record','world_record'
+    ].includes(graphic.type);
+    const backdrop = document.getElementById('graphic-backdrop');
+    if (backdrop) {
+      if (needsBackdrop) backdrop.classList.add('active');
+      else backdrop.classList.remove('active');
+    }
+
+    // Trigger in-animation on next paint
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('visible')));
+
+    // Play sound
+    SoundEngine.playGraphic(graphic.type);
+
+    // Auto-dismiss after hold
+    this._clearTimer = setTimeout(() => this._dismiss(), timing.hold);
+  },
+
+  _dismiss() {
+    if (this._clearTimer) { clearTimeout(this._clearTimer); this._clearTimer = null; }
+    const el = this._currentEl;
+    if (!el) { this._afterDismiss(); return; }
+
+    const type = el.dataset.graphicType || 'wicket';
+    const timing = getGraphicTiming(type);
+    el.classList.remove('visible');
+    setTimeout(() => this._afterDismiss(), timing.animOut || 300);
+  },
+
+  _afterDismiss() {
+    const overlay = document.getElementById('graphic-overlay');
+    if (overlay) { overlay.innerHTML = ''; overlay.style.display = 'none'; }
+    const backdrop = document.getElementById('graphic-backdrop');
+    if (backdrop) backdrop.classList.remove('active');
+    this._currentEl = null;
+    this._next();
+  },
+
+  clear() {
+    if (this._clearTimer) { clearTimeout(this._clearTimer); this._clearTimer = null; }
+    this.queue = [];
+    this.isPlaying = false;
+    this._currentEl = null;
+    const overlay = document.getElementById('graphic-overlay');
+    if (overlay) { overlay.innerHTML = ''; overlay.style.display = 'none'; }
+    const backdrop = document.getElementById('graphic-backdrop');
+    if (backdrop) backdrop.classList.remove('active');
+  },
+
+  _hideAll() {
+    const overlay = document.getElementById('graphic-overlay');
+    if (overlay) { overlay.innerHTML = ''; overlay.style.display = 'none'; }
+    const backdrop = document.getElementById('graphic-backdrop');
+    if (backdrop) backdrop.classList.remove('active');
+  },
+
+  // ── Graphic renderers ─────────────────────────────────────────
+
+  _render(graphic) {
+    const el = document.createElement('div');
+    el.dataset.graphicType = graphic.type;
+    switch (graphic.type) {
+      case 'wicket':          return this._wicket(el, graphic);
+      case 'duck':            return this._duck(el, graphic);
+      case 'fifty':           return this._fifty(el, graphic);
+      case 'century':         return this._century(el, graphic);
+      case 'one_fifty':       return this._oneFifty(el, graphic);
+      case 'double_century':  return this._doubleCentury(el, graphic);
+      case 'five_fer':        return this._fiveFer(el, graphic);
+      case 'ten_wicket':      return this._tenWicket(el, graphic);
+      case 'almanack_record': return this._almanackRecord(el, graphic);
+      case 'world_record':    return this._worldRecord(el, graphic);
+      case 'over_complete':   return this._overComplete(el, graphic);
+      default: return null;
+    }
+  },
+
+  _spawnConfetti(el, count = 18) {
+    const container = el.querySelector('.gfx-confetti-container');
+    if (!container) return;
+    const colors = ['var(--almanack-gold)', '#fff', '#e74c3c', '#2ecc71', '#9b59b6'];
+    for (let i = 0; i < count; i++) {
+      const p = document.createElement('div');
+      p.className = 'confetti-piece';
+      p.style.left = `${Math.random() * 100}%`;
+      p.style.animationDelay = `${(Math.random() * 1.8).toFixed(2)}s`;
+      p.style.background = colors[i % colors.length];
+      container.appendChild(p);
+    }
+  },
+
+  _wicket(el, g) {
+    el.className = 'graphic graphic-banner graphic-wicket';
+    const ords = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th'];
+    const ord = g.wicketNum ? (ords[(g.wicketNum - 1)] || `${g.wicketNum}th`) : '';
+    const fow = (g.wicketNum && g.fowScore != null) ? `FOW: ${g.wicketNum}-${g.fowScore}` : '';
+    const dism = (g.dismissalType || 'out').replace(/_/g, ' ');
+    const sr = g.balls > 0 ? ((g.runs / g.balls) * 100).toFixed(1) : '0.0';
+    el.innerHTML = `
+      <div class="gw-header">
+        <span class="gw-label">WICKET</span>
+        <span class="gw-dot">●</span>
+        <span class="gw-bowler">${escHtml(g.bowlerName || '')}</span>
+      </div>
+      <div class="gw-rule"></div>
+      <div class="gw-batter">${escHtml(g.batterName || 'Batter')} <span class="gw-dism">${escHtml(dism)}</span> ${g.runs} (${g.balls}b) SR: ${sr}</div>
+      <div class="gw-fow">${ord ? ord + ' wicket' : ''}${fow ? ' &nbsp;•&nbsp; ' + fow : ''}</div>`;
+    return el;
+  },
+
+  _duck(el, g) {
+    el.className = 'graphic graphic-banner graphic-duck';
+    const dism = (g.dismissalType || 'out').replace(/_/g, ' ');
+    el.innerHTML = `
+      <div class="gd-header">
+        <span class="duck-emoji">🦆</span>
+        <span class="gd-label">DUCK!</span>
+      </div>
+      <div class="gd-rule"></div>
+      <div class="gd-batter">${escHtml(g.batterName || 'Batter')} <span class="gd-dism">${escHtml(dism)}</span> 0 (${g.balls}b)</div>
+      <div class="gd-bowler">Cheap dismissal from ${escHtml(g.bowlerName || 'Bowler')}</div>`;
+    return el;
+  },
+
+  _fifty(el, g) {
+    el.className = 'graphic graphic-card graphic-fifty';
+    const sr = g.balls > 0 ? ((g.runs / g.balls) * 100).toFixed(1) : '0.0';
+    el.innerHTML = `
+      <div class="gf-header"><span class="milestone-star">★</span> HALF CENTURY <span class="milestone-star">★</span></div>
+      <div class="gf-player">${escHtml(g.playerName)}</div>
+      <div class="gf-score">${g.runs}*</div>
+      <div class="gf-detail">(${g.balls} balls) &nbsp; SR: ${sr}</div>
+      <div class="gf-context">${escHtml(g.matchContext || '')}</div>`;
+    return el;
+  },
+
+  _century(el, g) {
+    el.className = 'graphic graphic-card graphic-century';
+    const sr = g.balls > 0 ? ((g.runs / g.balls) * 100).toFixed(1) : '0.0';
+    const digits = String(g.runs).split('').map((d, i) =>
+      `<span class="century-digit" style="animation-delay:${i * 220}ms">${d}</span>`
+    ).join('');
+    el.innerHTML = `
+      <div class="gfx-confetti-container"></div>
+      <div class="gc-header">✦ ✦ ✦ &nbsp; CENTURY! &nbsp; ✦ ✦ ✦</div>
+      <div class="gc-player">${escHtml(g.playerName)}</div>
+      ${g.teamName ? `<div class="gc-team">${escHtml(g.teamName)}</div>` : ''}
+      <div class="gc-digits">${digits}<span class="gc-star">*</span></div>
+      <div class="gc-detail">(${g.balls} balls) &nbsp; SR: ${sr}</div>
+      <div class="gc-context">${escHtml(g.matchContext || '')}</div>`;
+    this._spawnConfetti(el, 20);
+    return el;
+  },
+
+  _oneFifty(el, g) {
+    el.className = 'graphic graphic-card graphic-one-fifty';
+    const sr = g.balls > 0 ? ((g.runs / g.balls) * 100).toFixed(1) : '0.0';
+    const digits = ['1','5','0'].map((d, i) =>
+      `<span class="century-digit" style="animation-delay:${i * 220}ms">${d}</span>`
+    ).join('');
+    el.innerHTML = `
+      <div class="go-header">⭐ &nbsp; 150! &nbsp; ⭐</div>
+      <div class="go-player">${escHtml(g.playerName)}</div>
+      <div class="gc-digits">${digits}<span class="gc-star">*</span></div>
+      <div class="go-detail">(${g.balls} balls) &nbsp; SR: ${sr}</div>
+      <div class="go-context">${escHtml(g.matchContext || '')}</div>`;
+    return el;
+  },
+
+  _doubleCentury(el, g) {
+    el.className = 'graphic graphic-card graphic-double-century';
+    const sr = g.balls > 0 ? ((g.runs / g.balls) * 100).toFixed(1) : '0.0';
+    const digits = ['2','0','0'].map((d, i) =>
+      `<span class="century-digit" style="animation-delay:${i * 250}ms">${d}</span>`
+    ).join('');
+    el.innerHTML = `
+      <div class="gfx-confetti-container"></div>
+      <div class="gdc-header">🌟 &nbsp; DOUBLE CENTURY! &nbsp; 🌟</div>
+      <div class="gdc-player">${escHtml(g.playerName)}</div>
+      <div class="gc-digits">${digits}<span class="gc-star">*</span></div>
+      <div class="gdc-detail">(${g.balls} balls) &nbsp; SR: ${sr}</div>
+      <div class="gdc-context">${escHtml(g.matchContext || '')}</div>`;
+    this._spawnConfetti(el, 28);
+    return el;
+  },
+
+  _fiveFer(el, g) {
+    el.className = 'graphic graphic-card graphic-five-fer';
+    el.innerHTML = `
+      <div class="gff-header"><span class="bowling-ball-emoji">🎳</span> &nbsp; FIVE WICKET HAUL! &nbsp; <span class="bowling-ball-emoji">🎳</span></div>
+      <div class="gff-player">${escHtml(g.playerName)}</div>
+      ${g.teamName ? `<div class="gff-team">${escHtml(g.teamName)}</div>` : ''}
+      <div class="gff-figures">${escHtml(g.figures || '5/?')}</div>
+      <div class="gff-detail">in ${escHtml(g.overs || '?')} overs &nbsp;•&nbsp; Econ: ${escHtml(g.econ || '?')}</div>`;
+    return el;
+  },
+
+  _tenWicket(el, g) {
+    el.className = 'graphic graphic-card graphic-ten-wicket';
+    el.innerHTML = `
+      <div class="gtw-header"><span class="lightning-emoji">⚡</span> &nbsp; TEN WICKETS IN THE MATCH! &nbsp; <span class="lightning-emoji">⚡</span></div>
+      <div class="gtw-player">${escHtml(g.playerName)}</div>
+      ${g.teamName ? `<div class="gtw-team">${escHtml(g.teamName)}</div>` : ''}
+      <div class="gtw-figures">${escHtml(g.figures || '10 wkts')}</div>
+      <div class="gtw-subtitle">A match for the history books</div>`;
+    return el;
+  },
+
+  _almanackRecord(el, g) {
+    el.className = 'graphic graphic-card graphic-almanack-record';
+    el.innerHTML = `
+      <div class="gar-label">📖 &nbsp; NEW ALMANACK RECORD</div>
+      <div class="gar-type">${escHtml(g.typeLabel || '')}</div>
+      <div class="gar-value">${escHtml(String(g.newValue))}</div>
+      <div class="gar-holder">${escHtml(g.playerName || '')}</div>
+      ${g.previousValue != null
+        ? `<div class="gar-prev">Previous: ${escHtml(String(g.previousValue))}${g.previousHolder ? ' &nbsp;('+escHtml(g.previousHolder)+')' : ''}</div>`
+        : '<div class="gar-prev">First ever record</div>'}`;
+    return el;
+  },
+
+  _worldRecord(el, g) {
+    el.className = 'graphic graphic-card graphic-world-record';
+    el.innerHTML = `
+      <div class="gfx-confetti-container"></div>
+      <div class="gwr-header"><span class="globe-emoji">🌍</span> &nbsp; REAL WORLD RECORD BEATEN! &nbsp; <span class="globe-emoji">🌍</span></div>
+      <div class="gwr-type">${escHtml(g.typeLabel || '')}</div>
+      <div class="gwr-value">${escHtml(String(g.newValue))}</div>
+      <div class="gwr-holder">${escHtml(g.playerName || '')}</div>
+      ${g.worldRecord != null ? `
+        <div class="gwr-rule"></div>
+        <div class="gwr-prev-label">Previous real-world record:</div>
+        <div class="gwr-prev">${escHtml(String(g.worldRecord))}${g.worldRecordHolder ? ' &nbsp;·&nbsp; '+escHtml(g.worldRecordHolder) : ''}</div>
+      ` : ''}`;
+    this._spawnConfetti(el, 22);
+    return el;
+  },
+
+  _overComplete(el, g) {
+    el.className = 'graphic graphic-lower-third graphic-over-complete';
+    let line2 = g.teamScore || '';
+    if (g.rr) line2 += ` &nbsp;·&nbsp; RR: ${g.rr}`;
+    if (g.rrr) line2 += ` &nbsp;·&nbsp; req: ${g.rrr}`;
+    el.innerHTML = `
+      <span class="goc-over">End of over ${g.overNumber}</span>
+      <span class="goc-sep">•</span>
+      <span class="goc-bowler">${escHtml(g.bowlerName || '')}</span>
+      <span class="goc-sep">•</span>
+      <span class="goc-figures">${g.wickets}-${g.maidens}-${g.runs}</span>
+      <span class="goc-score">${line2}</span>`;
+    return el;
+  },
+};
+
+// ── Milestone + record → graphic detection ────────────────────────────────────
+
+function _detectAndQueueGraphics(res, delivery, preBallState, freshState) {
+  if (!res) return;
+  const gfx = [];
+
+  // ── Wicket / Duck ──────────────────────────────────────────────
+  if (delivery && delivery.outcome_type === 'wicket') {
+    const strikerPid = preBallState?.current_striker_id;
+    const strikerInfo  = strikerPid ? MatchUI.allPlayers[strikerPid] : null;
+    const strikerBI    = strikerPid
+      ? (preBallState?.batter_innings || []).find(b => b.player_id === strikerPid && b.status === 'batting')
+      : null;
+    const bowlerPid    = preBallState?.current_bowler_id;
+    const bowlerInfo   = bowlerPid ? MatchUI.allPlayers[bowlerPid] : null;
+
+    const runs   = strikerBI?.runs        ?? 0;
+    const balls  = strikerBI?.balls_faced ?? 0;
+    const dism   = delivery.dismissal_type || 'out';
+    // wicket count and FOW come from fresh state (after the ball)
+    const freshInn     = freshState?.current_innings;
+    const wicketNum    = freshInn?.total_wickets ?? null;
+    const fowScore     = freshInn?.total_runs    ?? null;
+
+    gfx.push({
+      type: runs === 0 ? 'duck' : 'wicket',
+      batterName:    strikerInfo?.name  || 'Batter',
+      bowlerName:    bowlerInfo?.name   || 'Bowler',
+      runs, balls, dismissalType: dism, wicketNum, fowScore,
+    });
+  }
+
+  // ── Batting + bowling milestones from API ──────────────────────
+  const matchState = freshState || MatchUI.lastState;
+  const match      = matchState?.match || MatchUI.lastState?.match || {};
+  const matchCtx   = [match.team1_name, match.team2_name].filter(Boolean).join(' v ')
+    + (match.venue_name ? ' · ' + match.venue_name : '');
+
+  for (const ms of (res.milestones || [])) {
+    const pid        = ms.player_id;
+    const playerInfo = pid ? MatchUI.allPlayers[pid] : null;
+    const playerName = ms.player_name || playerInfo?.name || 'Player';
+    const teamName   = playerInfo?.team_name || '';
+
+    // Get live innings stats for this player
+    const bi  = freshState ? (freshState.batter_innings  || []).find(b => b.player_id === pid) : null;
+    const bwi = freshState ? (freshState.bowler_innings  || []).find(b => b.player_id === pid) : null;
+
+    if (ms.type === 'batter_50') {
+      gfx.push({
+        type: 'fifty', playerName,
+        runs:  bi?.runs        ?? 50,
+        balls: bi?.balls_faced ?? (ms.balls || 0),
+        matchContext: matchCtx,
+      });
+    } else if (ms.type === 'batter_100') {
+      gfx.push({
+        type: 'century', playerName, teamName,
+        runs:  bi?.runs        ?? 100,
+        balls: bi?.balls_faced ?? (ms.balls || 0),
+        matchContext: matchCtx,
+        format: matchState?.format || match.format || '',
+      });
+    } else if (ms.type === 'batter_150') {
+      gfx.push({
+        type: 'one_fifty', playerName,
+        runs:  bi?.runs        ?? 150,
+        balls: bi?.balls_faced ?? (ms.balls || 0),
+        matchContext: matchCtx,
+      });
+    } else if (ms.type === 'batter_200') {
+      gfx.push({
+        type: 'double_century', playerName,
+        runs:  bi?.runs        ?? 200,
+        balls: bi?.balls_faced ?? (ms.balls || 0),
+        matchContext: matchCtx,
+      });
+    } else if (ms.type === 'bowler_5fer') {
+      const wkts      = bwi?.wickets       ?? 5;
+      const runsConc  = bwi?.runs_conceded ?? 0;
+      const ovsF      = formatBowlerOvers(bwi?.overs ?? 0, bwi?.balls ?? 0);
+      const totalOvs  = (bwi?.overs ?? 0) + (bwi?.balls ?? 0) / 6;
+      const econ      = totalOvs > 0 ? (runsConc / totalOvs).toFixed(2) : '0.00';
+      gfx.push({
+        type: 'five_fer', playerName, teamName,
+        figures: `${wkts}/${runsConc}`,
+        overs: ovsF,
+        econ,
+      });
+    } else if (ms.type === 'bowler_10fer') {
+      gfx.push({
+        type: 'ten_wicket', playerName, teamName,
+        figures: ms.figures || '10 wkts',
+      });
+    }
+  }
+
+  // ── Records broken ─────────────────────────────────────────────
+  for (const rec of (res.records_broken || [])) {
+    // Accumulate for end-of-match summary regardless of popup setting
+    const existing = MatchUI.recordsBroken.findIndex(r => r.type === rec.type);
+    if (existing >= 0) MatchUI.recordsBroken[existing] = rec;
+    else MatchUI.recordsBroken.push(rec);
+
+    const typeLabel = RECORD_LABELS[rec.type] || rec.type.toUpperCase().replace(/_/g, ' ');
+    const isWorld   = !!(rec.is_world_record);
+
+    gfx.push({
+      type: isWorld ? 'world_record' : 'almanack_record',
+      typeLabel,
+      newValue:          rec.new_value,
+      playerName:        rec.player_name         || '',
+      previousValue:     rec.previous_value      ?? null,
+      previousHolder:    rec.previous_holder     || null,
+      worldRecord:       rec.world_record_value  ?? null,
+      worldRecordHolder: rec.world_record_holder || null,
+    });
+  }
+
+  // ── Over complete ──────────────────────────────────────────────
+  if (!res.innings_complete && !res.match_complete && freshState && preBallState) {
+    const prevOver = preBallState.over_number ?? -1;
+    const newOver  = freshState.over_number   ?? -1;
+    if (newOver > prevOver && newOver > 0) {
+      const bowlerPid = preBallState.current_bowler_id;
+      const bInfo     = bowlerPid ? MatchUI.allPlayers[bowlerPid] : null;
+      const bwi       = (preBallState.bowler_innings || []).find(b => b.player_id === bowlerPid) || {};
+      const freshInn  = freshState.current_innings;
+      const teamScore = freshInn
+        ? formatScore(freshInn.total_runs, freshInn.total_wickets)
+        : '';
+      const crr = freshInn?.run_rate        ?? null;
+      const rrr = freshInn?.required_rate   ?? null;
+
+      gfx.push({
+        type: 'over_complete',
+        overNumber: newOver,  // overs complete = the over that just finished
+        bowlerName: bInfo?.name || 'Bowler',
+        wickets:  bwi.wickets       ?? 0,
+        maidens:  bwi.maidens       ?? 0,
+        runs:     bwi.runs_conceded ?? 0,
+        teamScore,
+        rr:  crr != null ? Number(crr).toFixed(2)  : null,
+        rrr: rrr != null ? Number(rrr).toFixed(2)  : null,
+      });
+    }
+  }
+
+  // Sort highest priority first and add to queue
+  gfx.sort((a, b) => getGraphicPriority(b.type) - getGraphicPriority(a.type));
+  gfx.forEach(g => GraphicQueue.add(g));
+}
+
+// ── Fast Sim Summary Card ─────────────────────────────────────────────────────
+
+function showFastSimSummary(res) {
+  return new Promise(resolve => {
+    const digest = res?.sim_digest;
+    if (!digest) { resolve(); return; }
+
+    const trophies = [];
+    for (const ev of (digest.key_events || [])) {
+      if (/century|100/i.test(ev))      trophies.push('💯 ' + ev);
+      else if (/five.?wic|5.?fer/i.test(ev)) trophies.push('🎳 ' + ev);
+      else if (/record/i.test(ev))       trophies.push('📖 ' + ev);
+      else if (/duck/i.test(ev))         trophies.push('🦆 ' + ev);
+      else                               trophies.push('⭐ ' + ev);
+    }
+
+    const dim = document.createElement('div');
+    dim.className = 'fast-sim-summary-dim';
+    dim.innerHTML = `
+      <div class="fast-sim-summary-card">
+        <div class="fss-header">INNINGS COMPLETE — Fast Sim</div>
+        <div class="fss-score">${escHtml(digest.end_score || '—')}</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:4px">
+          ${digest.overs_completed ? formatOvers(digest.overs_completed) + ' ov' : ''}
+          ${digest.runs_scored != null ? ' · +' + digest.runs_scored + ' runs' : ''}
+          ${digest.wickets_fallen != null ? ' · ' + digest.wickets_fallen + ' wkt' + (digest.wickets_fallen !== 1 ? 's' : '') : ''}
+        </div>
+        ${trophies.length ? `
+          <div class="fss-trophies">
+            ${trophies.slice(0, 6).map(t => `<div class="fss-trophy">${escHtml(t)}</div>`).join('')}
+          </div>` : ''}
+        <div class="fss-continue">
+          <button class="btn btn-primary btn-sm">Continue</button>
+        </div>
+      </div>`;
+
+    dim.querySelector('.btn').addEventListener('click', () => { dim.remove(); resolve(); });
+    document.body.appendChild(dim);
+  });
+}
+
 // ── Sound Engine ──────────────────────────────────────────────────────────────
 
 const SoundEngine = {
@@ -3612,6 +4252,77 @@ const SoundEngine = {
         setTimeout(() => this._tone(659, 784,  0.20, 0.60), 1400);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.60), 1600);
         setTimeout(() => this._tone(1047, 1047, 0.40, 0.60), 1900);
+        break;
+    }
+  },
+
+  // Sounds for broadcast graphic types
+  playGraphic(type) {
+    if (!AppState.soundEnabled) return;
+    this.init();
+    switch (type) {
+      case 'wicket':
+        this._tone(440, 220, 0.25, 0.45);
+        setTimeout(() => this._tone(220, 110, 0.30, 0.40), 250);
+        break;
+      case 'duck':
+        this._tone(300, 200, 0.20, 0.35);
+        setTimeout(() => this._tone(200, 140, 0.25, 0.35), 200);
+        setTimeout(() => this._tone(140, 100, 0.30, 0.30), 420);
+        break;
+      case 'fifty':
+        this._tone(523, 659, 0.15, 0.55);
+        setTimeout(() => this._tone(659, 784, 0.15, 0.55), 150);
+        setTimeout(() => this._tone(784, 784, 0.25, 0.55), 300);
+        break;
+      case 'century':
+        this._tone(523, 659, 0.12, 0.60);
+        setTimeout(() => this._tone(659, 784,  0.12, 0.60), 130);
+        setTimeout(() => this._tone(784, 1047, 0.15, 0.65), 260);
+        setTimeout(() => this._tone(1047, 1047,0.40, 0.70), 420);
+        break;
+      case 'one_fifty':
+        this._tone(587, 698, 0.12, 0.60);
+        setTimeout(() => this._tone(698, 880,  0.12, 0.60), 130);
+        setTimeout(() => this._tone(880, 1175, 0.15, 0.65), 260);
+        setTimeout(() => this._tone(1175,1175, 0.40, 0.70), 420);
+        break;
+      case 'double_century':
+        this._tone(523, 659, 0.10, 0.65);
+        setTimeout(() => this._tone(659, 784,  0.10, 0.65), 110);
+        setTimeout(() => this._tone(784, 1047, 0.10, 0.70), 220);
+        setTimeout(() => this._tone(1047,1319, 0.12, 0.75), 330);
+        setTimeout(() => this._tone(1319,1319, 0.50, 0.80), 460);
+        break;
+      case 'five_fer':
+        this._tone(440, 550, 0.12, 0.55);
+        setTimeout(() => this._tone(550, 660, 0.12, 0.55), 120);
+        setTimeout(() => this._tone(660, 550, 0.12, 0.55), 240);
+        setTimeout(() => this._tone(550, 440, 0.12, 0.55), 360);
+        setTimeout(() => this._tone(440, 440, 0.30, 0.60), 480);
+        break;
+      case 'ten_wicket':
+        this._tone(330, 440, 0.10, 0.60);
+        setTimeout(() => this._tone(440, 550, 0.10, 0.65), 100);
+        setTimeout(() => this._tone(550, 660, 0.10, 0.70), 200);
+        setTimeout(() => this._tone(660, 880, 0.10, 0.75), 300);
+        setTimeout(() => this._tone(880, 880, 0.60, 0.80), 400);
+        break;
+      case 'almanack_record':
+        this._tone(659, 784, 0.15, 0.60);
+        setTimeout(() => this._tone(784, 1047, 0.20, 0.65), 180);
+        setTimeout(() => this._tone(1047,1047, 0.35, 0.70), 400);
+        break;
+      case 'world_record':
+        this._tone(523, 784, 0.10, 0.70);
+        setTimeout(() => this._tone(784, 1047, 0.10, 0.75), 110);
+        setTimeout(() => this._tone(1047,784,  0.10, 0.75), 220);
+        setTimeout(() => this._tone(784, 1047, 0.10, 0.80), 330);
+        setTimeout(() => this._tone(1047,1319, 0.15, 0.85), 440);
+        setTimeout(() => this._tone(1319,1319, 0.55, 0.90), 580);
+        break;
+      case 'over_complete':
+        this._tone(440, 440, 0.08, 0.20);
         break;
     }
   },

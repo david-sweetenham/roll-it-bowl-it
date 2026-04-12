@@ -8,6 +8,20 @@ All notable changes to Roll It & Bowl It are documented here.
 
 ### Added
 
+**Broadcast graphic system** (`static/app.js`, `static/style.css`)
+- TV-style full/partial overlay cards appear on 11 milestone types: WICKET, DUCK, FIFTY, CENTURY, ONE-FIFTY, DOUBLE CENTURY, FIVE-WICKET HAUL, TEN-WICKET HAUL, NEW ALMANACK RECORD, WORLD RECORD BEATEN, OVER COMPLETE
+- `GraphicQueue` — serialised priority queue (world record = 13 down to over complete = 1); over-complete cards skipped if anything higher-priority is pending
+- `GRAPHIC_TIMING` constants: distinct `hold`, `animIn`, `animOut` durations per type in normal and broadcast modes; broadcast mode extends all holds (century 8 s, world record 15 s)
+- Three layout classes: `.graphic-banner` (slides up from bottom), `.graphic-card` (fades/scales in from centre), `.graphic-lower-third` (slides in from right)
+- CSS keyframe animations: `duck-waddle`, `star-shimmer`, `century-digit-in`, `confetti-fall`, `globe-spin`, `bowling-ball-covered`, `lightning-pulse`, `gwr-glow`
+- Confetti burst on century, double century, world record: randomised `.confetti-piece` elements via JS
+- Dimmed backdrop (`#graphic-backdrop`, `rgba(0,0,0,0.62)`) behind modal cards; pointer-events: none on overlay so Roll button never blocked
+- `SoundEngine.playGraphic(type)` — distinct tone sequences for all 11 types (AudioContext, no external assets)
+- Instant / fast-sim suppression: graphics skipped when `animationSpeed === 'instant'`; fast-sim shows a single `showFastSimSummary` blocking card with key events from `res.sim_digest` instead of individual cards
+- Enhanced innings break: `showInningsTransition` now builds a rich `.innings-break-graphic` card with team score, target, required RR, top scorer, best bowling; broadcast mode waits for click OR 8 s
+- Pre-ball state capture in `_completeBall` preserves striker's batting record (runs, balls) before state refresh — needed for dismissal graphic data
+- `GraphicQueue.clear()` called before innings-break and match-result flows to prevent overlap
+
 **Cricket Calendar Engine** (`cricket_calendar.py`)
 - Realistic FTP-style calendar generator: home seasons locked to real-world windows (England: May–Sep, India: Oct–Mar, Australia: Oct–Apr, etc.), away tours filling the gaps
 - ICC event scheduling: Champions Trophy (ODI), World Test Championship Final, T20 World Cup placed at correct intervals, hosted by rotating neutral venues
