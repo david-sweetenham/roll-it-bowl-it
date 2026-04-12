@@ -4821,12 +4821,9 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
   background: var(--surface2);
   border: 2px solid var(--border);
   border-radius: 14px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  padding: 12px;
-  gap: 6px;
+  overflow: hidden;
   transition: box-shadow 0.4s ease;
+  /* The grid lives on .demo-die-pips, not here */
 }
 
 .demo-die-el .pip {

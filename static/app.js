@@ -7194,10 +7194,10 @@ async function _animateDemoDie(targetFace, flashColor, outcomeText) {
     const pipsEl = el.querySelector('.demo-die-pips');
     if (!pipsEl) return;
     if (face === 0) {
-      pipsEl.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%';
+      pipsEl.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;box-sizing:border-box';
       pipsEl.innerHTML = '<span style="font-size:28px;color:var(--text-muted)">?</span>';
     } else {
-      pipsEl.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);width:100%;height:100%';
+      pipsEl.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);width:100%;height:100%;padding:12px;gap:6px;box-sizing:border-box';
       pipsEl.innerHTML = DIE_PIPS[face] || '';
     }
     el.dataset.face = face;
