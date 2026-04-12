@@ -1,4 +1,4 @@
-# Roll It & Bowl It
+# Roll It & Bowl It (UNDER CONSTRUCTION)
 
 **Dice Cricket Done Digitally** — a full-featured cricket simulation game powered by physical dice mechanics, running as a local web app on your machine.
 
