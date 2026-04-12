@@ -567,7 +567,12 @@
     <div id="screen-teams" class="screen">
       <div class="screen-inner">
         <h2>Teams</h2>
-        <p class="screen-subtitle">All international squads.</p>
+        <p id="teams-subtitle" class="screen-subtitle">All teams.</p>
+        <div class="teams-filter-bar">
+          <button id="teams-filter-all" class="teams-filter-btn active" onclick="setTeamsFilter('all')">All</button>
+          <button id="teams-filter-international" class="teams-filter-btn" onclick="setTeamsFilter('international')">International</button>
+          <button id="teams-filter-domestic" class="teams-filter-btn" onclick="setTeamsFilter('domestic')">Domestic</button>
+        </div>
         <div id="teams-list" class="teams-grid">Loading...</div>
       </div>
     </div>

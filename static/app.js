@@ -3673,7 +3673,9 @@ async function loadMatchScreen() {
 
 async function loadTeamsScreen() {
   const container = document.getElementById('teams-list');
+  const subtitleEl = document.getElementById('teams-subtitle');
   if (!container) return;
+  AppState.teamsFilter = AppState.teamsFilter || 'all';
   container.innerHTML = '<div class="spinner"></div>';
 
   const data = await api('GET', '/api/teams');
@@ -3684,15 +3686,45 @@ async function loadTeamsScreen() {
     return;
   }
 
-  container.innerHTML = teams.map(t => `
+  const filteredTeams = teams.filter(t => {
+    const isDomestic = !!t.team_type && t.team_type !== 'international';
+    if (AppState.teamsFilter === 'international') return !isDomestic;
+    if (AppState.teamsFilter === 'domestic') return isDomestic;
+    return true;
+  });
+
+  ['all', 'international', 'domestic'].forEach(key => {
+    document.getElementById(`teams-filter-${key}`)?.classList.toggle('active', AppState.teamsFilter === key);
+  });
+
+  if (subtitleEl) {
+    const label = AppState.teamsFilter === 'international'
+      ? 'International teams only.'
+      : AppState.teamsFilter === 'domestic'
+        ? 'Domestic and franchise teams only.'
+        : 'All teams.';
+    subtitleEl.textContent = `${label} ${filteredTeams.length} shown.`;
+  }
+
+  if (!filteredTeams.length) {
+    container.innerHTML = '<p class="text-muted">No teams match this filter.</p>';
+    return;
+  }
+
+  container.innerHTML = filteredTeams.map(t => `
     <div class="team-card" onclick="loadTeamDetail(${t.id})">
       <span class="team-card-badge" style="background:${t.badge_colour || '#444'}"></span>
       <div>
         <div class="team-card-name">${t.name}</div>
-        <div class="team-card-code">${t.short_code || ''}</div>
+        <div class="team-card-code">${t.short_code || ''}${t.team_type && t.team_type !== 'international' && t.league ? ` · ${t.league}` : ''}</div>
       </div>
     </div>
   `).join('');
+}
+
+function setTeamsFilter(filter) {
+  AppState.teamsFilter = ['all', 'international', 'domestic'].includes(filter) ? filter : 'all';
+  if (AppState.currentScreen === 'teams') loadTeamsScreen();
 }
 
 // ── Team Detail ───────────────────────────────────────────────────────────────

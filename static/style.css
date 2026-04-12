@@ -589,6 +589,32 @@ select option { background: var(--surface); color: var(--text); }
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 16px;
 }
+.teams-filter-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 18px;
+}
+.teams-filter-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  padding: 7px 14px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.teams-filter-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.teams-filter-btn.active {
+  background: rgba(46,204,113,0.10);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .team-card {
   background: var(--surface);
