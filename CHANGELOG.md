@@ -4,6 +4,42 @@ All notable changes to Roll It & Bowl It are documented here.
 
 ---
 
+## [0.2.0-dev] — 2026-04-12
+
+### Added
+
+**Cricket Calendar Engine** (`cricket_calendar.py`)
+- Realistic FTP-style calendar generator: home seasons locked to real-world windows (England: May–Sep, India: Oct–Mar, Australia: Oct–Apr, etc.), away tours filling the gaps
+- ICC event scheduling: Champions Trophy (ODI), World Test Championship Final, T20 World Cup placed at correct intervals, hosted by rotating neutral venues
+- ICC double-booking fix: `team_last_date` tracking prevents the same team appearing in two ICC fixtures on the same date
+- Relaxed density fix: reciprocal tour skipped in `_schedule_bilateral()` when `density == 'relaxed'` — prevents paradox where relaxed mode produced more fixtures than moderate
+- Calendar Style option in World Wizard Step 2: **Realistic** (FTP logic, seasons & ICC events) or **Random** (original rotation — faster to generate)
+- Calendar preview panel shown after world creation in Realistic mode: total fixtures, series count, ICC events, first 30 upcoming fixtures
+
+**UAT suite** (`uat/`)
+- `test_calendar.py` — 10 acceptance tests: England/India home-season months enforced, Ashes present/absent by density, no double-booking on same date, avoid_months respected, India-Pakistan only at ICC events, format order within series, fixture count ordering by density, required fields present on every fixture
+- `run_uat.py` — orchestrator running suites as subprocesses, prints pass/fail summary
+
+**Almanack: real-world records benchmarks**
+- `real_world_records` table seeded on startup (idempotent) with 28 reference records: Test/ODI/T20 batting and bowling bests, team totals — sourced from official ICC records
+- New API endpoint `GET /api/almanack/honours/with-world-records` — returns in-game records enriched with `real_world` entry and `pct_of_world_record` percentage
+- Honours board enriched view: two-panel cards showing in-game achievement alongside real-world benchmark, progress bar (clamped at 100%), gold "BEATEN" badge when the in-game record surpasses the real-world mark
+
+### Fixed
+
+**Almanack — Batting/Bowling tabs empty (BUG 1)**
+- Root cause: batting and bowling API endpoints returned `{'records': rows}` but the frontend read `data.rows`. Key renamed to `rows` in both endpoints.
+- View status filter also excluded `status='batting'` not-outs (batters still at the crease when stumps were drawn). Fixed by changing `WHERE bi.status = 'dismissed'` to `WHERE bi.status != 'yet_to_bat'`.
+- Exhibition fallback banner added: appears in the Almanack when no canon matches exist, explaining how to promote matches to official records via the Manage tab.
+
+**Almanack — Bowling figures format (BUG 2)**
+- Bowling records and honours were displaying wickets only. All bowling values now rendered as `W/R` format (e.g. `6/32`) via `formatBowlingFigures(wickets, runs)`. Real-world bowling records seeded with pre-formatted `display_value` strings in the same format.
+
+**Almanack — Honours label names (BUG 3)**
+- Honours board was showing raw database key names (`highest_score_test`, `best_bowling_odi`, etc.). All keys mapped through `HONOURS_LABELS` constant with human-readable labels; unmapped keys fall back to title-case conversion.
+
+---
+
 ## [0.1.0-dev] — 2026-04-12
 
 Initial development release. Core game engine, full season simulation, live match play, and two rolling modes.

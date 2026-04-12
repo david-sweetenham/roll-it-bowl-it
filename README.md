@@ -14,6 +14,8 @@ I built this because I wanted the tactile tension of dice cricket but with prope
 - **Ten international teams** (England, Australia, India, Pakistan, New Zealand, South Africa, West Indies, Sri Lanka, Bangladesh, Afghanistan) with rated batters and bowlers
 - **Eighteen venues** with home-ground advantages
 - **Persistent world**: standings, averages, career records, head-to-head results all update as matches are played
+- **Realistic cricket calendar**: FTP-style scheduling with proper home seasons, bilateral tours, and ICC events (Champions Trophy, WTC Final, T20 World Cup) — or random rotation for faster setup
+- **Dice Cricketers' Almanack**: full career batting and bowling statistics, partnership records, honours board with real-world benchmark comparisons and progress bars
 - **Tension detection**: the game notices when you're in a tight finish or on a century approach and nudges you toward Manual mode for the atmosphere
 - **Broadcast mode**: slower animations, dramatic pauses, designed for streaming
 
@@ -117,24 +119,29 @@ The banner is per-innings — dismiss it and it won't reappear for that innings.
 
 ```
 roll-it-bowl-it/
-├── app.py              # Flask app — all API routes (71 endpoints)
+├── app.py              # Flask app — all API routes
 ├── game_engine.py      # HOWZAT! dice engine — do not modify
 ├── database.py         # DB access layer — do not modify
+├── cricket_calendar.py # FTP-style calendar engine
 ├── schema.sql          # SQLite schema (25+ tables)
-├── seed_data.py        # Initial teams, players, venues
+├── seed_data.py        # Initial teams, players, venues, world records
 ├── config.py           # Production config
 ├── config_dev.py       # Development overrides (not packaged)
 ├── start.py            # Entry point for both dev and packaged exe
 ├── templates/
 │   └── index.html      # Single-page app shell
 ├── static/
-│   ├── app.js          # All client-side logic (~2000 lines)
+│   ├── app.js          # All client-side logic
 │   └── style.css       # Styles + animations
 ├── tests/
 │   ├── test_engine.py          # 5 engine unit tests
 │   ├── test_sim_controls.py    # 5 simulation-control tests
 │   ├── test_world_sim.py       # 4 world-simulation tests
 │   └── test_canon_system.py    # 94 API + system tests
+├── uat/
+│   ├── test_calendar.py        # 10 calendar engine UAT tests
+│   └── run_uat.py              # UAT orchestrator
+├── screenshots/        # Application screenshots
 └── ribi.spec           # PyInstaller packaging spec
 ```
 
@@ -148,6 +155,41 @@ pytest tests/ -v
 ```
 
 All 103 tests pass against the current codebase. The canon system tests exercise all major API routes with a live SQLite database.
+
+### UAT suite (calendar engine)
+
+```bash
+python uat/run_uat.py
+# or run a suite directly:
+python uat/test_calendar.py
+```
+
+10 acceptance tests covering: home-season month enforcement, ICC event placement, double-booking prevention, avoid_months respected, India-Pakistan isolation, format ordering, fixture count by density.
+
+---
+
+## Screenshots
+
+### Match in progress — HOWZAT! appeal (dark mode)
+![Match HOWZAT](screenshots/match-howzat.png)
+
+### Match result screen
+![Match Result](screenshots/match-result.png)
+
+### Match start — batting and bowling panels
+![Match Start](screenshots/match-start-dark.png)
+
+### The Dice Cricketers' Almanack — Teams tab
+![Almanack Teams](screenshots/almanack-teams.png)
+
+### The Dice Cricketers' Almanack — Batting records
+![Almanack Batting](screenshots/almanack-batting.png)
+
+### The Dice Cricketers' Almanack — Honours with real-world benchmarks
+![Almanack Honours](screenshots/almanack-honours.png)
+
+### Series & Tournaments
+![Series and Tournaments](screenshots/series-tournaments.png)
 
 ---
 
@@ -172,7 +214,7 @@ The output is `dist/RollItBowlIt` (Linux/Mac) or `dist/RollItBowlIt.exe` (Window
 
 ## Version
 
-`0.1.0-dev` — Python 3.14.3, Flask 3.1.3
+`0.2.0-dev` — Python 3.14.3, Flask 3.1.3
 
 See [CHANGELOG.md](CHANGELOG.md) for what's in this release.
 For how to play, see [HOWTO_PLAY.md](HOWTO_PLAY.md).

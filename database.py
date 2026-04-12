@@ -801,12 +801,75 @@ def bulk_create_fixtures(db, fixtures):
     db.executemany(
         "INSERT INTO fixtures "
         "(tournament_id, series_id, world_id, scheduled_date, venue_id, "
-        " team1_id, team2_id, fixture_type, format, is_user_match, status) "
+        " team1_id, team2_id, fixture_type, format, is_user_match, status, "
+        " series_name, match_number_in_series, series_length, "
+        " is_icc_event, icc_event_name, is_home_for_team1, tour_template, season_year) "
         "VALUES (:tournament_id, :series_id, :world_id, :scheduled_date, :venue_id, "
-        " :team1_id, :team2_id, :fixture_type, :format, :is_user_match, 'scheduled')",
-        [{**f, 'format': f.get('format'), 'is_user_match': f.get('is_user_match', 0)} for f in fixtures]
+        " :team1_id, :team2_id, :fixture_type, :format, :is_user_match, 'scheduled', "
+        " :series_name, :match_number_in_series, :series_length, "
+        " :is_icc_event, :icc_event_name, :is_home_for_team1, :tour_template, :season_year)",
+        [{
+            **f,
+            'format':                  f.get('format'),
+            'is_user_match':           f.get('is_user_match', 0),
+            'series_name':             f.get('series_name'),
+            'match_number_in_series':  f.get('match_number_in_series', 1),
+            'series_length':           f.get('series_length', 1),
+            'is_icc_event':            1 if f.get('is_icc_event') else 0,
+            'icc_event_name':          f.get('icc_event_name'),
+            'is_home_for_team1':       1 if f.get('is_home_for_team1', True) else 0,
+            'tour_template':           f.get('tour_template'),
+            'season_year':             f.get('season_year'),
+        } for f in fixtures]
     )
     db.commit()
+
+
+def create_world_series(db, data):
+    """Insert a world_series record and return its id."""
+    cur = db.execute(
+        "INSERT INTO world_series "
+        "(world_id, series_name, format, team1_id, team2_id, host_team_id, "
+        " start_date, end_date, total_matches, is_icc_event, icc_event_name, status) "
+        "VALUES (:world_id, :series_name, :format, :team1_id, :team2_id, :host_team_id, "
+        " :start_date, :end_date, :total_matches, :is_icc_event, :icc_event_name, 'scheduled')",
+        {
+            'world_id':       data['world_id'],
+            'series_name':    data['series_name'],
+            'format':         data.get('format'),
+            'team1_id':       data.get('team1_id'),
+            'team2_id':       data.get('team2_id'),
+            'host_team_id':   data.get('host_team_id'),
+            'start_date':     data.get('start_date'),
+            'end_date':       data.get('end_date'),
+            'total_matches':  data.get('total_matches', 0),
+            'is_icc_event':   1 if data.get('is_icc_event') else 0,
+            'icc_event_name': data.get('icc_event_name'),
+        }
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def get_world_series(db, world_id, status=None):
+    """Return all series for a world, optionally filtered by status."""
+    q = (
+        "SELECT ws.*, "
+        "  t1.name as team1_name, t2.name as team2_name, "
+        "  ht.name as host_team_name "
+        "FROM world_series ws "
+        "LEFT JOIN teams t1 ON ws.team1_id = t1.id "
+        "LEFT JOIN teams t2 ON ws.team2_id = t2.id "
+        "LEFT JOIN teams ht ON ws.host_team_id = ht.id "
+        "WHERE ws.world_id = ?"
+    )
+    params = [world_id]
+    if status:
+        q += " AND ws.status = ?"
+        params.append(status)
+    q += " ORDER BY ws.start_date"
+    rows = db.execute(q, params).fetchall()
+    return dict_from_rows(rows)
 
 
 def get_fixtures(db, world_id=None, series_id=None, tournament_id=None, status=None):
@@ -1036,6 +1099,17 @@ def run_migrations(db):
         "ALTER TABLE matches ADD COLUMN canon_status TEXT DEFAULT 'canon'",
         "ALTER TABLE matches ADD COLUMN player_mode TEXT DEFAULT 'ai_vs_ai'",
         "ALTER TABLE matches ADD COLUMN human_team_id INTEGER DEFAULT NULL",
+        # Calendar engine columns
+        "ALTER TABLE fixtures ADD COLUMN series_name TEXT",
+        "ALTER TABLE fixtures ADD COLUMN match_number_in_series INTEGER DEFAULT 1",
+        "ALTER TABLE fixtures ADD COLUMN series_length INTEGER DEFAULT 1",
+        "ALTER TABLE fixtures ADD COLUMN is_icc_event INTEGER DEFAULT 0",
+        "ALTER TABLE fixtures ADD COLUMN icc_event_name TEXT",
+        "ALTER TABLE fixtures ADD COLUMN is_home_for_team1 INTEGER DEFAULT 1",
+        "ALTER TABLE fixtures ADD COLUMN tour_template TEXT",
+        "ALTER TABLE fixtures ADD COLUMN season_year INTEGER",
+        # Calendar style on worlds table
+        "ALTER TABLE worlds ADD COLUMN calendar_style TEXT DEFAULT 'random'",
     ]
     for sql in migrations:
         try:
@@ -1076,29 +1150,54 @@ def run_migrations(db):
         ")"
     )
 
-    # Recreate statistical views with canon_status filter
+    # world_series table — tracks series context for world mode
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS world_series ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  world_id INTEGER NOT NULL,"
+        "  series_name TEXT NOT NULL,"
+        "  format TEXT,"
+        "  team1_id INTEGER,"
+        "  team2_id INTEGER,"
+        "  host_team_id INTEGER,"
+        "  start_date TEXT,"
+        "  end_date TEXT,"
+        "  total_matches INTEGER,"
+        "  matches_completed INTEGER DEFAULT 0,"
+        "  is_icc_event INTEGER DEFAULT 0,"
+        "  icc_event_name TEXT,"
+        "  status TEXT DEFAULT 'scheduled',"
+        "  winner_team_id INTEGER,"
+        "  FOREIGN KEY (world_id) REFERENCES worlds(id)"
+        ")"
+    )
+
+    # Recreate statistical views — no canon filter here; applied at query time
     # (DROP + CREATE is idempotent — views have no data)
     db.execute("DROP VIEW IF EXISTS batting_averages")
     db.execute(
         "CREATE VIEW batting_averages AS "
         "SELECT "
         " p.id as player_id, p.name, t.name as team_name, t.id as team_id, m.format, "
+        " m.canon_status, "
         " COUNT(DISTINCT m.id) as matches, COUNT(bi.id) as innings, "
-        " SUM(bi.not_out) as not_outs, SUM(bi.runs) as runs, MAX(bi.runs) as highest_score, "
-        " ROUND(CAST(SUM(bi.runs) AS REAL) / NULLIF(COUNT(bi.id) - SUM(bi.not_out), 0), 2) as average, "
+        " SUM(CASE WHEN bi.not_out=1 OR bi.status='batting' OR bi.status='not_out' THEN 1 ELSE 0 END) as not_outs, "
+        " SUM(bi.runs) as runs, MAX(bi.runs) as highest_score, "
+        " MAX(CASE WHEN bi.not_out=1 OR bi.status='batting' OR bi.status='not_out' THEN bi.runs ELSE 0 END) as highest_not_out, "
+        " ROUND(CAST(SUM(bi.runs) AS REAL) / NULLIF(COUNT(bi.id) - "
+        "   SUM(CASE WHEN bi.not_out=1 OR bi.status='batting' OR bi.status='not_out' THEN 1 ELSE 0 END), 0), 2) as average, "
         " ROUND(CAST(SUM(bi.runs) AS REAL) / NULLIF(SUM(bi.balls_faced), 0) * 100, 2) as strike_rate, "
         " SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) as hundreds, "
         " SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) as fifties, "
-        " SUM(CASE WHEN bi.runs = 0 AND bi.not_out = 0 THEN 1 ELSE 0 END) as ducks, "
+        " SUM(CASE WHEN bi.runs = 0 AND bi.not_out = 0 AND bi.status != 'batting' AND bi.status != 'not_out' THEN 1 ELSE 0 END) as ducks, "
         " SUM(bi.fours) as fours, SUM(bi.sixes) as sixes, SUM(bi.balls_faced) as balls_faced "
         "FROM batter_innings bi "
         "JOIN innings i ON bi.innings_id = i.id "
         "JOIN matches m ON i.match_id = m.id "
         "JOIN players p ON bi.player_id = p.id "
         "JOIN teams t ON p.team_id = t.id "
-        "WHERE (bi.status = 'dismissed' OR bi.not_out = 1) "
-        "  AND COALESCE(m.canon_status, 'canon') = 'canon' "
-        "GROUP BY p.id, m.format"
+        "WHERE bi.status != 'yet_to_bat' "
+        "GROUP BY p.id, m.format, m.canon_status"
     )
 
     db.execute("DROP VIEW IF EXISTS bowling_averages")
@@ -1106,6 +1205,7 @@ def run_migrations(db):
         "CREATE VIEW bowling_averages AS "
         "SELECT "
         " p.id as player_id, p.name, p.bowling_type, t.name as team_name, t.id as team_id, m.format, "
+        " m.canon_status, "
         " COUNT(DISTINCT m.id) as matches, COUNT(bwi.id) as innings_bowled, "
         " SUM(bwi.overs) as overs, SUM(bwi.maidens) as maidens, "
         " SUM(bwi.runs_conceded) as runs_conceded, SUM(bwi.wickets) as wickets, "
@@ -1119,8 +1219,7 @@ def run_migrations(db):
         "JOIN players p ON bwi.player_id = p.id "
         "JOIN teams t ON p.team_id = t.id "
         "WHERE bwi.overs > 0 "
-        "  AND COALESCE(m.canon_status, 'canon') = 'canon' "
-        "GROUP BY p.id, m.format"
+        "GROUP BY p.id, m.format, m.canon_status"
     )
 
     db.execute("DROP VIEW IF EXISTS team_records_view")
@@ -1154,6 +1253,27 @@ def run_migrations(db):
         "JOIN innings i ON p.innings_id = i.id "
         "JOIN matches m ON i.match_id = m.id "
         "WHERE COALESCE(m.canon_status, 'canon') = 'canon'"
+    )
+
+    # Real-world records reference table
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS real_world_records ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  record_key TEXT NOT NULL,"
+        "  format TEXT NOT NULL,"
+        "  record_type TEXT NOT NULL,"
+        "  value_runs INTEGER,"
+        "  value_wickets INTEGER,"
+        "  value_runs_conceded INTEGER,"
+        "  value_decimal REAL,"
+        "  display_value TEXT NOT NULL,"
+        "  holder_name TEXT,"
+        "  team_name TEXT,"
+        "  opponent_name TEXT,"
+        "  venue_name TEXT,"
+        "  match_date TEXT,"
+        "  notes TEXT"
+        ")"
     )
 
     db.commit()
@@ -1220,6 +1340,14 @@ def _safe_sort(col, allowed, default):
     return col if col in allowed else default
 
 
+def _batting_query(db, canon_filter, extra, p, sort_col, sort_dir, limit, offset):
+    base  = f"SELECT * FROM batting_averages WHERE canon_status {canon_filter}" + extra
+    total = db.execute(f"SELECT COUNT(*) as cnt FROM ({base})", p).fetchone()['cnt']
+    rows  = db.execute(base + f" ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?",
+                       p + [limit, offset]).fetchall()
+    return dict_from_rows(rows), total
+
+
 def get_almanack_batting(db, params):
     sort_col = _safe_sort(params.get('sort', 'runs'),
                           {'runs', 'average', 'strike_rate', 'hundreds', 'fifties',
@@ -1228,13 +1356,22 @@ def get_almanack_batting(db, params):
     sort_dir = 'ASC' if params.get('dir', 'desc').lower() == 'asc' else 'DESC'
     limit    = int(params.get('limit', 50))
     offset   = int(params.get('offset', 0))
-
     extra, p = build_almanack_filters(params)
-    query    = "SELECT * FROM batting_averages WHERE 1=1" + extra
-    total    = db.execute(f"SELECT COUNT(*) as cnt FROM ({query})", p).fetchone()['cnt']
 
-    query += f" ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?"
-    rows = db.execute(query, p + [limit, offset]).fetchall()
+    # Canon matches first; fall back to all non-deleted matches
+    rows, total = _batting_query(db, "= 'canon'", extra, p, sort_col, sort_dir, limit, offset)
+    if rows:
+        return rows, total, False
+
+    rows, total = _batting_query(db, "!= 'deleted'", extra, p, sort_col, sort_dir, limit, offset)
+    return rows, total, bool(rows)   # True = exhibition fallback
+
+
+def _bowling_query(db, canon_filter, extra, p, sort_col, sort_dir, limit, offset):
+    base  = f"SELECT * FROM bowling_averages WHERE wickets > 0 AND canon_status {canon_filter}" + extra
+    total = db.execute(f"SELECT COUNT(*) as cnt FROM ({base})", p).fetchone()['cnt']
+    rows  = db.execute(base + f" ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?",
+                       p + [limit, offset]).fetchall()
     return dict_from_rows(rows), total
 
 
@@ -1246,14 +1383,14 @@ def get_almanack_bowling(db, params):
     sort_dir = 'ASC' if params.get('dir', 'desc').lower() == 'asc' else 'DESC'
     limit    = int(params.get('limit', 50))
     offset   = int(params.get('offset', 0))
-
     extra, p = build_almanack_filters(params, context='bowling')
-    query    = "SELECT * FROM bowling_averages WHERE wickets > 0" + extra
-    total    = db.execute(f"SELECT COUNT(*) as cnt FROM ({query})", p).fetchone()['cnt']
 
-    query += f" ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?"
-    rows = db.execute(query, p + [limit, offset]).fetchall()
-    return dict_from_rows(rows), total
+    rows, total = _bowling_query(db, "= 'canon'", extra, p, sort_col, sort_dir, limit, offset)
+    if rows:
+        return rows, total, False
+
+    rows, total = _bowling_query(db, "!= 'deleted'", extra, p, sort_col, sort_dir, limit, offset)
+    return rows, total, bool(rows)
 
 
 def get_almanack_allrounders(db, params):
@@ -1266,6 +1403,14 @@ def get_almanack_allrounders(db, params):
     limit    = int(params.get('limit', 50))
     offset   = int(params.get('offset', 0))
 
+    canon_clause = "bat.canon_status = 'canon'"
+    # Check if any canon data exists; if not, fall back to all non-deleted
+    _test = db.execute(
+        "SELECT 1 FROM batting_averages WHERE canon_status = 'canon' LIMIT 1"
+    ).fetchone()
+    if not _test:
+        canon_clause = "bat.canon_status != 'deleted'"
+
     base = (
         "SELECT bat.player_id, bat.name, bat.team_name, bat.team_id, bat.format, "
         " bat.matches, bat.innings, bat.not_outs, bat.runs, bat.highest_score, "
@@ -1275,8 +1420,9 @@ def get_almanack_allrounders(db, params):
         " bowl.average AS bowling_average, bowl.economy, bowl.five_fors, "
         " ROUND(COALESCE(bat.average,0) + COALESCE(bowl.wickets,0) * 20.0, 2) AS ar_index "
         "FROM batting_averages bat "
-        "JOIN bowling_averages bowl ON bat.player_id=bowl.player_id AND bat.format=bowl.format "
-        "WHERE bat.innings >= 3 AND bowl.wickets >= 5"
+        "JOIN bowling_averages bowl ON bat.player_id=bowl.player_id "
+        "  AND bat.format=bowl.format AND bat.canon_status=bowl.canon_status "
+        f"WHERE {canon_clause} AND bat.innings >= 3 AND bowl.wickets >= 5"
     )
     p = []
     if params.get('format'):
@@ -1529,6 +1675,189 @@ def get_almanack_honours(db):
     }
 
 
+def get_almanack_honours_with_world_records(db):
+    """
+    Returns the honours board enriched with real-world record comparisons.
+    Each entry includes an in-game record and the matching real-world benchmark.
+    """
+    real_world_recs = {
+        r['record_key']: dict(r)
+        for r in db.execute("SELECT * FROM real_world_records").fetchall()
+    }
+
+    # ── Batting records ───────────────────────────────────────────────────────
+    BATTING_KEYS = [
+        ('highest_score_test',  'Test',  'highest_score'),
+        ('highest_score_odi',   'ODI',   'highest_score'),
+        ('highest_score_t20',   'T20',   'highest_score'),
+        ('most_runs_test',      'Test',  'most_runs'),
+        ('most_runs_odi',       'ODI',   'most_runs'),
+        ('most_runs_t20',       'T20',   'most_runs'),
+        ('best_average_test',   'Test',  'best_average'),
+        ('best_average_odi',    'ODI',   'best_average'),
+        ('most_centuries_test', 'Test',  'most_centuries'),
+        ('most_centuries_odi',  'ODI',   'most_centuries'),
+    ]
+
+    BOWLING_KEYS = [
+        ('best_bowling_test',         'Test', 'best_bowling'),
+        ('best_bowling_odi',          'ODI',  'best_bowling'),
+        ('best_bowling_t20',          'T20',  'best_bowling'),
+        ('most_wickets_test',         'Test', 'most_wickets'),
+        ('most_wickets_odi',          'ODI',  'most_wickets'),
+        ('most_wickets_t20',          'T20',  'most_wickets'),
+        ('best_bowling_average_test', 'Test', 'best_bowling_average'),
+        ('most_five_fors_test',       'Test', 'most_five_fors'),
+    ]
+
+    TEAM_KEYS = [
+        ('highest_team_total_test', 'Test', 'highest_team_total'),
+        ('highest_team_total_odi',  'ODI',  'highest_team_total'),
+        ('highest_team_total_t20',  'T20',  'highest_team_total'),
+        ('lowest_team_total_test',  'Test', 'lowest_team_total'),
+        ('lowest_team_total_odi',   'ODI',  'lowest_team_total'),
+    ]
+
+    def _in_game_batting(fmt, record_type):
+        if record_type == 'highest_score':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, highest_score as value, "
+                    " not_outs "
+                    f"FROM batting_averages WHERE format=? AND canon_status {cs} "
+                    "ORDER BY highest_score DESC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        elif record_type == 'most_runs':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, SUM(runs) as value "
+                    f"FROM batting_averages WHERE format=? AND canon_status {cs} "
+                    "GROUP BY player_id, name, team_name ORDER BY value DESC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        elif record_type == 'best_average':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, average as value "
+                    f"FROM batting_averages WHERE format=? AND canon_status {cs} "
+                    "AND innings >= 5 ORDER BY average DESC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        elif record_type == 'most_centuries':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, SUM(hundreds) as value "
+                    f"FROM batting_averages WHERE format=? AND canon_status {cs} "
+                    "GROUP BY player_id, name, team_name ORDER BY value DESC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        return None
+
+    def _in_game_bowling(fmt, record_type):
+        if record_type == 'best_bowling':
+            row = db.execute(
+                "SELECT p.name as player_name, t.name as team_name, "
+                " bwi.wickets, bwi.runs_conceded, "
+                " (bwi.wickets || '/' || bwi.runs_conceded) as display_value, "
+                " m.match_date, opp.name as opponent_name, v.name as venue_name "
+                "FROM bowler_innings bwi "
+                "JOIN innings i ON bwi.innings_id = i.id "
+                "JOIN matches m ON i.match_id = m.id "
+                "JOIN players p ON bwi.player_id = p.id "
+                "JOIN teams t ON p.team_id = t.id "
+                "JOIN teams opp ON ("
+                "  CASE WHEN i.batting_team_id = t.id "
+                "  THEN i.bowling_team_id ELSE i.batting_team_id END) = opp.id "
+                "LEFT JOIN venues v ON m.venue_id = v.id "
+                "WHERE m.format = ? AND bwi.wickets > 0 "
+                "  AND COALESCE(m.canon_status,'canon') != 'deleted' "
+                "ORDER BY bwi.wickets DESC, bwi.runs_conceded ASC LIMIT 1", (fmt,)
+            ).fetchone()
+            return dict(row) if row else None
+        elif record_type == 'most_wickets':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, SUM(wickets) as value "
+                    f"FROM bowling_averages WHERE format=? AND canon_status {cs} "
+                    "GROUP BY player_id, name, team_name ORDER BY value DESC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        elif record_type == 'best_bowling_average':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, average as value "
+                    f"FROM bowling_averages WHERE format=? AND canon_status {cs} "
+                    "AND wickets >= 5 ORDER BY average ASC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        elif record_type == 'most_five_fors':
+            for cs in ("= 'canon'", "!= 'deleted'"):
+                row = db.execute(
+                    "SELECT player_id, name as player_name, team_name, SUM(five_fors) as value "
+                    f"FROM bowling_averages WHERE format=? AND canon_status {cs} "
+                    "GROUP BY player_id, name, team_name ORDER BY value DESC LIMIT 1", (fmt,)
+                ).fetchone()
+                if row: return dict(row)
+        return None
+
+    def _in_game_team(fmt, record_type):
+        order = 'DESC' if record_type == 'highest_team_total' else 'ASC'
+        row = db.execute(
+            "SELECT i.total_runs as value, i.total_wickets as wickets, "
+            " t.name as team_name, opp.name as opponent_name, "
+            " v.name as venue_name, m.match_date "
+            "FROM innings i JOIN matches m ON i.match_id=m.id "
+            "JOIN teams t ON i.batting_team_id=t.id "
+            "JOIN teams opp ON (CASE WHEN i.batting_team_id=m.team1_id "
+            "  THEN m.team2_id ELSE m.team1_id END)=opp.id "
+            "LEFT JOIN venues v ON m.venue_id=v.id "
+            f"WHERE m.format=? AND m.status='complete' AND i.total_runs > 0 "
+            "  AND COALESCE(m.canon_status,'canon') != 'deleted' "
+            f"ORDER BY i.total_runs {order} LIMIT 1", (fmt,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def _enrich(key, in_game, in_game_num_value=None):
+        rw = real_world_recs.get(key)
+        if not rw:
+            return None
+        rw_num = rw.get('value_runs') or rw.get('value_wickets') or rw.get('value_decimal')
+        ig_num  = in_game_num_value or (in_game.get('value') if in_game else None)
+        pct = None
+        if ig_num and rw_num and rw_num != 0:
+            pct = round(float(ig_num) / float(rw_num) * 100, 1)
+        return {
+            'key':                key,
+            'in_game':            in_game,
+            'real_world':         rw,
+            'pct_of_world_record': pct,
+        }
+
+    batting_out, bowling_out, team_out = [], [], []
+
+    for key, fmt, rt in BATTING_KEYS:
+        ig = _in_game_batting(fmt, rt)
+        entry = _enrich(key, ig)
+        if entry:
+            batting_out.append(entry)
+
+    for key, fmt, rt in BOWLING_KEYS:
+        ig = _in_game_bowling(fmt, rt)
+        entry = _enrich(key, ig,
+                        in_game_num_value=ig.get('wickets') if ig and rt == 'best_bowling' else None)
+        if entry:
+            bowling_out.append(entry)
+
+    for key, fmt, rt in TEAM_KEYS:
+        ig = _in_game_team(fmt, rt)
+        entry = _enrich(key, ig)
+        if entry:
+            team_out.append(entry)
+
+    return {'batting': batting_out, 'bowling': bowling_out, 'teams': team_out}
+
+
 def get_almanack_search(db, q):
     """Search players, teams and matches. Returns list of {type, id, name, context}."""
     if not q or len(q.strip()) < 2:
@@ -1576,21 +1905,26 @@ def get_almanack_search(db, q):
 # ── Almanack records ──────────────────────────────────────────────────────────
 
 def get_almanack_batting_record(db, format_, record_type='highest_score'):
-    if record_type == 'highest_score':
-        row = db.execute(
-            "SELECT player_id, name, team_name, highest_score as value "
-            "FROM batting_averages WHERE format=? ORDER BY highest_score DESC LIMIT 1",
-            (format_,)
-        ).fetchone()
-    elif record_type == 'highest_average':
-        row = db.execute(
-            "SELECT player_id, name, team_name, average as value "
-            "FROM batting_averages WHERE format=? AND innings >= 5 ORDER BY average DESC LIMIT 1",
-            (format_,)
-        ).fetchone()
-    else:
-        return None
-    return dict_from_row(row)
+    for cs in ("= 'canon'", "!= 'deleted'"):
+        if record_type == 'highest_score':
+            row = db.execute(
+                "SELECT player_id, name, team_name, highest_score as value "
+                f"FROM batting_averages WHERE format=? AND canon_status {cs} "
+                "ORDER BY highest_score DESC LIMIT 1",
+                (format_,)
+            ).fetchone()
+        elif record_type == 'highest_average':
+            row = db.execute(
+                "SELECT player_id, name, team_name, average as value "
+                f"FROM batting_averages WHERE format=? AND canon_status {cs} "
+                "AND innings >= 5 ORDER BY average DESC LIMIT 1",
+                (format_,)
+            ).fetchone()
+        else:
+            return None
+        if row:
+            return dict_from_row(row)
+    return None
 
 
 def get_almanack_bowling_record(db, format_, record_type='best_figures'):
@@ -1672,12 +2006,29 @@ def get_player_profile(db, player_id):
         return None
 
     bat_rows = db.execute(
-        "SELECT * FROM batting_averages WHERE player_id = ? ORDER BY format",
+        "SELECT player_id, name, team_name, team_id, format, "
+        " SUM(matches) as matches, SUM(innings) as innings, SUM(not_outs) as not_outs, "
+        " SUM(runs) as runs, MAX(highest_score) as highest_score, "
+        " ROUND(CAST(SUM(runs) AS REAL) / NULLIF(SUM(innings)-SUM(not_outs),0),2) as average, "
+        " ROUND(CAST(SUM(runs) AS REAL) / NULLIF(SUM(balls_faced),0)*100,2) as strike_rate, "
+        " SUM(hundreds) as hundreds, SUM(fifties) as fifties, SUM(ducks) as ducks, "
+        " SUM(fours) as fours, SUM(sixes) as sixes, SUM(balls_faced) as balls_faced "
+        "FROM batting_averages WHERE player_id = ? AND canon_status != 'deleted' "
+        "GROUP BY player_id, name, team_name, team_id, format ORDER BY format",
         (player_id,)
     ).fetchall()
 
     bowl_rows = db.execute(
-        "SELECT * FROM bowling_averages WHERE player_id = ? ORDER BY format",
+        "SELECT player_id, name, bowling_type, team_name, team_id, format, "
+        " SUM(matches) as matches, SUM(innings_bowled) as innings_bowled, "
+        " SUM(overs) as overs, SUM(maidens) as maidens, "
+        " SUM(runs_conceded) as runs_conceded, SUM(wickets) as wickets, "
+        " ROUND(CAST(SUM(runs_conceded) AS REAL)/NULLIF(SUM(wickets),0),2) as average, "
+        " ROUND(CAST(SUM(runs_conceded) AS REAL)/NULLIF(SUM(overs),0),2) as economy, "
+        " ROUND(CAST(SUM(overs)*6 AS REAL)/NULLIF(SUM(wickets),0),2) as strike_rate, "
+        " SUM(five_fors) as five_fors "
+        "FROM bowling_averages WHERE player_id = ? AND canon_status != 'deleted' "
+        "GROUP BY player_id, name, bowling_type, team_name, team_id, format ORDER BY format",
         (player_id,)
     ).fetchall()
 
@@ -1702,13 +2053,13 @@ def get_player_profile(db, player_id):
         "SELECT SUM(runs) as total_runs, SUM(matches) as total_matches, "
         " SUM(innings) as total_innings, SUM(hundreds) as hundreds, "
         " SUM(fifties) as fifties, SUM(ducks) as ducks "
-        "FROM batting_averages WHERE player_id = ?",
+        "FROM batting_averages WHERE player_id = ? AND canon_status != 'deleted'",
         (player_id,)
     ).fetchone()
 
     mil_bowl = db.execute(
         "SELECT SUM(wickets) as total_wickets, SUM(five_fors) as five_fors "
-        "FROM bowling_averages WHERE player_id = ?",
+        "FROM bowling_averages WHERE player_id = ? AND canon_status != 'deleted'",
         (player_id,)
     ).fetchone()
 
@@ -1846,16 +2197,16 @@ def get_team_profile(db, team_id):
     top_scorers = db.execute(
         "SELECT player_id, name, SUM(runs) as runs, SUM(matches) as matches, "
         " SUM(innings) as innings, SUM(hundreds) as hundreds, SUM(fifties) as fifties "
-        "FROM batting_averages WHERE team_id = ? GROUP BY player_id, name "
-        "ORDER BY runs DESC LIMIT 5",
+        "FROM batting_averages WHERE team_id = ? AND canon_status != 'deleted' "
+        "GROUP BY player_id, name ORDER BY runs DESC LIMIT 5",
         (team_id,)
     ).fetchall()
 
     top_bowlers = db.execute(
         "SELECT player_id, name, SUM(wickets) as wickets, SUM(matches) as matches, "
         " SUM(innings_bowled) as innings_bowled, SUM(five_fors) as five_fors "
-        "FROM bowling_averages WHERE team_id = ? GROUP BY player_id, name "
-        "ORDER BY wickets DESC LIMIT 5",
+        "FROM bowling_averages WHERE team_id = ? AND canon_status != 'deleted' "
+        "GROUP BY player_id, name ORDER BY wickets DESC LIMIT 5",
         (team_id,)
     ).fetchall()
 
@@ -1894,7 +2245,9 @@ def get_team_profile(db, team_id):
         " COALESCE(SUM(bowl.wickets), 0) as total_wickets "
         "FROM players p "
         "LEFT JOIN batting_averages bat ON bat.player_id = p.id "
+        "  AND bat.canon_status != 'deleted' "
         "LEFT JOIN bowling_averages bowl ON bowl.player_id = p.id "
+        "  AND bowl.canon_status != 'deleted' "
         "WHERE p.team_id = ? "
         "GROUP BY p.id ORDER BY p.batting_position",
         (team_id,)

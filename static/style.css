@@ -2,6 +2,9 @@
    ROLL IT & BOWL IT — Main Stylesheet
    ============================================================ */
 
+/* Almanack typeface — Playfair Display (falls back to Georgia) */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
 /* ── Custom Properties (Dark Mode default) ───────────────── */
 :root {
   --bg:           #0a1628;
@@ -25,6 +28,16 @@
   --font-ui:      -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-score:   'Courier New', 'Courier', monospace;
 
+  /* Almanack publication palette */
+  --almanack-gold:       #c9a84c;
+  --almanack-gold-dim:   rgba(201, 168, 76, 0.3);
+  --almanack-gold-glow:  rgba(201, 168, 76, 0.15);
+  --almanack-text:       #e8dcc8;
+  --almanack-text-muted: #a89878;
+  --almanack-serif:      'Playfair Display', Georgia, serif;
+  --almanack-bg-tint:    rgba(201, 168, 76, 0.05);
+  --almanack-rule:       rgba(201, 168, 76, 0.25);
+
   /* Font sizes */
   --fs-xs:    11px;
   --fs-sm:    13px;
@@ -45,6 +58,11 @@ body.light-mode {
   --text-muted: #4a6a8a;
   --border:     rgba(0, 0, 0, 0.1);
   --shadow:     0 4px 24px rgba(0, 0, 0, 0.08);
+
+  /* Almanack — warm dark ink on cream in light mode */
+  --almanack-text:       #2c1f0a;
+  --almanack-text-muted: #7a6040;
+  --almanack-bg-tint:    rgba(201, 168, 76, 0.08);
 }
 
 /* ── Broadcast Mode Overrides ────────────────────────────── */
@@ -2517,6 +2535,36 @@ body.broadcast-mode .btn-howzat {
 .density-card strong { display:block; font-size:var(--fs-sm); }
 .density-card small { font-size:var(--fs-xs); color:var(--text-muted); }
 
+/* Calendar style radio group in wizard */
+.cal-style-radio-group { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+.cal-style-opt { cursor:pointer; }
+.cal-style-opt input[type="radio"] { display:none; }
+.cal-style-card { display:block; border:2px solid var(--border); border-radius:8px;
+  padding:8px 16px; text-align:center; transition:all .15s; }
+.cal-style-opt input:checked + .cal-style-card { border-color:var(--accent);
+  background:rgba(100,200,100,.08); color:var(--accent); }
+.cal-style-card strong { display:block; font-size:var(--fs-sm); }
+.cal-style-card small { font-size:var(--fs-xs); color:var(--text-muted); }
+
+/* Calendar preview panel (shown after realistic world creation) */
+.cal-preview-panel { border:1px solid var(--border); border-radius:10px;
+  padding:14px 16px; margin-top:16px; background:var(--surface2); }
+.cal-preview-panel h4 { margin:0 0 10px; font-size:var(--fs-sm);
+  color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; }
+.cal-preview-stats { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; }
+.cal-preview-stat { text-align:center; }
+.cal-preview-stat strong { display:block; font-size:1.25rem; }
+.cal-preview-stat small { font-size:var(--fs-xs); color:var(--text-muted); }
+.cal-preview-list { list-style:none; padding:0; margin:0; max-height:220px; overflow-y:auto; }
+.cal-preview-list li { display:flex; gap:10px; align-items:center;
+  padding:4px 0; border-bottom:1px solid var(--border); font-size:var(--fs-sm); }
+.cal-preview-list li:last-child { border-bottom:none; }
+.cal-preview-date { color:var(--text-muted); min-width:90px; font-variant-numeric:tabular-nums; }
+.cal-preview-series { color:var(--text-muted); font-size:var(--fs-xs); flex:1;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cal-preview-icc { font-size:var(--fs-xs); padding:2px 5px; border-radius:4px;
+  background:var(--accent); color:#fff; }
+
 /* Team badge grid in wizard */
 .wizard-team-actions { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .wizard-team-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(80px,1fr)); gap:8px; }
@@ -2997,3 +3045,470 @@ body.light-mode .select-input {
   border: 1px solid rgba(239,68,68,0.35);
 }
 .btn-danger:hover { background: rgba(239,68,68,0.25); }
+
+/* ═══════════════════════════════════════════════════════════
+   THE ALMANACK — Publication Restyling
+   A different zone: feels like a reference book, not a scoreboard.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Masthead ─────────────────────────────────────────────── */
+
+.alm-masthead {
+  background: var(--almanack-bg-tint);
+  border-top: 1px solid var(--almanack-gold-dim);
+  border-bottom: 1px solid var(--almanack-gold-dim);
+  text-align: center;
+  padding: 20px 24px 16px;
+  margin-bottom: 20px;
+}
+
+.alm-masthead-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px auto 6px;
+  max-width: 400px;
+}
+
+.alm-masthead-rule::before,
+.alm-masthead-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--almanack-gold-dim);
+}
+
+.alm-masthead-rule-inner {
+  color: var(--almanack-gold);
+  font-size: 13px;
+  letter-spacing: 2px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.alm-masthead-title {
+  font-family: var(--almanack-serif);
+  font-size: clamp(18px, 4vw, 26px);
+  font-weight: 700;
+  color: var(--almanack-gold);
+  letter-spacing: 0.06em;
+  margin: 8px 0 6px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.alm-masthead-sub {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  color: var(--almanack-text-muted);
+  margin: 0 0 10px;
+  font-style: italic;
+}
+
+.alm-masthead-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 10px auto 0;
+  max-width: 380px;
+  padding-top: 8px;
+  border-top: 1px solid var(--almanack-rule);
+  font-size: var(--fs-xs);
+  color: var(--almanack-text-muted);
+  font-variant: small-caps;
+  letter-spacing: 0.07em;
+}
+
+/* ── Almanack Tab Strip ────────────────────────────────────── */
+
+#alm-tab-bar {
+  border-top: 1px solid var(--almanack-rule);
+  border-bottom: 1px solid var(--almanack-rule);
+  padding: 2px 0;
+  margin-bottom: 16px;
+  gap: 0;
+}
+
+#alm-tab-bar .tab-btn {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--almanack-text-muted);
+  border-bottom: 3px solid transparent;
+  background: none;
+  padding: 8px 14px;
+  margin-bottom: -1px;
+}
+
+#alm-tab-bar .tab-btn:hover {
+  color: var(--almanack-gold);
+  background: none;
+}
+
+#alm-tab-bar .tab-btn.active {
+  font-family: var(--almanack-serif);
+  font-size: calc(var(--fs-sm) + 1px);
+  color: var(--almanack-gold);
+  border-bottom-color: var(--almanack-gold);
+  background: none;
+}
+
+/* Manage tab — utilitarian, not a reference chapter */
+#alm-tab-bar .tab-btn.alm-manage-tab {
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+#alm-tab-bar .tab-btn.alm-manage-tab:hover {
+  color: var(--text);
+}
+
+#alm-tab-bar .tab-btn.alm-manage-tab.active {
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  color: #b8860b;
+  border-bottom-color: #b8860b;
+}
+
+/* ── Filter Panel — reference index treatment ─────────────── */
+
+.alm-filter-panel {
+  border-color: var(--almanack-rule) !important;
+}
+
+.alm-filter-header {
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  color: var(--almanack-gold) !important;
+}
+
+.alm-filter-header:hover { opacity: 0.8; }
+
+.alm-filter-cell input:focus,
+.alm-filter-cell select:focus {
+  outline: none;
+  border-color: var(--almanack-gold) !important;
+  box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.15);
+}
+
+.alm-fmt-btn.active {
+  border-color: var(--almanack-gold) !important;
+  color: var(--almanack-gold) !important;
+  background: rgba(201, 168, 76, 0.1) !important;
+}
+
+/* ── Search Bar ────────────────────────────────────────────── */
+
+.alm-search-input {
+  color: var(--almanack-text);
+}
+
+.alm-search-input:focus {
+  outline: none;
+  border-color: var(--almanack-gold) !important;
+  box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.3) !important;
+}
+
+/* ── Almanack Table — typeset publication style ───────────── */
+
+.almanack-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.almanack-table thead th {
+  font-family: var(--almanack-serif);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--almanack-gold);
+  background: transparent;
+  border-bottom: 2px solid var(--almanack-gold);
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.almanack-table thead th.alm-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.almanack-table thead th.alm-sortable:hover { opacity: 0.75; }
+
+.almanack-table thead th.alm-sort-active { opacity: 1; }
+
+.almanack-table thead th.numeric { text-align: right; }
+
+.almanack-table tbody tr {
+  border-bottom: 0.5px solid var(--almanack-rule);
+}
+
+.almanack-table tbody tr:hover {
+  background: rgba(201, 168, 76, 0.06);
+}
+
+.almanack-table tbody td {
+  padding: 7px 12px;
+  color: var(--almanack-text);
+  white-space: nowrap;
+}
+
+.almanack-table tbody td.numeric {
+  text-align: right;
+  font-family: 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* First column — player/team name — slightly more prominent */
+.almanack-table tbody td:first-child {
+  font-weight: 500;
+  color: #f0e8d5;
+}
+body.light-mode .almanack-table tbody td:first-child { color: #2c1f0a; }
+
+/* Alternate row tint — very subtle parchment effect */
+.almanack-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+body.light-mode .almanack-table tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Links inside almanack tables */
+.almanack-table .alm-link {
+  color: var(--almanack-gold);
+  text-decoration: none;
+}
+.almanack-table .alm-link:hover {
+  text-decoration: underline;
+  opacity: 0.8;
+}
+
+/* ── Section Headings ──────────────────────────────────────── */
+
+.alm-section-heading {
+  font-family: var(--almanack-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--almanack-gold);
+  padding: 16px 4px 8px;
+  border-bottom: 1px solid var(--almanack-gold-dim);
+  letter-spacing: 0.05em;
+  margin-top: 24px;
+}
+.alm-section-heading:first-child { margin-top: 8px; }
+
+.alm-section-subheading {
+  font-family: var(--almanack-serif);
+  font-size: 13px;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--almanack-text-muted);
+  padding: 10px 4px 6px;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.12);
+  margin-top: 12px;
+}
+
+/* ── Honours Board ─────────────────────────────────────────── */
+
+.alm-honours-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 12px 0 24px;
+}
+
+@media (max-width: 600px) {
+  .alm-honours-grid { grid-template-columns: 1fr; }
+}
+
+.alm-honours-card {
+  border-left: 3px solid var(--almanack-gold);
+  background: var(--almanack-bg-tint);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 12px 14px;
+  min-height: 80px;
+}
+
+.alm-honours-card-title {
+  font-family: var(--almanack-serif);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--almanack-text-muted);
+  margin-bottom: 6px;
+}
+
+.alm-honours-card-value {
+  font-family: var(--almanack-serif);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--almanack-gold);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.alm-honours-card-holder {
+  font-size: var(--fs-xs);
+  color: var(--almanack-text);
+  line-height: 1.4;
+}
+
+.alm-honours-card-empty {
+  font-style: italic;
+  color: var(--almanack-text-muted);
+  font-size: var(--fs-xs);
+  margin-top: 8px;
+}
+
+/* ── Almanack Empty State ──────────────────────────────────── */
+
+.alm-empty-state {
+  border: 1px dashed var(--almanack-gold-dim);
+  border-radius: var(--radius);
+  padding: 48px 32px;
+  text-align: center;
+  margin: 24px 0;
+}
+
+.alm-empty-state-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.alm-empty-state-heading {
+  font-family: var(--almanack-serif);
+  font-size: var(--fs-md);
+  font-style: italic;
+  color: var(--almanack-text-muted);
+  margin-bottom: 8px;
+}
+
+.alm-empty-state-sub {
+  font-size: var(--fs-sm);
+  color: var(--almanack-text-muted);
+  margin-bottom: 16px;
+}
+
+/* ── CSV Export Button ─────────────────────────────────────── */
+
+#alm-export-btn {
+  background: transparent !important;
+  border: 1px solid var(--almanack-gold-dim) !important;
+  color: var(--almanack-gold) !important;
+  font-size: var(--fs-xs);
+  padding: 4px 10px;
+}
+
+#alm-export-btn:hover {
+  background: var(--almanack-gold) !important;
+  color: #1a1200 !important;
+  border-color: var(--almanack-gold) !important;
+}
+
+/* ── Exhibition fallback banner ────────────────────────────── */
+
+.alm-exhibition-banner {
+  background: rgba(251,191,36,.12);
+  border: 1px solid rgba(251,191,36,.35);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: var(--fs-sm);
+  color: var(--almanack-gold);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.alm-exhibition-banner-icon { font-style: normal; font-size: 1.1em; }
+
+/* ── Enriched honours card elements ────────────────────────── */
+
+.honours-section-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--almanack-text-muted);
+  margin-bottom: 3px;
+  margin-top: 8px;
+}
+.honours-section-label--world { color: var(--almanack-gold); }
+
+.honours-card__value {
+  font-family: var(--almanack-serif);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.1;
+  margin-bottom: 2px;
+}
+.honours-card__value--world {
+  color: var(--almanack-gold);
+}
+.honours-card__context {
+  font-size: var(--fs-xs);
+  color: var(--almanack-text-muted);
+  line-height: 1.4;
+}
+.honours-card__context--empty {
+  font-style: italic;
+  margin-top: 6px;
+}
+.honours-card__notes {
+  font-size: var(--fs-xs);
+  color: var(--almanack-text-muted);
+  font-style: italic;
+  margin-top: 3px;
+}
+
+.honours-divider {
+  border-top: 1px solid var(--border);
+  margin: 10px 0 6px;
+}
+
+.honours-progress-wrap {
+  background: var(--border);
+  border-radius: 99px;
+  height: 5px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+.honours-progress-bar {
+  background: var(--almanack-gold);
+  height: 100%;
+  border-radius: 99px;
+  transition: width .4s;
+}
+.honours-progress-label {
+  font-size: var(--fs-xs);
+  color: var(--almanack-text-muted);
+  margin-top: 4px;
+}
+
+.alm-honours-card--beaten {
+  border-left-color: #ffd700;
+  background: rgba(255,215,0,.08);
+  box-shadow: 0 0 12px rgba(255,215,0,.25);
+}
+.honours-beaten-badge {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: #ffd700;
+  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Toolbar count label ───────────────────────────────────── */
+
+#alm-toolbar .alm-count {
+  color: var(--almanack-text-muted);
+  font-size: var(--fs-xs);
+  font-variant: small-caps;
+  letter-spacing: 0.05em;
+}

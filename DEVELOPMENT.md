@@ -10,7 +10,7 @@ Technical reference for working on this codebase.
 - **Flask**: 3.1.3
 - **Database**: SQLite (via Python's built-in `sqlite3`)
 - **Frontend**: Vanilla JavaScript, no build step
-- **Version**: `0.1.0-dev` (set in `config.py` as `APP_VERSION`)
+- **Version**: `0.2.0-dev` (set in `config.py` as `APP_VERSION`)
 
 ```bash
 git clone <repo>
@@ -28,24 +28,29 @@ python start.py
 
 ```
 roll-it-bowl-it/
-├── app.py                  # Flask application — 71 API routes
+├── app.py                  # Flask application — API routes
 ├── game_engine.py          # HOWZAT! dice engine (do not modify)
 ├── database.py             # DB access layer (do not modify)
+├── cricket_calendar.py     # FTP-style calendar engine
 ├── schema.sql              # SQLite schema — 25+ tables
-├── seed_data.py            # Teams, players, venues seed data
+├── seed_data.py            # Teams, players, venues, world records
 ├── config.py               # Production config
 ├── config_dev.py           # Dev overrides (excluded from packaging)
 ├── start.py                # Entry point (dev + packaged binary)
 ├── templates/
 │   └── index.html          # Single-page app shell
 ├── static/
-│   ├── app.js              # All client-side logic (~2000 lines)
+│   ├── app.js              # All client-side logic
 │   └── style.css           # Styles + CSS animations
 ├── tests/
 │   ├── test_engine.py          # 5 unit tests — dice engine
 │   ├── test_sim_controls.py    # 5 tests — simulation controls
 │   ├── test_world_sim.py       # 4 tests — world simulation
 │   └── test_canon_system.py    # 94 tests — API + system (canon suite)
+├── uat/
+│   ├── test_calendar.py        # 10 UAT tests — calendar engine
+│   └── run_uat.py              # UAT orchestrator
+├── screenshots/            # Application screenshots
 ├── ribi.spec               # PyInstaller spec
 ├── REVIEW_REPORT.md        # Previous code-review findings + status
 └── requirements.txt
@@ -135,7 +140,7 @@ The DB file is `ribi.db` in the project root. Delete it and restart to reset eve
 
 ## API routes
 
-`app.py` registers 71 routes. Key groupings:
+`app.py` registers all routes. Key groupings:
 
 ### Match lifecycle
 | Route | Method | Purpose |
@@ -159,6 +164,19 @@ The DB file is `ribi.db` in the project root. Delete it and restart to reset eve
 | `/api/stats/batting` | GET | Career batting averages |
 | `/api/stats/bowling` | GET | Career bowling averages |
 | `/api/records` | GET | All-time records |
+
+### Almanack
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/almanack/batting` | GET | Batting records — returns `{rows, total, exhibition_fallback}` |
+| `/api/almanack/bowling` | GET | Bowling records — same shape |
+| `/api/almanack/honours` | GET | In-game honours board |
+| `/api/almanack/honours/with-world-records` | GET | Honours enriched with real-world benchmarks and `pct_of_world_record` |
+
+### Calendar
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/worlds/<id>/calendar/upcoming` | GET | Upcoming fixtures (supports `?days=N`) |
 
 ### Tension endpoint
 
@@ -321,7 +339,7 @@ Auto → Manual switching is immediate. Manual → Auto is queued to the end of 
 ## Tests
 
 ```bash
-pytest tests/ -v              # all 103 tests
+pytest tests/ -v              # all 103 unit/integration tests
 pytest tests/test_engine.py   # 5 engine tests
 pytest tests/test_canon_system.py -v   # 94 system tests
 ```
@@ -336,12 +354,74 @@ pytest tests/test_canon_system.py -v   # 94 system tests
 
 **`test_canon_system.py`** (94 tests) — the full system test suite. Spins up a real Flask test client against a real (temp) SQLite database. Exercises all major API routes including the full match lifecycle, innings completion, record-breaking events, and edge cases.
 
+### UAT suite (calendar engine)
+
+```bash
+python uat/run_uat.py           # run all UAT suites
+python uat/test_calendar.py     # run calendar suite directly
+```
+
+The UAT suite runs against a live application instance (requires the server to be running on port 5001, or spun up by the test). 10 tests covering:
+
+| Test | Checks |
+|------|--------|
+| England home season | No England home fixtures in January or February |
+| India home season | No India home fixtures in July or August |
+| Ashes present | England-Australia series exists when density allows |
+| No double-booking | No two fixtures on the same date involve the same team |
+| Avoid months | No fixtures in configured `avoid_months` |
+| India-Pakistan | India vs Pakistan matches only appear at ICC events |
+| Format order | Within a series, T20s before ODIs before Tests |
+| Fixture count by density | Relaxed < Moderate < Busy |
+| Required fields | Every fixture has `date`, `home_team`, `away_team`, `format`, `venue` |
+| ICC event presence | At least one ICC event per calendar year in multi-year worlds |
+
 ### What the tests do not cover
 
 - `game_engine.py` internal implementation (black-box only)
 - `database.py` internal implementation
 - Frontend JavaScript (no browser automation)
 - PyInstaller packaging
+
+---
+
+## Cricket Calendar Engine
+
+`cricket_calendar.py` — the FTP-style calendar generator. Called from `app.py` when `calendar_style == 'realistic'` during world creation.
+
+### Key concepts
+
+**Home season windows** — each team has months when they host cricket at home. England: May–September. India: October–March. These mirror real international cricket scheduling.
+
+**`_schedule_bilateral(home, away, formats, density)`** — places a home series for `home` vs `away`. In `relaxed` mode only one direction is scheduled per cycle (the reciprocal is skipped). In `moderate`/`busy` mode, both directions are scheduled across the year range.
+
+**`_place_icc_events(year, event_type)`** — places a multi-team ICC event (group stage + knockout rounds). Uses `team_last_date` dict to prevent the same team appearing in two fixtures on the same date (ICC double-booking fix).
+
+**`generate_realistic_calendar(world_id, teams, start_year, end_year, density)`** — top-level entry point. Returns a list of fixture dicts ready for insertion.
+
+### Calendar Style wizard option
+
+The World Wizard Step 2 includes a Calendar Style radio group:
+- **Realistic**: calls `generate_realistic_calendar()` — proper home seasons, tours, ICC events
+- **Random**: original rotation (faster, no FTP logic)
+
+After Realistic world creation, a preview panel shows fixture counts and the first 30 upcoming fixtures before navigating to the world.
+
+---
+
+## Almanack: canon/exhibition system
+
+### How records are filtered
+
+The `batting_averages` and `bowling_averages` views group by `(player_id, format, canon_status)`. When querying, `database.py` tries `canon_status = 'canon'` first; if no rows come back it falls back to `canon_status != 'deleted'` (all exhibition matches).
+
+The exhibition fallback banner in the Almanack appears when `exhibition_fallback=True` is returned by the batting/bowling endpoints.
+
+### Real-world records benchmarks
+
+`real_world_records` table is seeded at startup (idempotent) with 28 reference records. The `GET /api/almanack/honours/with-world-records` endpoint enriches in-game honours with `real_world` data and `pct_of_world_record`.
+
+Bowling records use `display_value` (pre-formatted `W/R` string) rather than separate wickets/runs columns, matching the `formatBowlingFigures()` display in the frontend.
 
 ---
 
@@ -352,7 +432,7 @@ These files must not be modified:
 - `game_engine.py` — stable engine, covered by tests, any change risks breaking the probability model
 - `database.py` — DB access layer, changes break the canon system tests
 
-The UAT test suite (`test_canon_system.py`) must remain green. It is the acceptance gate for all changes.
+Both test suites (`test_canon_system.py` and `uat/test_calendar.py`) must remain green. They are the acceptance gates for all changes.
 
 ---
 

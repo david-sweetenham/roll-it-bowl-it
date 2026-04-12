@@ -714,6 +714,13 @@
           </div>
         </div>
 
+        <!-- Exhibition fallback banner (shown when no canon data exists) -->
+        <div id="alm-exhibition-banner" class="alm-exhibition-banner hidden">
+          <span class="alm-exhibition-banner-icon">ℹ</span>
+          Showing exhibition matches — mark matches as <strong>Canon</strong> in the
+          Manage tab to include them in official records.
+        </div>
+
         <!-- Table / content area -->
         <div id="alm-table-area">
           <p class="empty-state">Play some matches first to build your Almanack.</p>
@@ -993,6 +1000,23 @@
                 <span class="density-card">
                   <strong>Relaxed</strong>
                   <small>~7–10 day gap, leisurely</small>
+                </span>
+              </label>
+            </div>
+            <label class="form-label" style="margin-top:14px">Calendar Style</label>
+            <div class="cal-style-radio-group">
+              <label class="cal-style-opt">
+                <input type="radio" name="wc-cal-style" value="realistic" checked />
+                <span class="cal-style-card">
+                  <strong>Realistic</strong>
+                  <small>Follow real-world FTP logic, seasons &amp; ICC events</small>
+                </span>
+              </label>
+              <label class="cal-style-opt">
+                <input type="radio" name="wc-cal-style" value="random" />
+                <span class="cal-style-card">
+                  <strong>Random</strong>
+                  <small>Original random rotation — faster to generate</small>
                 </span>
               </label>
             </div>

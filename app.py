@@ -4,6 +4,7 @@ import os
 import random
 import database
 import game_engine
+import cricket_calendar
 import ai_captain
 import config
 
@@ -2676,12 +2677,14 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
 @app.route('/api/worlds', methods=['POST'])
 def create_world():
     import json
-    body       = request.get_json() or {}
-    name       = (body.get('name') or '').strip()
-    team_ids   = body.get('team_ids', [])
-    my_team_id = body.get('my_team_id')
-    start_date = body.get('start_date', '2025-01-01')
-    density    = body.get('calendar_density', 'moderate')
+    body           = request.get_json() or {}
+    name           = (body.get('name') or '').strip()
+    team_ids       = body.get('team_ids', [])
+    my_team_id     = body.get('my_team_id')
+    start_date     = body.get('start_date', '2025-01-01')
+    density        = body.get('calendar_density', 'moderate')
+    cal_style      = body.get('calendar_style', 'random')  # 'realistic' | 'random'
+    cal_years      = int(body.get('calendar_years', 2))
 
     if not name:
         return err('name required')
@@ -2690,7 +2693,8 @@ def create_world():
 
     db = database.get_db()
     try:
-        settings = {'team_ids': team_ids, 'my_team_id': my_team_id}
+        settings = {'team_ids': team_ids, 'my_team_id': my_team_id,
+                    'calendar_style': cal_style}
         world_id = database.create_world(db, {
             'name':             name,
             'created_date':     start_date,
@@ -2699,48 +2703,131 @@ def create_world():
             'settings_json':    json.dumps(settings),
         })
 
-        # Generate fixture calendar
-        raw_fixtures = game_engine.generate_fixture_calendar(team_ids, start_date, density)
+        # Store calendar_style on the world row (via migration column)
+        try:
+            db.execute("UPDATE worlds SET calendar_style = ? WHERE id = ?",
+                       (cal_style, world_id))
+            db.commit()
+        except Exception:
+            pass  # column may not exist on older DBs
 
-        # Resolve venues: use home team venue where available
-        team_venues = {}
+        # Build team name + venue lookups
+        team_name_map  = {}   # team_id  -> name
+        venue_name_map = {}   # team_name -> [venue_id]
+        team_venues    = {}   # team_id  -> primary venue_id  (for random fallback)
         for tid in team_ids:
             t = database.get_team(db, tid)
-            if t and t.get('home_venue_id'):
-                team_venues[tid] = t['home_venue_id']
+            if t:
+                tname = t.get('name', f'Team{tid}')
+                team_name_map[tid] = tname
+                vid = t.get('home_venue_id')
+                if vid:
+                    team_venues[tid] = vid
+                    venue_name_map[tname] = [vid]
 
-        venues = database.get_venues(db)
+        venues         = database.get_venues(db)
         fallback_venue = venues[0]['id'] if venues else None
 
+        # ── Generate fixture calendar ─────────────────────────────────────────
+        if cal_style == 'realistic':
+            raw_fixtures = cricket_calendar.generate_realistic_calendar(
+                team_ids       = team_ids,
+                team_names     = team_name_map,
+                venue_ids      = venue_name_map,
+                start_date_str = start_date,
+                density        = density,
+                years          = cal_years,
+            )
+        else:
+            raw_fixtures = game_engine.generate_fixture_calendar(
+                team_ids, start_date, density)
+
+        # ── Convert to DB-ready rows ──────────────────────────────────────────
         fixtures_to_insert = []
+        series_dates       = {}   # series_key -> {min_date, max_date, t1, t2, fmt}
+
         for fx in raw_fixtures:
-            t1 = fx['team1_id']
-            t2 = fx['team2_id']
-            venue_id = team_venues.get(t1) or team_venues.get(t2) or fallback_venue
-            is_user = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            t1       = fx['team1_id']
+            t2       = fx['team2_id']
+            venue_id = (fx.get('venue_id')
+                        or team_venues.get(t1)
+                        or team_venues.get(t2)
+                        or fallback_venue)
+            is_user  = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            sdate    = fx.get('scheduled_date', start_date)
+
+            # Track series date ranges for world_series creation
+            sk = fx.get('series_key')
+            if sk:
+                if sk not in series_dates:
+                    series_dates[sk] = {
+                        'min': sdate, 'max': sdate,
+                        't1': t1, 't2': t2,
+                        'fmt': fx.get('format'),
+                        'name': fx.get('series_name', ''),
+                        'is_icc': bool(fx.get('is_icc_event')),
+                        'icc_name': fx.get('icc_event_name'),
+                        'tmpl': fx.get('tour_template'),
+                        'count': 0,
+                    }
+                entry = series_dates[sk]
+                if sdate < entry['min']:
+                    entry['min'] = sdate
+                if sdate > entry['max']:
+                    entry['max'] = sdate
+                entry['count'] += 1
+
+            year = int(sdate[:4]) if sdate else None
             fixtures_to_insert.append({
-                'world_id':       world_id,
-                'tournament_id':  None,
-                'series_id':      None,
-                'scheduled_date': fx['scheduled_date'],
-                'venue_id':       venue_id,
-                'team1_id':       t1,
-                'team2_id':       t2,
-                'fixture_type':   'world',
-                'format':         fx.get('format'),
-                'is_user_match':  is_user,
+                'world_id':                world_id,
+                'tournament_id':           None,
+                'series_id':               None,
+                'scheduled_date':          sdate,
+                'venue_id':                venue_id,
+                'team1_id':                t1,
+                'team2_id':                t2,
+                'fixture_type':            'world',
+                'format':                  fx.get('format'),
+                'is_user_match':           is_user,
+                'series_name':             fx.get('series_name'),
+                'match_number_in_series':  fx.get('match_number_in_series', 1),
+                'series_length':           fx.get('series_length', 1),
+                'is_icc_event':            fx.get('is_icc_event', False),
+                'icc_event_name':          fx.get('icc_event_name'),
+                'is_home_for_team1':       fx.get('is_home_for_team1', True),
+                'tour_template':           fx.get('tour_template'),
+                'season_year':             year,
             })
 
         database.bulk_create_fixtures(db, fixtures_to_insert)
 
-        # Initialise rankings at 100 pts per team × format
+        # ── Create world_series records ───────────────────────────────────────
+        for sk, sd in series_dates.items():
+            try:
+                database.create_world_series(db, {
+                    'world_id':       world_id,
+                    'series_name':    sd['name'],
+                    'format':         sd['fmt'],
+                    'team1_id':       sd['t1'],
+                    'team2_id':       sd['t2'],
+                    'host_team_id':   sd['t1'],
+                    'start_date':     sd['min'],
+                    'end_date':       sd['max'],
+                    'total_matches':  sd['count'],
+                    'is_icc_event':   sd['is_icc'],
+                    'icc_event_name': sd['icc_name'],
+                })
+            except Exception:
+                pass
+
+        # ── Initialise rankings ───────────────────────────────────────────────
         for pos, tid in enumerate(team_ids, 1):
             for fmt in ('Test', 'ODI', 'T20'):
                 database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
 
         world = database.get_world(db, world_id)
         return jsonify({'world_id': world_id, 'fixture_count': len(fixtures_to_insert),
-                        'world': world})
+                        'world': world, 'calendar_style': cal_style})
     finally:
         database.close_db(db)
 
@@ -2816,33 +2903,51 @@ def world_calendar(id):
     status  = request.args.get('status')
     offset  = int(request.args.get('offset', 0))
     limit   = int(request.args.get('limit', 0))   # 0 = all
+    year    = request.args.get('year')             # optional YYYY filter
+    month   = request.args.get('month')            # optional MM filter (requires year)
     db      = database.get_db()
     try:
         world = database.get_world(db, id)
         if not world:
             return err('World not found', 404)
 
-        # Get all fixtures with match result info
+        # Build WHERE clause
+        where  = "WHERE f.world_id = ?"
+        params = [id]
+        if status:
+            where += " AND f.status = ?"
+            params.append(status)
+        if year and month:
+            prefix = f"{int(year):04d}-{int(month):02d}"
+            where += " AND f.scheduled_date LIKE ?"
+            params.append(f"{prefix}%")
+        elif year:
+            where += " AND f.scheduled_date LIKE ?"
+            params.append(f"{int(year):04d}%")
+
         rows = db.execute(
             "SELECT f.id, f.scheduled_date, f.format, f.status, f.is_user_match, "
-            " f.match_id, f.series_id, "
+            " f.match_id, f.series_id, f.series_name, f.match_number_in_series, "
+            " f.series_length, f.is_icc_event, f.icc_event_name, "
+            " f.is_home_for_team1, f.tour_template, "
             " t1.name as team1_name, t1.short_code as team1_code, t1.badge_colour as team1_colour, "
             " t2.name as team2_name, t2.short_code as team2_code, t2.badge_colour as team2_colour, "
+            " v.name as venue_name, "
             " m.result_type, m.margin_runs, m.margin_wickets, "
             " wt.name as winning_team_name "
             "FROM fixtures f "
             "JOIN teams t1 ON f.team1_id = t1.id "
             "JOIN teams t2 ON f.team2_id = t2.id "
+            "LEFT JOIN venues v ON f.venue_id = v.id "
             "LEFT JOIN matches m ON f.match_id = m.id "
             "LEFT JOIN teams wt ON m.winning_team_id = wt.id "
-            "WHERE f.world_id = ?" + (" AND f.status = ?" if status else ""),
-            (id, status) if status else (id,)
+            + where,
+            params
         ).fetchall()
 
         fixtures = []
         for r in rows:
             f = dict(r)
-            # Build result string for completed fixtures
             if f['status'] == 'complete' and f.get('result_type'):
                 rt = f['result_type']
                 w  = f.get('winning_team_name', '')
@@ -2872,11 +2977,209 @@ def world_calendar(id):
         by_month = {}
         for f in page:
             d = f.get('scheduled_date', '')
-            month_key = d[:7] if d else 'Unknown'  # 'YYYY-MM'
+            month_key = d[:7] if d else 'Unknown'
             by_month.setdefault(month_key, []).append(f)
 
         return jsonify({'fixtures': page, 'by_month': by_month,
                         'total': total, 'offset': offset})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/calendar/upcoming', methods=['GET'])
+def world_calendar_upcoming(id):
+    """Return fixtures in the next N days from the world's current date."""
+    days = int(request.args.get('days', 30))
+    db   = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+        from datetime import date, timedelta
+        today     = world.get('current_date') or date.today().isoformat()
+        until     = (date.fromisoformat(today) + timedelta(days=days)).isoformat()
+        rows = db.execute(
+            "SELECT f.id, f.team1_id, f.team2_id, f.scheduled_date, f.format, f.status, "
+            " f.is_user_match, f.series_name, f.match_number_in_series, f.series_length, "
+            " f.is_icc_event, f.icc_event_name, "
+            " t1.name as team1_name, t1.short_code as team1_code, "
+            " t2.name as team2_name, t2.short_code as team2_code, "
+            " v.name as venue_name "
+            "FROM fixtures f "
+            "JOIN teams t1 ON f.team1_id = t1.id "
+            "JOIN teams t2 ON f.team2_id = t2.id "
+            "LEFT JOIN venues v ON f.venue_id = v.id "
+            "WHERE f.world_id = ? AND f.scheduled_date >= ? AND f.scheduled_date < ? "
+            "  AND f.status = 'scheduled' "
+            "ORDER BY f.scheduled_date "
+            "LIMIT 200",
+            (id, today, until)
+        ).fetchall()
+        return jsonify({'fixtures': [dict(r) for r in rows],
+                        'from_date': today, 'until_date': until})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/calendar/series', methods=['GET'])
+def world_calendar_series(id):
+    """Return all active and upcoming world_series records."""
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+        series = database.get_world_series(db, id)
+        # Annotate with matches played vs remaining
+        for s in series:
+            sid = s.get('id')
+            completed = db.execute(
+                "SELECT COUNT(*) FROM fixtures "
+                "WHERE world_id=? AND series_name=? AND status='complete'",
+                (id, s.get('series_name', ''))
+            ).fetchone()[0]
+            s['matches_played']    = completed
+            s['matches_remaining'] = max(0, (s.get('total_matches') or 0) - completed)
+        return jsonify({'series': series})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/regenerate-calendar', methods=['POST'])
+def world_regenerate_calendar(id):
+    """
+    Regenerate the calendar from a given date forward.
+    Completed fixtures are untouched. Body: {from_date, style, density, years}.
+    """
+    import json
+    body      = request.get_json() or {}
+    from_date = body.get('from_date')
+    style     = body.get('style', 'random')
+    density   = body.get('density', 'moderate')
+    years     = int(body.get('years', 2))
+
+    if not from_date:
+        return err('from_date required')
+
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+
+        # Delete all scheduled (not completed/skipped) fixtures from from_date onward
+        db.execute(
+            "DELETE FROM fixtures WHERE world_id=? AND scheduled_date >= ? "
+            "AND status NOT IN ('complete', 'skipped')",
+            (id, from_date)
+        )
+        db.commit()
+
+        # Also remove world_series records that started on/after from_date
+        db.execute(
+            "DELETE FROM world_series WHERE world_id=? AND start_date >= ?",
+            (id, from_date)
+        )
+        db.commit()
+
+        # Get teams from settings
+        settings_json = world.get('settings_json') or '{}'
+        settings      = json.loads(settings_json)
+        team_ids      = settings.get('team_ids', [])
+        my_team_id    = settings.get('my_team_id')
+
+        if not team_ids:
+            return err('No teams found in world settings')
+
+        team_name_map  = {}
+        venue_name_map = {}
+        team_venues    = {}
+        for tid in team_ids:
+            t = database.get_team(db, tid)
+            if t:
+                tname = t.get('name', f'Team{tid}')
+                team_name_map[tid]   = tname
+                vid = t.get('home_venue_id')
+                if vid:
+                    team_venues[tid]       = vid
+                    venue_name_map[tname]  = [vid]
+
+        venues         = database.get_venues(db)
+        fallback_venue = venues[0]['id'] if venues else None
+
+        if style == 'realistic':
+            raw_fixtures = cricket_calendar.generate_realistic_calendar(
+                team_ids       = team_ids,
+                team_names     = team_name_map,
+                venue_ids      = venue_name_map,
+                start_date_str = from_date,
+                density        = density,
+                years          = years,
+            )
+        else:
+            raw_fixtures = game_engine.generate_fixture_calendar(
+                team_ids, from_date, density)
+
+        series_dates = {}
+        fixtures_to_insert = []
+        for fx in raw_fixtures:
+            t1      = fx['team1_id']
+            t2      = fx['team2_id']
+            vid     = (fx.get('venue_id') or team_venues.get(t1)
+                       or team_venues.get(t2) or fallback_venue)
+            is_user = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            sdate   = fx.get('scheduled_date', from_date)
+            sk      = fx.get('series_key')
+            if sk:
+                if sk not in series_dates:
+                    series_dates[sk] = {
+                        'min': sdate, 'max': sdate, 't1': t1, 't2': t2,
+                        'fmt': fx.get('format'), 'name': fx.get('series_name', ''),
+                        'is_icc': bool(fx.get('is_icc_event')),
+                        'icc_name': fx.get('icc_event_name'), 'count': 0,
+                    }
+                entry = series_dates[sk]
+                if sdate < entry['min']: entry['min'] = sdate
+                if sdate > entry['max']: entry['max'] = sdate
+                entry['count'] += 1
+
+            fixtures_to_insert.append({
+                'world_id': id, 'tournament_id': None, 'series_id': None,
+                'scheduled_date': sdate, 'venue_id': vid,
+                'team1_id': t1, 'team2_id': t2, 'fixture_type': 'world',
+                'format': fx.get('format'), 'is_user_match': is_user,
+                'series_name': fx.get('series_name'),
+                'match_number_in_series': fx.get('match_number_in_series', 1),
+                'series_length': fx.get('series_length', 1),
+                'is_icc_event': fx.get('is_icc_event', False),
+                'icc_event_name': fx.get('icc_event_name'),
+                'is_home_for_team1': fx.get('is_home_for_team1', True),
+                'tour_template': fx.get('tour_template'),
+                'season_year': int(sdate[:4]) if sdate else None,
+            })
+
+        database.bulk_create_fixtures(db, fixtures_to_insert)
+
+        for sk, sd in series_dates.items():
+            try:
+                database.create_world_series(db, {
+                    'world_id': id, 'series_name': sd['name'],
+                    'format': sd['fmt'], 'team1_id': sd['t1'], 'team2_id': sd['t2'],
+                    'host_team_id': sd['t1'], 'start_date': sd['min'],
+                    'end_date': sd['max'], 'total_matches': sd['count'],
+                    'is_icc_event': sd['is_icc'], 'icc_event_name': sd['icc_name'],
+                })
+            except Exception:
+                pass
+
+        try:
+            db.execute("UPDATE worlds SET calendar_style=? WHERE id=?", (style, id))
+            db.commit()
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'new_fixture_count': len(fixtures_to_insert),
+                        'from_date': from_date, 'style': style})
     finally:
         database.close_db(db)
 
@@ -3035,10 +3338,11 @@ def simulate_world(id):
 def almanack_batting():
     db = database.get_db()
     try:
-        rows, total = database.get_almanack_batting(db, request.args)
-        return jsonify({'records': rows, 'total': total,
+        rows, total, is_fallback = database.get_almanack_batting(db, request.args)
+        return jsonify({'rows': rows, 'total': total,
                         'offset': int(request.args.get('offset', 0)),
-                        'limit':  int(request.args.get('limit', 50))})
+                        'limit':  int(request.args.get('limit', 50)),
+                        'exhibition_fallback': is_fallback})
     finally:
         database.close_db(db)
 
@@ -3047,10 +3351,11 @@ def almanack_batting():
 def almanack_bowling():
     db = database.get_db()
     try:
-        rows, total = database.get_almanack_bowling(db, request.args)
-        return jsonify({'records': rows, 'total': total,
+        rows, total, is_fallback = database.get_almanack_bowling(db, request.args)
+        return jsonify({'rows': rows, 'total': total,
                         'offset': int(request.args.get('offset', 0)),
-                        'limit':  int(request.args.get('limit', 50))})
+                        'limit':  int(request.args.get('limit', 50)),
+                        'exhibition_fallback': is_fallback})
     finally:
         database.close_db(db)
 
@@ -3122,6 +3427,16 @@ def almanack_honours():
     db = database.get_db()
     try:
         data = database.get_almanack_honours(db)
+        return jsonify(data)
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/almanack/honours/with-world-records', methods=['GET'])
+def almanack_honours_with_world_records():
+    db = database.get_db()
+    try:
+        data = database.get_almanack_honours_with_world_records(db)
         return jsonify(data)
     finally:
         database.close_db(db)

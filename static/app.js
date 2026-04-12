@@ -261,6 +261,12 @@ function toggleDarkMode() {
     settingsBtn.classList.toggle('active', AppState.darkMode);
   }
   try { localStorage.setItem('ribi_dark_mode', AppState.darkMode ? '1' : '0'); } catch (_) {}
+
+  // Keep Almanack CSS variables in sync with mode
+  const isDark = AppState.darkMode;
+  document.documentElement.style.setProperty('--almanack-text',     isDark ? '#e8dcc8' : '#2c1f0a');
+  document.documentElement.style.setProperty('--almanack-text-muted', isDark ? '#a89878' : '#7a6040');
+  document.documentElement.style.setProperty('--almanack-bg-tint',  isDark ? 'rgba(201,168,76,0.05)' : 'rgba(201,168,76,0.08)');
 }
 
 function toggleSound() {
@@ -4004,6 +4010,15 @@ const ALM = {
   _searchTimer: null,
 };
 
+// Keys whose columns should right-align and render in monospace
+const ALMANACK_NUMERIC_KEYS = new Set([
+  'matches', 'innings', 'not_outs', 'runs', 'highest_score', 'average', 'strike_rate',
+  'hundreds', 'fifties', 'ducks', 'innings_bowled', 'overs', 'maidens', 'runs_conceded',
+  'wickets', 'economy', 'five_fors', 'batting_average', 'bowling_average', 'ar_index',
+  'matches_played', 'won', 'lost', 'drawn', 'tied', 'win_percentage',
+  'wicket_number', 'balls',
+]);
+
 // Column definitions per tab
 const ALM_COLS = {
   batting: [
@@ -4093,6 +4108,37 @@ const ALM_DEFAULT_SORT = {
 };
 
 async function loadAlmanackScreen() {
+  // Inject publication masthead once (replaces plain h2 + subtitle)
+  const screenInner = document.querySelector('#screen-almanack .screen-inner');
+  if (screenInner && !screenInner.querySelector('.alm-masthead')) {
+    const h2  = screenInner.querySelector('h2');
+    const sub = h2 ? h2.nextElementSibling : null;
+    const yr  = new Date().getFullYear();
+    const masthead = document.createElement('div');
+    masthead.className = 'alm-masthead';
+    masthead.innerHTML =
+      `<div class="alm-masthead-rule"><span class="alm-masthead-rule-inner">══════════════</span></div>` +
+      `<h2 class="alm-masthead-title">The Dice Cricketers&#8217; Almanack</h2>` +
+      `<div class="alm-masthead-rule"><span class="alm-masthead-rule-inner">══════════════</span></div>` +
+      `<p class="alm-masthead-sub">The complete statistical record of every match ever played</p>` +
+      `<div class="alm-masthead-footer">` +
+        `<span class="alm-masthead-volume">Volume I</span>` +
+        `<span class="alm-masthead-est">Est. ${yr}</span>` +
+      `</div>`;
+    if (h2) {
+      h2.replaceWith(masthead);
+      if (sub && sub.classList.contains('screen-subtitle')) sub.remove();
+    }
+    // Update search placeholder
+    const searchInput = document.getElementById('alm-search-input');
+    if (searchInput) searchInput.placeholder = 'Search the Almanack\u2026';
+    // Update Manage tab label
+    const manageBtn = document.querySelector('#alm-tab-bar .alm-manage-tab');
+    if (manageBtn && !manageBtn.querySelector('.alm-manage-icon')) {
+      manageBtn.innerHTML = '<span class="alm-manage-icon">&#9881;</span> Manage';
+    }
+  }
+
   // Populate team dropdown once
   const teamSel = document.getElementById('alm-f-team');
   if (teamSel && teamSel.options.length <= 1) {
@@ -4227,6 +4273,10 @@ async function loadAlmTab(tab) {
   _updateAlmCount(data.total, data.offset, data.limit);
   _updateAlmPager(data.total, data.offset, data.limit);
 
+  // Show exhibition fallback banner if canon data is absent
+  const bannerEl = document.getElementById('alm-exhibition-banner');
+  if (bannerEl) bannerEl.classList.toggle('hidden', !data.exhibition_fallback);
+
   const cols = ALM_COLS[tab];
   if (!cols) return;
   _renderAlmTable(cols, data.rows || [], data.offset);
@@ -4257,64 +4307,224 @@ function _renderAlmTable(cols, rows, offset) {
     const msg = isFiltered
       ? 'No records match your filters.'
       : (ALM.tab === 'batting'
-          ? 'No batting records yet — play some matches first!'
+          ? 'No batting records yet — play some matches first.'
           : ALM.tab === 'bowling'
-            ? 'No bowling records yet — play some matches first!'
-            : 'No records yet.');
-    const cta = isFiltered ? '' : `<button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="showScreen('play')">Play Match</button>`;
-    area.innerHTML = `<div class="empty-state-card"><div class="empty-state-icon">📖</div><h3 class="empty-state-heading">${msg}</h3>${cta}</div>`;
+            ? 'No bowling records yet — play some matches first.'
+            : 'No records to display.');
+    const sub = isFiltered
+      ? ''
+      : `<p class="alm-empty-state-sub">The Almanack grows with every match played.</p>`;
+    const cta = isFiltered ? '' : `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="showScreen('play')">Play a Match →</button>`;
+    area.innerHTML = `<div class="alm-empty-state">
+      <div class="alm-empty-state-icon">📖</div>
+      <h3 class="alm-empty-state-heading">${msg}</h3>
+      ${sub}${cta}
+    </div>`;
     return;
   }
 
   const thead = cols.map(c => {
-    if (c.nosort) return `<th>${c.label}</th>`;
+    const numCls = ALMANACK_NUMERIC_KEYS.has(c.k) ? ' numeric' : '';
+    if (c.nosort) return `<th class="${numCls.trim()}">${c.label}</th>`;
     const active = ALM.sort === c.k;
     const arrow  = active ? (ALM.dir === 'DESC' ? ' ▼' : ' ▲') : '';
-    return `<th class="alm-sortable${active ? ' alm-sort-active' : ''}"
+    return `<th class="alm-sortable${active ? ' alm-sort-active' : ''}${numCls}"
                 onclick="almSort('${c.k}')">${c.label}${arrow}</th>`;
   }).join('');
 
   const tbody = rows.map((row, i) => {
     const cells = cols.map(c => {
+      const numCls = ALMANACK_NUMERIC_KEYS.has(c.k) ? ' class="numeric"' : '';
       if (c.k === '#') return `<td>${offset + i + 1}</td>`;
       const v = row[c.k];
-      if (v === null || v === undefined) return '<td>—</td>';
+      if (v === null || v === undefined) return `<td${numCls}>—</td>`;
       if (c.k === 'name') return `<td><a class="alm-link" onclick="goToPlayer(${row.player_id})">${v}</a></td>`;
       if (c.k === 'team_name') return `<td><a class="alm-link" onclick="goToTeam(${row.team_id})">${v}</a></td>`;
       if (c.k === 'format') return `<td><span class="badge badge-${String(v).toLowerCase()}">${v}</span></td>`;
       if (c.k === 'player_mode')  return `<td>${_modeBadgeHtml(v)}</td>`;
       if (c.k === 'canon_status') return `<td>${v && v !== 'canon' ? _canonBadgeHtml(v) : '<span class="badge badge-canon">Canon</span>'}</td>`;
       if (c.k === 'average' || c.k === 'batting_average' || c.k === 'bowling_average')
-        return `<td>${v != null ? Number(v).toFixed(2) : '—'}</td>`;
+        return `<td${numCls}>${v != null ? Number(v).toFixed(2) : '—'}</td>`;
       if (c.k === 'strike_rate' || c.k === 'economy' || c.k === 'win_percentage')
-        return `<td>${v != null ? Number(v).toFixed(1) : '—'}</td>`;
+        return `<td${numCls}>${v != null ? Number(v).toFixed(1) : '—'}</td>`;
       if (c.k === 'ar_index')
-        return `<td>${v != null ? Number(v).toFixed(1) : '—'}</td>`;
-      return `<td>${v}</td>`;
+        return `<td${numCls}>${v != null ? Number(v).toFixed(1) : '—'}</td>`;
+      return `<td${numCls}>${v}</td>`;
     }).join('');
     return `<tr class="${i % 2 === 0 ? 'alm-row-even' : 'alm-row-odd'}">${cells}</tr>`;
   }).join('');
 
   area.innerHTML =
-    `<div class="alm-table-wrap"><table class="alm-table">
+    `<div class="alm-table-wrap"><table class="alm-table almanack-table">
        <thead><tr>${thead}</tr></thead>
        <tbody>${tbody}</tbody>
      </table></div>`;
 }
 
+// ── Honours helpers ───────────────────────────────────────────────────────────
+
+const HONOURS_LABELS = {
+  'highest_score_test':        'Highest Individual Score — Test',
+  'highest_score_odi':         'Highest Individual Score — ODI',
+  'highest_score_t20':         'Highest Individual Score — T20',
+  'most_runs_test':            'Most Career Runs — Test',
+  'most_runs_odi':             'Most Career Runs — ODI',
+  'most_runs_t20':             'Most Career Runs — T20',
+  'best_average_test':         'Best Batting Average — Test',
+  'best_average_odi':          'Best Batting Average — ODI',
+  'best_average_t20':          'Best Batting Average — T20',
+  'most_centuries_test':       'Most Centuries — Test',
+  'most_centuries_odi':        'Most Centuries — ODI',
+  'most_sixes':                'Most Sixes (Career)',
+  'highest_partnership_test':  'Highest Partnership — Test',
+  'highest_partnership_odi':   'Highest Partnership — ODI',
+  'highest_partnership_t20':   'Highest Partnership — T20',
+  'best_bowling_test':         'Best Bowling Figures — Test',
+  'best_bowling_odi':          'Best Bowling Figures — ODI',
+  'best_bowling_t20':          'Best Bowling Figures — T20',
+  'most_wickets_test':         'Most Career Wickets — Test',
+  'most_wickets_odi':          'Most Career Wickets — ODI',
+  'most_wickets_t20':          'Most Career Wickets — T20',
+  'best_bowling_average_test': 'Best Bowling Average — Test',
+  'best_economy_t20':          'Best Economy Rate — T20',
+  'best_economy_odi':          'Best Economy Rate — ODI',
+  'most_five_fors_test':       'Most Five-Wicket Hauls — Test',
+  'highest_team_total_test':   'Highest Team Total — Test',
+  'highest_team_total_odi':    'Highest Team Total — ODI',
+  'highest_team_total_t20':    'Highest Team Total — T20',
+  'lowest_team_total_test':    'Lowest Team Total — Test',
+  'lowest_team_total_odi':     'Lowest Team Total — ODI',
+  'lowest_team_total_t20':     'Lowest Team Total — T20',
+  'biggest_win_runs_test':     'Biggest Win (by runs) — Test',
+  'biggest_win_runs_odi':      'Biggest Win (by runs) — ODI',
+  'biggest_win_wickets_test':  'Biggest Win (by wickets) — Test',
+};
+
+function getHonoursLabel(key) {
+  return HONOURS_LABELS[key.toLowerCase()] ||
+    key.replace(/_/g, ' ')
+       .replace(/\b(test|odi|t20)\b/gi, m => m.toUpperCase())
+       .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatBowlingFigures(wickets, runs) {
+  if (wickets === null || wickets === undefined) return '—';
+  if (runs    === null || runs    === undefined) return `${wickets}/?`;
+  return `${wickets}/${runs}`;
+}
+
+function formatHonoursValue(key, record) {
+  const k = (key || '').toLowerCase();
+  if (k.includes('best_bowling')) {
+    return record.display_value ||
+           formatBowlingFigures(record.wickets, record.runs_conceded);
+  }
+  if (k.includes('highest_score') || k.includes('highest_partnership')) {
+    const notOut = record.not_out ? '*' : '';
+    return `${record.value ?? record.display_value ?? '—'}${notOut}`;
+  }
+  if (k.includes('average') || k.includes('economy')) {
+    const v = record.value ?? record.value_decimal;
+    return v != null ? parseFloat(v).toFixed(2) : (record.display_value || '—');
+  }
+  if (k.includes('team_total')) {
+    const wkts = record.wickets ?? record.value_wickets;
+    const runs  = record.value ?? record.value_runs;
+    if (wkts != null && runs != null)
+      return wkts >= 10 ? `${runs} all out` : `${runs}/${wkts}`;
+  }
+  return record.value ?? record.display_value ?? '—';
+}
+
+function formatHonoursContext(record) {
+  const parts = [];
+  if (record.player_name)   parts.push(record.player_name);
+  if (record.team_name)     parts.push(record.team_name);
+  if (record.opponent_name) parts.push(`v ${record.opponent_name}`);
+  if (record.venue_name)    parts.push(record.venue_name);
+  if (record.match_date)    parts.push(record.match_date);
+  return parts.join(' · ');
+}
+
+function _renderHonoursEnrichedSection(title, entries) {
+  if (!entries || !entries.length) return '';
+  let html = `<h3 class="alm-section-heading">${title}</h3>`;
+  html += `<div class="alm-honours-grid">`;
+  for (const entry of entries) {
+    const label = getHonoursLabel(entry.key);
+    const rw    = entry.real_world;
+    const ig    = entry.in_game;
+    const pct   = entry.pct_of_world_record;
+    const beaten = pct != null && pct >= 100;
+
+    let igHtml;
+    if (ig) {
+      const igVal  = formatHonoursValue(entry.key, ig);
+      const igCtx  = formatHonoursContext(ig);
+      igHtml = `
+        <div class="honours-section-label">In-Game Record</div>
+        <div class="honours-card__value">${igVal}</div>
+        ${igCtx ? `<div class="honours-card__context">${igCtx}</div>` : ''}`;
+    } else {
+      igHtml = `<div class="honours-card__context honours-card__context--empty">No record set yet</div>`;
+    }
+
+    let rwHtml = '';
+    if (rw) {
+      const rwVal  = rw.display_value || formatHonoursValue(entry.key, rw);
+      const rwCtx  = formatHonoursContext({
+        player_name: rw.holder_name, team_name: rw.team_name,
+        opponent_name: rw.opponent_name, match_date: rw.match_date,
+      });
+      rwHtml = `
+        <div class="honours-divider"></div>
+        <div class="honours-section-label honours-section-label--world">🌍 Real World Record</div>
+        <div class="honours-card__value honours-card__value--world">${rwVal}</div>
+        ${rwCtx ? `<div class="honours-card__context">${rwCtx}</div>` : ''}
+        ${rw.notes ? `<div class="honours-card__notes">"${rw.notes}"</div>` : ''}`;
+    }
+
+    let progressHtml = '';
+    if (pct != null && rw) {
+      const bar = Math.min(100, pct);
+      progressHtml = `
+        <div class="honours-progress-wrap">
+          <div class="honours-progress-bar" style="width:${bar}%"></div>
+        </div>
+        <div class="honours-progress-label">${beaten ? '🏆 World Record beaten!' : `${pct.toFixed(1)}% of world record`}</div>`;
+    }
+
+    html += `
+      <div class="alm-honours-card${beaten ? ' alm-honours-card--beaten' : ''}">
+        ${beaten ? '<div class="honours-beaten-badge">🏆 WORLD RECORD BEATEN!</div>' : ''}
+        <div class="alm-honours-card-title">${label}</div>
+        ${igHtml}
+        ${rwHtml}
+        ${progressHtml}
+      </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
 async function loadAlmHonours() {
   const area = document.getElementById('alm-table-area');
   if (!area) return;
-  const data = await api('GET', '/api/almanack/honours');
-  if (!data) return;
+
+  // Fetch both standard honours and enriched world-record comparison
+  const [honData, wrData] = await Promise.all([
+    api('GET', '/api/almanack/honours'),
+    api('GET', '/api/almanack/honours/with-world-records'),
+  ]);
+  if (!honData) return;
 
   let html = '';
 
   // Series winners
-  html += `<h3 class="alm-honours-heading">Series Winners</h3>`;
-  const series = data.series || [];
+  html += `<h3 class="alm-section-heading">Series Winners</h3>`;
+  const series = honData.series || [];
   html += series.length
-    ? `<table class="alm-table"><thead><tr>
+    ? `<div class="alm-table-wrap"><table class="alm-table almanack-table"><thead><tr>
          <th>Series</th><th>Format</th><th>Teams</th><th>Winner</th><th>Date</th>
        </tr></thead><tbody>
          ${series.map((r,i) => `<tr class="${i%2===0?'alm-row-even':'alm-row-odd'}">
@@ -4324,14 +4534,16 @@ async function loadAlmHonours() {
            <td><strong>${r.winner_name || '—'}</strong></td>
            <td>${r.start_date || '—'}</td>
          </tr>`).join('')}
-       </tbody></table>`
-    : '<p class="empty-state">No completed series yet.</p>';
+       </tbody></table></div>`
+    : `<div class="alm-empty-state" style="margin:12px 0 24px;padding:24px">
+         <p class="alm-empty-state-heading">No completed series yet</p>
+       </div>`;
 
   // Tournament winners
-  html += `<h3 class="alm-honours-heading">Tournament Winners</h3>`;
-  const tournaments = data.tournaments || [];
+  html += `<h3 class="alm-section-heading">Tournament Winners</h3>`;
+  const tournaments = honData.tournaments || [];
   html += tournaments.length
-    ? `<table class="alm-table"><thead><tr>
+    ? `<div class="alm-table-wrap"><table class="alm-table almanack-table"><thead><tr>
          <th>Tournament</th><th>Format</th><th>Winner</th><th>Date</th>
        </tr></thead><tbody>
          ${tournaments.map((r,i) => `<tr class="${i%2===0?'alm-row-even':'alm-row-odd'}">
@@ -4340,22 +4552,37 @@ async function loadAlmHonours() {
            <td><strong>${r.winner_name || '—'}</strong></td>
            <td>${r.start_date || '—'}</td>
          </tr>`).join('')}
-       </tbody></table>`
-    : '<p class="empty-state">No completed tournaments yet.</p>';
+       </tbody></table></div>`
+    : `<div class="alm-empty-state" style="margin:12px 0 24px;padding:24px">
+         <p class="alm-empty-state-heading">No completed tournaments yet</p>
+       </div>`;
 
-  // World records (only if worlds exist)
-  const worldRecs = data.world_records || [];
-  if (worldRecs.length) {
-    html += `<h3 class="alm-honours-heading">World Records</h3>`;
+  // Enriched records vs real world
+  if (wrData) {
+    html += _renderHonoursEnrichedSection('Batting Records', wrData.batting);
+    html += _renderHonoursEnrichedSection('Bowling Records', wrData.bowling);
+    html += _renderHonoursEnrichedSection('Team Records',    wrData.teams);
+  }
+
+  // World mode records (legacy cards)
+  const worldRecs = honData.world_records || [];
+  if (worldRecs.some(s => s.records.length)) {
+    html += `<h3 class="alm-section-heading">World Mode Records</h3>`;
     worldRecs.forEach(section => {
-      html += `<h4 class="alm-honours-subheading">${section.world.name}</h4>`;
-      html += section.records.length
-        ? `<table class="alm-table"><thead><tr><th>Record</th><th>Value</th><th>Format</th></tr></thead><tbody>
-             ${section.records.map((r,i) => `<tr class="${i%2===0?'alm-row-even':'alm-row-odd'}">
-               <td>${r.record_key}</td><td>${r.record_value}</td><td>${r.format||'—'}</td>
-             </tr>`).join('')}
-           </tbody></table>`
-        : '<p class="empty-state">No records yet for this world.</p>';
+      if (!section.records.length) return;
+      html += `<h4 class="alm-section-subheading">${section.world.name}</h4>`;
+      html += `<div class="alm-honours-grid">` +
+        section.records.map(r => {
+          const hasValue = r.record_value != null && r.record_value !== '';
+          const label    = getHonoursLabel(r.record_key);
+          return `<div class="alm-honours-card">
+            <div class="alm-honours-card-title">${label}</div>
+            ${hasValue
+              ? `<div class="honours-card__value">${r.record_value}</div>`
+              : `<div class="honours-card__context honours-card__context--empty">No record set yet</div>`}
+          </div>`;
+        }).join('') +
+        `</div>`;
     });
   }
 
@@ -5191,17 +5418,20 @@ function _wizardUpdateCount() {
 function _wizardBuildSummary() {
   const el = document.getElementById('wizard-summary');
   if (!el) return;
-  const name     = document.getElementById('wc-name').value.trim();
-  const start    = document.getElementById('wc-start').value;
-  const density  = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
-  const myTeamId = parseInt(document.getElementById('wc-my-team').value) || null;
-  const myTeam   = myTeamId ? WorldUI.wizardAllTeams.find(t => t.id === myTeamId) : null;
-  const teamList = WorldUI.wizardAllTeams.filter(t => WorldUI.wizardTeamIds.has(t.id));
+  const name      = document.getElementById('wc-name').value.trim();
+  const start     = document.getElementById('wc-start').value;
+  const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
+  const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
+  const myTeam    = myTeamId ? WorldUI.wizardAllTeams.find(t => t.id === myTeamId) : null;
+  const teamList  = WorldUI.wizardAllTeams.filter(t => WorldUI.wizardTeamIds.has(t.id));
+  const styleLabel = calStyle === 'realistic' ? 'Realistic (FTP)' : 'Random';
 
   el.innerHTML = `
     <div class="summary-row"><span>World Name</span><strong>${name}</strong></div>
     <div class="summary-row"><span>Start Date</span><strong>${start}</strong></div>
     <div class="summary-row"><span>Density</span><strong>${density}</strong></div>
+    <div class="summary-row"><span>Calendar Style</span><strong>${styleLabel}</strong></div>
     <div class="summary-row"><span>Your Team</span><strong>${myTeam ? myTeam.name : 'None (AI only)'}</strong></div>
     <div class="summary-row"><span>Teams (${teamList.length})</span>
       <span>${teamList.map(t => t.short_code || t.name.slice(0,3)).join(', ')}</span>
@@ -5209,26 +5439,90 @@ function _wizardBuildSummary() {
 }
 
 async function submitWorldWizard() {
-  const name     = document.getElementById('wc-name').value.trim();
-  const start    = document.getElementById('wc-start').value;
-  const density  = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
-  const myTeamId = parseInt(document.getElementById('wc-my-team').value) || null;
-  const team_ids = Array.from(WorldUI.wizardTeamIds);
+  const name      = document.getElementById('wc-name').value.trim();
+  const start     = document.getElementById('wc-start').value;
+  const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
+  const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
+  const team_ids  = Array.from(WorldUI.wizardTeamIds);
 
   const btn = document.getElementById('wizard-create-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
 
   const res = await api('POST', '/api/worlds', {
     name, start_date: start, calendar_density: density,
-    team_ids, my_team_id: myTeamId,
+    calendar_style: calStyle, team_ids, my_team_id: myTeamId,
   });
 
   if (btn) { btn.disabled = false; btn.textContent = 'Create World'; }
 
   if (res?.world_id) {
-    hideWorldWizard();
-    loadWorldDetail(res.world_id);
+    if (calStyle === 'realistic') {
+      await _showCalendarPreview(res.world_id);
+    } else {
+      hideWorldWizard();
+      loadWorldDetail(res.world_id);
+    }
   }
+}
+
+async function _showCalendarPreview(worldId) {
+  // Replace wizard content with a calendar preview before navigating
+  const panel = document.getElementById('wizard-pages');
+  if (!panel) { hideWorldWizard(); loadWorldDetail(worldId); return; }
+
+  panel.innerHTML = `<div style="padding:8px 0">
+    <h3 style="margin:0 0 6px">Calendar Preview</h3>
+    <p class="text-muted" style="font-size:var(--fs-sm);margin:0 0 12px">
+      Next 12 months of generated fixtures</p>
+    <div id="cal-preview-loading" class="text-muted">Loading…</div>
+    <div id="cal-preview-content" class="hidden"></div>
+    <div class="wizard-nav" style="margin-top:16px">
+      <button class="btn btn-primary" onclick="hideWorldWizard();loadWorldDetail(${worldId})">
+        Open World →</button>
+    </div>
+  </div>`;
+
+  const data = await api('GET', `/api/worlds/${worldId}/calendar/upcoming?days=365`);
+  const loadingEl  = document.getElementById('cal-preview-loading');
+  const contentEl  = document.getElementById('cal-preview-content');
+  if (loadingEl)  loadingEl.classList.add('hidden');
+  if (!contentEl) return;
+  contentEl.classList.remove('hidden');
+
+  const fixtures   = data?.fixtures || [];
+  const seriesSet  = new Set(fixtures.map(f => f.series_name).filter(Boolean));
+  const iccCount   = fixtures.filter(f => f.is_icc_event).length;
+
+  const statHtml = `
+    <div class="cal-preview-panel">
+      <h4>Calendar Preview — Next 12 months</h4>
+      <div class="cal-preview-stats">
+        <div class="cal-preview-stat"><strong>${fixtures.length}</strong><small>Fixtures</small></div>
+        <div class="cal-preview-stat"><strong>${seriesSet.size}</strong><small>Series</small></div>
+        <div class="cal-preview-stat"><strong>${iccCount}</strong><small>ICC Event matches</small></div>
+      </div>
+      <ul class="cal-preview-list">
+        ${fixtures.slice(0, 30).map(f => {
+          const d = f.scheduled_date || '';
+          const t1 = f.team1_name || `Team ${f.team1_id}`;
+          const t2 = f.team2_name || `Team ${f.team2_id}`;
+          const iccBadge = f.is_icc_event
+            ? `<span class="cal-preview-icc">ICC</span>` : '';
+          const series = f.series_name
+            ? `<span class="cal-preview-series">${f.series_name}</span>` : '';
+          return `<li>
+            <span class="cal-preview-date">${d}</span>
+            <span><span class="badge badge-${(f.format||'').toLowerCase()}">${f.format||''}</span></span>
+            <span>${t1} v ${t2}</span>
+            ${series}${iccBadge}
+          </li>`;
+        }).join('')}
+        ${fixtures.length > 30 ? `<li style="color:var(--text-muted);padding:6px 0">…and ${fixtures.length - 30} more</li>` : ''}
+      </ul>
+    </div>`;
+
+  contentEl.innerHTML = statHtml;
 }
 
 // ── World Dashboard ───────────────────────────────────────────────────────────
