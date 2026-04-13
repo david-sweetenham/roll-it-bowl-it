@@ -3289,6 +3289,13 @@ function showBroadcastPicker() {
   if (!worldId) return;
   document.getElementById('broadcast-picker')?.remove();
 
+  // Derive the current world year and the two following years for the year picker
+  const worldDate  = WorldUI._worldData?.world?.current_date || '';
+  const worldYear  = worldDate ? parseInt(worldDate.slice(0, 4), 10) : new Date().getFullYear();
+  const yearOptions = [worldYear, worldYear + 1, worldYear + 2].map(y =>
+    `<button class="btn btn-secondary" onclick="_bcastPickStart('year:${y}')">${y}</button>`
+  ).join('');
+
   const el = document.createElement('div');
   el.id = 'broadcast-picker';
   el.className = 'broadcast-picker-modal';
@@ -3296,11 +3303,16 @@ function showBroadcastPicker() {
     <div class="bcast-picker-card">
       <div class="bcast-picker-title">📡 Broadcast</div>
       <div class="bcast-picker-sub">Play upcoming fixtures ball-by-ball, automatically. Choose scope:</div>
+      <div class="bcast-picker-section-label">By count</div>
       <div class="bcast-picker-options">
         <button class="btn btn-secondary" onclick="_bcastPickStart('next1')">Next Match</button>
         <button class="btn btn-secondary" onclick="_bcastPickStart('next5')">Next 5</button>
         <button class="btn btn-secondary" onclick="_bcastPickStart('next10')">Next 10</button>
         <button class="btn btn-secondary" onclick="_bcastPickStart('next20')">Next 20</button>
+      </div>
+      <div class="bcast-picker-section-label">Full calendar year</div>
+      <div class="bcast-picker-options">
+        ${yearOptions}
       </div>
       <div class="bcast-picker-speed">
         <span class="bcast-picker-speed-label">Speed:</span>

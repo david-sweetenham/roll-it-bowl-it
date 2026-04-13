@@ -3974,6 +3974,13 @@ def world_broadcast_queue(id):
             extra_where = ' AND f.scheduled_date <= ?'
             extra_params = [scope[8:]]
             limit = 200
+        elif scope.startswith('year:'):
+            year = scope[5:]
+            # Full calendar year — override the today lower-bound so Jan fixtures aren't skipped
+            today = f'{year}-01-01'
+            extra_where = ' AND f.scheduled_date <= ?'
+            extra_params = [f'{year}-12-31']
+            limit = 1000
 
         rows = db.execute(
             "SELECT f.id, f.team1_id, f.team2_id, f.scheduled_date, f.format, f.status, "
