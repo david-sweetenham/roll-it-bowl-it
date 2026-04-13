@@ -1586,11 +1586,15 @@ def simulate_world_to(target, fixtures, world_state):
               matches_simulated, updated_player_states, truncated}
     """
     MAX_MATCHES  = 500
-    my_team_id   = world_state.get('my_team_id')
+    user_team_ids = set(world_state.get('user_team_ids') or [])
+    if not user_team_ids and world_state.get('my_team_id'):
+        user_team_ids.add(world_state.get('my_team_id'))
+    if not user_team_ids and world_state.get('my_domestic_team_id'):
+        user_team_ids.add(world_state.get('my_domestic_team_id'))
     target_date  = world_state.get('target_date')
     current_date = world_state.get('current_date', '')
 
-    if target == 'next_my_match' and not my_team_id:
+    if target == 'next_my_match' and not user_team_ids:
         return {
             'results': [],
             'new_current_date': current_date,
@@ -1630,8 +1634,8 @@ def simulate_world_to(target, fixtures, world_state):
             paused_at = fixture
             break
 
-        if target == 'next_my_match' and my_team_id:
-            if fixture.get('team1_id') == my_team_id or fixture.get('team2_id') == my_team_id:
+        if target == 'next_my_match' and user_team_ids:
+            if fixture.get('team1_id') in user_team_ids or fixture.get('team2_id') in user_team_ids:
                 paused_at = fixture
                 break
 

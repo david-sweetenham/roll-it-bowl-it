@@ -8020,16 +8020,44 @@ function _refreshWizardTeamPool() {
       titleEl.innerHTML = 'Step 3 — Select Teams <span class="text-muted">(min 4)</span>';
     }
   }
+  const intlWrap = document.getElementById('wc-managed-international-wrap');
+  const domWrap = document.getElementById('wc-managed-domestic-wrap');
+  if (intlWrap) intlWrap.classList.toggle('hidden', scope === 'domestic');
+  if (domWrap) domWrap.classList.toggle('hidden', scope === 'international');
 }
 
 function _refreshWizardMyTeamOptions() {
   const myTeamSel = document.getElementById('wc-my-team');
-  if (!myTeamSel) return;
-  const current = parseInt(myTeamSel.value) || null;
-  myTeamSel.innerHTML = '<option value="">None — AI only</option>' +
-    (WorldUI.wizardAllTeams || []).map(t => `<option value="${t.id}">${t.name}</option>`).join('');
-  if (current && (WorldUI.wizardAllTeams || []).some(t => t.id === current)) {
-    myTeamSel.value = String(current);
+  const myDomesticSel = document.getElementById('wc-my-domestic-team');
+  const currentIntl = parseInt(myTeamSel?.value) || null;
+  const currentDom = parseInt(myDomesticSel?.value) || null;
+  const scope = getWorldScope();
+  const intlTeams = (WorldUI.wizardInternationalTeams || []).filter(t => WorldUI.wizardTeamIds.has(t.id));
+  const selectedLeagueNames = new Set(
+    Array.from(WorldUI.wizardDomesticLeagues || [])
+      .map(k => (WorldUI.wizardDomesticLeagueOptions || []).find(l => l.key === k)?.league)
+      .filter(Boolean)
+  );
+  const domesticTeams = scope === 'combined'
+    ? (WorldUI.wizardDomesticTeams || []).filter(t =>
+        !selectedLeagueNames.size || (t.league && selectedLeagueNames.has(t.league))
+      )
+    : (WorldUI.wizardDomesticTeams || []).filter(t => WorldUI.wizardTeamIds.has(t.id));
+
+  if (myTeamSel) {
+    myTeamSel.innerHTML = '<option value="">None — AI only</option>' +
+      intlTeams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    if (currentIntl && intlTeams.some(t => t.id === currentIntl)) {
+      myTeamSel.value = String(currentIntl);
+    }
+  }
+
+  if (myDomesticSel) {
+    myDomesticSel.innerHTML = '<option value="">None — AI only</option>' +
+      domesticTeams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    if (currentDom && domesticTeams.some(t => t.id === currentDom)) {
+      myDomesticSel.value = String(currentDom);
+    }
   }
 }
 
@@ -8074,7 +8102,9 @@ function _wizardBuildSummary() {
   const worldScope = getWorldScope();
   const domesticTeamMode = getWorldDomesticTeamMode();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
-  const myTeam    = myTeamId ? WorldUI.wizardAllTeams.find(t => t.id === myTeamId) : null;
+  const myDomesticTeamId = parseInt(document.getElementById('wc-my-domestic-team')?.value) || null;
+  const myTeam    = myTeamId ? (WorldUI.wizardInternationalTeams || []).find(t => t.id === myTeamId) : null;
+  const myDomesticTeam = myDomesticTeamId ? (WorldUI.wizardDomesticTeams || []).find(t => t.id === myDomesticTeamId) : null;
   const teamList  = WorldUI.wizardAllTeams.filter(t => WorldUI.wizardTeamIds.has(t.id));
   const styleLabel = calStyle === 'realistic' ? 'Realistic (FTP)' : 'Random';
   const domLeagues = Array.from(WorldUI.wizardDomesticLeagues || []);
@@ -8091,7 +8121,8 @@ function _wizardBuildSummary() {
     <div class="summary-row"><span>Calendar Style</span><strong>${styleLabel}</strong></div>
     <div class="summary-row"><span>Fixture Horizon</span><strong>${calYears} year${calYears !== 1 ? 's' : ''}</strong></div>
     ${worldScope === 'domestic' && calStyle === 'realistic' ? `<div class="summary-row"><span>Domestic Coverage</span><strong>${domesticTeamMode === 'full_league' ? 'Full League' : 'Selected Clubs'}</strong></div>` : ''}
-    <div class="summary-row"><span>Your Team</span><strong>${myTeam ? myTeam.name : 'None (AI only)'}</strong></div>
+    <div class="summary-row"><span>Managed International Team</span><strong>${myTeam ? myTeam.name : 'None'}</strong></div>
+    ${worldScope !== 'international' ? `<div class="summary-row"><span>Managed Domestic Team</span><strong>${myDomesticTeam ? myDomesticTeam.name : 'None'}</strong></div>` : ''}
     <div class="summary-row"><span>Teams (${teamList.length})</span>
       <span>${worldScope === 'domestic' && domesticTeamMode === 'full_league'
         ? `All clubs from the selected league set (${teamList.length})`
@@ -8109,6 +8140,7 @@ async function submitWorldWizard() {
   const worldScope = getWorldScope();
   const domesticTeamMode = getWorldDomesticTeamMode();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
+  const myDomesticTeamId = parseInt(document.getElementById('wc-my-domestic-team')?.value) || null;
   const team_ids  = Array.from(WorldUI.wizardTeamIds);
 
   const btn = document.getElementById('wizard-create-btn');
@@ -8120,7 +8152,7 @@ async function submitWorldWizard() {
 
   const res = await api('POST', '/api/worlds', {
     name, start_date: start, calendar_density: density,
-    calendar_style: calStyle, team_ids, my_team_id: myTeamId,
+    calendar_style: calStyle, team_ids, my_team_id: myTeamId, my_domestic_team_id: myDomesticTeamId,
     domestic_leagues, world_scope: worldScope, domestic_team_mode: domesticTeamMode,
     calendar_years: calYears,
   });
@@ -8262,16 +8294,22 @@ function _renderWorldRules(data, settings) {
   const domesticMode    = settings.domestic_team_mode === 'full_league' ? 'Full League' : 'Selected Clubs';
   const leagues         = Array.isArray(settings.domestic_leagues) ? settings.domestic_leagues : [];
   const myTeamId        = settings.my_team_id || null;
+  const myDomesticTeamId = settings.my_domestic_team_id || null;
   const calendarYears   = Math.max(1, Math.min(10, parseInt(settings.calendar_years, 10) || 2));
   const generatedThrough = data.generated_through || '';
 
   // Resolve team name from any available fixture data
   let myTeamName = null;
-  if (myTeamId) {
+  let myDomesticTeamName = null;
+  if (myTeamId || myDomesticTeamId) {
     const allFixtures = [...(data.next_fixtures || []), ...(data.upcoming_fixtures || [])];
     for (const f of allFixtures) {
       if (f.team1_id === myTeamId) { myTeamName = f.team1_name; break; }
       if (f.team2_id === myTeamId) { myTeamName = f.team2_name; break; }
+    }
+    for (const f of allFixtures) {
+      if (f.team1_id === myDomesticTeamId) { myDomesticTeamName = f.team1_name; break; }
+      if (f.team2_id === myDomesticTeamId) { myDomesticTeamName = f.team2_name; break; }
     }
   }
 
@@ -8294,9 +8332,15 @@ function _renderWorldRules(data, settings) {
     }
   }
 
-  if (myTeamId) {
-    const label = myTeamName ? escHtml(myTeamName) : 'User Controlled';
-    pills.push(`<span class="wrs-pill wrs-pill-team-set">👤 ${label}</span>`);
+  if (myTeamId || myDomesticTeamId) {
+    if (myTeamId) {
+      const label = myTeamName ? escHtml(myTeamName) : 'Managed International';
+      pills.push(`<span class="wrs-pill wrs-pill-team-set">🌐 ${label}</span>`);
+    }
+    if (myDomesticTeamId) {
+      const label = myDomesticTeamName ? escHtml(myDomesticTeamName) : 'Managed Domestic';
+      pills.push(`<span class="wrs-pill wrs-pill-team-set">🏟 ${label}</span>`);
+    }
   } else {
     pills.push(`<span class="wrs-pill wrs-pill-team-ai">🤖 AI Only</span>`);
   }
@@ -8318,7 +8362,7 @@ function _renderWorldOverview(data) {
   const calendarYears = Math.max(1, Math.min(10, parseInt(settings.calendar_years, 10) || 2));
   const upcoming = data.upcoming_fixtures || [];
   const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
-  const hasTrackedTeam = !!settings.my_team_id;
+  const hasTrackedTeam = !!(settings.my_team_id || settings.my_domestic_team_id);
   const nextFix = (data.next_fixtures || [])[0] || null;
   const generatedThrough = data.generated_through || '';
   const iccUpcoming = upcoming.filter(f => f.is_icc_event).length;
@@ -8845,7 +8889,7 @@ async function simulateWorld(target) {
     catch (_) { return {}; }
   })();
 
-  if (target === 'next_my_match' && !settings.my_team_id) {
+  if (target === 'next_my_match' && !(settings.my_team_id || settings.my_domestic_team_id)) {
     alert('Set a user-controlled team for this world before using My Next Match.');
     return;
   }

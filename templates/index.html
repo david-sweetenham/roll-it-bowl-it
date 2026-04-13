@@ -1184,10 +1184,18 @@
               <button id="wizard-select-all-btn" class="btn btn-secondary btn-sm" onclick="wizardSelectAllTeams()">Select All</button>
               <span id="wizard-team-count" class="text-muted" style="font-size:var(--fs-sm)">0 selected</span>
             </div>
-            <label class="form-label" style="margin-top:10px">Your Team (optional)</label>
-            <select id="wc-my-team" class="form-input">
-              <option value="">None — AI only</option>
-            </select>
+            <div id="wc-managed-international-wrap" style="margin-top:10px">
+              <label class="form-label">Managed International Team <span class="text-muted">(optional)</span></label>
+              <select id="wc-my-team" class="form-input">
+                <option value="">None — AI only</option>
+              </select>
+            </div>
+            <div id="wc-managed-domestic-wrap" class="hidden" style="margin-top:10px">
+              <label class="form-label">Managed Domestic Team <span class="text-muted">(optional)</span></label>
+              <select id="wc-my-domestic-team" class="form-input">
+                <option value="">None — AI only</option>
+              </select>
+            </div>
             <div id="wizard-team-badges" class="wizard-team-grid" style="margin-top:12px"></div>
             <div class="wizard-nav">
               <button class="btn btn-secondary" onclick="wizardBack(3)">← Back</button>

@@ -2408,6 +2408,7 @@ def _build_world_state(db, world_id):
 
     team_ids   = settings.get('team_ids', [])
     my_team_id = settings.get('my_team_id')
+    my_domestic_team_id = settings.get('my_domestic_team_id')
 
     teams = {}
     for tid in team_ids:
@@ -2436,6 +2437,8 @@ def _build_world_state(db, world_id):
 
     return {
         'my_team_id':     my_team_id,
+        'my_domestic_team_id': my_domestic_team_id,
+        'user_team_ids':  list(_user_team_ids(settings)),
         'current_date':   world.get('current_date', ''),
         'teams':          teams,
         'player_states':  player_states,
@@ -3025,6 +3028,15 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
     database.update_world(db, world_id, {'current_date': new_current_date})
 
 
+def _user_team_ids(settings):
+    """Return a set of all user-controlled team IDs from a world settings dict."""
+    ids = set()
+    if settings.get('my_team_id'):
+        ids.add(int(settings['my_team_id']))
+    if settings.get('my_domestic_team_id'):
+        ids.add(int(settings['my_domestic_team_id']))
+    return ids
+
 # ── Worlds — routes ───────────────────────────────────────────────────────────
 
 @app.route('/api/worlds', methods=['POST'])
@@ -3033,7 +3045,8 @@ def create_world():
     body              = request.get_json() or {}
     name              = (body.get('name') or '').strip()
     team_ids          = body.get('team_ids', [])
-    my_team_id        = body.get('my_team_id')
+    my_team_id          = body.get('my_team_id')
+    my_domestic_team_id = body.get('my_domestic_team_id')
     start_date        = body.get('start_date', '2025-01-01')
     density           = body.get('calendar_density', 'moderate')
     cal_style         = body.get('calendar_style', 'random')  # 'realistic' | 'random'
@@ -3057,6 +3070,7 @@ def create_world():
     db = database.get_db()
     try:
         settings = {'team_ids': team_ids, 'my_team_id': my_team_id,
+                    'my_domestic_team_id': my_domestic_team_id,
                     'calendar_style': cal_style,
                     'calendar_years': cal_years,
                     'domestic_leagues': domestic_leagues,
@@ -3159,7 +3173,8 @@ def create_world():
                         or team_venues.get(t1)
                         or team_venues.get(t2)
                         or fallback_venue)
-            is_user  = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            _utids   = _user_team_ids(settings)
+            is_user  = 1 if _utids and (t1 in _utids or t2 in _utids) else 0
             sdate    = fx.get('scheduled_date', start_date)
 
             # Track series date ranges for world_series creation
@@ -3633,7 +3648,8 @@ def world_regenerate_calendar(id):
             t2      = fx['team2_id']
             vid     = (fx.get('venue_id') or team_venues.get(t1)
                        or team_venues.get(t2) or fallback_venue)
-            is_user = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            _utids  = _user_team_ids(settings)
+            is_user = 1 if _utids and (t1 in _utids or t2 in _utids) else 0
             sdate   = fx.get('scheduled_date', from_date)
             sk      = fx.get('series_key')
             if sk:
@@ -3820,7 +3836,8 @@ def world_extend_calendar(id):
             t2 = fx['team2_id']
             vid = (fx.get('venue_id') or team_venues.get(t1)
                    or team_venues.get(t2) or fallback_venue)
-            is_user = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            _utids  = _user_team_ids(settings)
+            is_user = 1 if _utids and (t1 in _utids or t2 in _utids) else 0
             sdate = fx.get('scheduled_date', from_date)
             sk = fx.get('series_key')
             if sk:
@@ -4219,7 +4236,7 @@ def simulate_world(id):
                 settings = json.loads(world['settings_json'])
             except Exception:
                 settings = {}
-        if target == 'next_my_match' and not settings.get('my_team_id'):
+        if target == 'next_my_match' and not _user_team_ids(settings):
             return err('No user-controlled team selected for this world')
 
         world_state = _build_world_state(db, id)
