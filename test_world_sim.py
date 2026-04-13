@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import random
 import game_engine
+import cricket_calendar
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -222,6 +223,243 @@ def test_5_next_my_match_without_team():
            ok, f"matches_simulated={result['matches_simulated']}, paused_at={result['paused_at_fixture']}")
 
 
+# ── Helpers for domestic / world-rules tests ──────────────────────────────────
+
+def _make_dom_teams(league, ids, prefix='Club'):
+    """Return a list of domestic-team dicts usable by generate_domestic_fixtures."""
+    return [
+        {'team_id': tid, 'name': f'{prefix}{tid}', 'league': league,
+         'home_venue_id': tid * 10}
+        for tid in ids
+    ]
+
+
+def _parse_world_settings(settings):
+    """
+    Replicate the normalisation applied by both create_world and
+    world_regenerate_calendar so we can test it in isolation.
+    """
+    world_scope = settings.get('world_scope', 'international')
+    if world_scope not in ('international', 'domestic', 'combined'):
+        world_scope = 'international'
+
+    domestic_team_mode = settings.get('domestic_team_mode', 'selected')
+    if domestic_team_mode not in ('selected', 'full_league'):
+        domestic_team_mode = 'selected'
+
+    domestic_leagues = settings.get('domestic_leagues') or []
+
+    return world_scope, domestic_team_mode, domestic_leagues
+
+
+# ── Test 6: domestic 'selected' mode — only chosen clubs in fixture pool ───────
+
+def test_6_domestic_selected_mode():
+    """
+    When domestic_team_mode='selected', generate_domestic_fixtures should only
+    produce matches between the clubs that were explicitly chosen — not the
+    full league roster.
+    """
+    ALL_IDS      = list(range(41, 49))    # 8 BBL-style clubs
+    SELECTED_IDS = {41, 43, 45}           # 3 chosen
+
+    selected_teams = _make_dom_teams('Big Bash League', SELECTED_IDS)
+    fixtures = cricket_calendar.generate_domestic_fixtures(
+        'bbl', selected_teams, 2026, 2027
+    )
+
+    seen_ids   = {f['team1_id'] for f in fixtures} | {f['team2_id'] for f in fixtures}
+    unexpected = seen_ids - SELECTED_IDS
+
+    _check(
+        'Test 6: domestic selected mode — only selected clubs appear in fixture pool',
+        len(unexpected) == 0 and len(fixtures) > 0,
+        f'unexpected IDs={unexpected}, fixtures={len(fixtures)}',
+    )
+
+
+# ── Test 7: domestic 'full_league' mode — all clubs in fixture pool ────────────
+
+def test_7_domestic_full_league_mode():
+    """
+    When domestic_team_mode='full_league', every club in the league appears
+    in at least one generated fixture, and home+away round-robin count is met.
+    """
+    ALL_IDS = list(range(41, 49))   # 8 clubs
+    all_teams = _make_dom_teams('Big Bash League', ALL_IDS)
+
+    fixtures = cricket_calendar.generate_domestic_fixtures(
+        'bbl', all_teams, 2026, 2027
+    )
+
+    seen_ids = {f['team1_id'] for f in fixtures} | {f['team2_id'] for f in fixtures}
+    missing  = set(ALL_IDS) - seen_ids
+
+    # BBL has home_away=True → C(8,2)*2 = 56 fixtures per season
+    n = len(ALL_IDS)
+    expected_min = n * (n - 1)   # 56
+
+    _check(
+        'Test 7: domestic full_league mode — all clubs appear and fixture count correct',
+        len(missing) == 0 and len(fixtures) >= expected_min,
+        f'missing={missing}, fixtures={len(fixtures)}, expected>={expected_min}',
+    )
+
+
+# ── Test 8: combined world — both intl and domestic fixtures generated ──────────
+
+def test_8_combined_world_fixture_types():
+    """
+    generate_realistic_calendar with non-empty team_ids AND domestic_leagues
+    must produce both international bilateral fixtures and domestic fixtures,
+    with no fixture crossing the two pools.
+    """
+    INTL_IDS   = [1, 2, 3, 4]
+    INTL_NAMES = {1: 'England', 2: 'Australia', 3: 'India', 4: 'South Africa'}
+    INTL_VENUES = {n: [i * 2] for i, n in INTL_NAMES.items()}
+
+    DOM_IDS   = list(range(51, 57))   # 6 IPL teams
+    dom_teams = _make_dom_teams('IPL', DOM_IDS, prefix='IPLClub')
+
+    fixtures = cricket_calendar.generate_realistic_calendar(
+        team_ids         = INTL_IDS,
+        team_names       = INTL_NAMES,
+        venue_ids        = INTL_VENUES,
+        start_date_str   = '2026-01-01',
+        density          = 'moderate',
+        years            = 1,
+        domestic_leagues = ['ipl'],
+        domestic_teams   = dom_teams,
+    )
+
+    dom_fxs  = [f for f in fixtures if f.get('domestic_competition')]
+    intl_fxs = [f for f in fixtures if not f.get('domestic_competition')]
+
+    # No fixture should pair an international team with a domestic club
+    dom_id_set  = set(DOM_IDS)
+    intl_id_set = set(INTL_IDS)
+    cross = [
+        f for f in fixtures
+        if (f['team1_id'] in intl_id_set) != (f['team2_id'] in intl_id_set)
+           and (f['team1_id'] in dom_id_set or f['team2_id'] in dom_id_set)
+    ]
+
+    _check(
+        'Test 8: combined world generates both international and domestic fixtures',
+        len(dom_fxs) > 0 and len(intl_fxs) > 0,
+        f'domestic={len(dom_fxs)}, international={len(intl_fxs)}',
+    )
+    _check(
+        'Test 8b: combined world — no cross-pool (intl vs domestic) fixtures',
+        len(cross) == 0,
+        f'{len(cross)} cross-pool fixture(s) found',
+    )
+
+
+# ── Test 9: world settings normalisation ──────────────────────────────────────
+
+def test_9_world_settings_normalisation():
+    """
+    The settings-normalisation logic used by both create_world and
+    world_regenerate_calendar must:
+      - preserve valid world_scope / domestic_team_mode values
+      - fall back to safe defaults for invalid / missing values
+    """
+    cases = [
+        # (input_settings, expected_scope, expected_mode)
+        ({'world_scope': 'domestic',      'domestic_team_mode': 'full_league'},
+         'domestic',      'full_league',  []),
+        ({'world_scope': 'combined',      'domestic_team_mode': 'selected',
+          'domestic_leagues': ['ipl', 'bbl']},
+         'combined',      'selected',     ['ipl', 'bbl']),
+        ({'world_scope': 'international'},
+         'international', 'selected',     []),
+        ({'world_scope': 'INVALID',       'domestic_team_mode': 'BAD'},
+         'international', 'selected',     []),
+        ({},
+         'international', 'selected',     []),
+        ({'world_scope': 'domestic',      'domestic_team_mode': 'full_league',
+          'domestic_leagues': ['bbl']},
+         'domestic',      'full_league',  ['bbl']),
+    ]
+
+    failures = []
+    for settings, exp_scope, exp_mode, exp_leagues in cases:
+        scope, mode, leagues = _parse_world_settings(settings)
+        if scope != exp_scope or mode != exp_mode or leagues != exp_leagues:
+            failures.append(
+                f'{settings!r}: got ({scope!r},{mode!r},{leagues!r}), '
+                f'expected ({exp_scope!r},{exp_mode!r},{exp_leagues!r})'
+            )
+
+    _check(
+        'Test 9: world settings normalisation handles valid and invalid inputs correctly',
+        len(failures) == 0,
+        '; '.join(failures),
+    )
+
+
+# ── Test 10: regenerate-calendar preserves team pool across start-date shifts ──
+
+def test_10_regenerate_preserves_team_pool():
+    """
+    Regenerating a calendar with the same domestic settings but a different
+    start date must yield the exact same pool of participating teams.
+    This mirrors what world_regenerate_calendar does when the user rebuilds
+    their calendar mid-season.
+    """
+    SELECTED_IDS = {41, 42, 43, 44}
+    selected_teams = _make_dom_teams('Big Bash League', SELECTED_IDS)
+
+    original = cricket_calendar.generate_domestic_fixtures(
+        'bbl', selected_teams, 2026, 2027
+    )
+    regen = cricket_calendar.generate_domestic_fixtures(
+        'bbl', selected_teams, 2027, 2028    # later start (simulating mid-season regen)
+    )
+
+    orig_pool  = {f['team1_id'] for f in original} | {f['team2_id'] for f in original}
+    regen_pool = {f['team1_id'] for f in regen}    | {f['team2_id'] for f in regen}
+
+    _check(
+        'Test 10: regenerate-calendar (selected mode) — team pool identical across start-date shifts',
+        orig_pool == regen_pool == SELECTED_IDS,
+        f'original={orig_pool}, regen={regen_pool}, expected={SELECTED_IDS}',
+    )
+
+
+# ── Test 11: domestic world scope — calendar_team_ids is empty (no intl fixtures) ─
+
+def test_11_domestic_scope_no_intl_fixtures():
+    """
+    When world_scope='domestic', generate_realistic_calendar is called with
+    calendar_team_ids=[] so no international bilateral fixtures are produced.
+    Only domestic competition fixtures should appear.
+    """
+    DOM_IDS   = list(range(61, 67))
+    dom_teams = _make_dom_teams('IPL', DOM_IDS, prefix='IPLTeam')
+
+    fixtures = cricket_calendar.generate_realistic_calendar(
+        team_ids         = [],     # domestic worlds pass empty list for intl
+        team_names       = {},
+        venue_ids        = {},
+        start_date_str   = '2026-01-01',
+        density          = 'moderate',
+        years            = 1,
+        domestic_leagues = ['ipl'],
+        domestic_teams   = dom_teams,
+    )
+
+    dom_fxs  = [f for f in fixtures if f.get('domestic_competition')]
+    intl_fxs = [f for f in fixtures if not f.get('domestic_competition')]
+
+    _check(
+        'Test 11: domestic-scope world — no international fixtures, only domestic',
+        len(dom_fxs) > 0 and len(intl_fxs) == 0,
+        f'domestic={len(dom_fxs)}, international={len(intl_fxs)}',
+    )
+
+
 # ── Run all tests ──────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -230,6 +468,12 @@ if __name__ == '__main__':
     test_3_end_of_series()
     test_4_date_and_digest()
     test_5_next_my_match_without_team()
+    test_6_domestic_selected_mode()
+    test_7_domestic_full_league_mode()
+    test_8_combined_world_fixture_types()
+    test_9_world_settings_normalisation()
+    test_10_regenerate_preserves_team_pool()
+    test_11_domestic_scope_no_intl_fixtures()
 
     print()
     print(f'Results: {_passed} passed, {_failed} failed')

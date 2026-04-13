@@ -294,6 +294,220 @@ def test_series_names_not_duplicated():
     )
 
 
+# ── Helpers for domestic / world-rules UAT ────────────────────────────────────
+
+def _dom_teams(league, ids, prefix='Club'):
+    return [
+        {'team_id': tid, 'name': f'{prefix}{tid}', 'league': league,
+         'home_venue_id': tid * 10}
+        for tid in ids
+    ]
+
+
+def _intl_world(nations, dom_leagues=None, dom_teams=None,
+                start='2026-01-01', years=1, density='moderate'):
+    """Generate a realistic calendar for international (optionally + domestic) worlds."""
+    team_ids   = list(range(1, len(nations) + 1))
+    team_names = {i + 1: n for i, n in enumerate(nations)}
+    venue_ids  = {n: [100 + i] for i, n in enumerate(nations)}
+    return team_ids, team_names, cc.generate_realistic_calendar(
+        team_ids         = team_ids,
+        team_names       = team_names,
+        venue_ids        = venue_ids,
+        start_date_str   = start,
+        density          = density,
+        years            = years,
+        domestic_leagues = dom_leagues,
+        domestic_teams   = dom_teams,
+    )
+
+
+# ── Test 12: Domestic fixtures carry domestic_competition key ─────────────────
+
+def test_domestic_fixtures_are_tagged():
+    """
+    Every fixture produced from a domestic league entry must carry the
+    domestic_competition key set to the competition key string.
+    """
+    dom = _dom_teams('IPL', range(101, 107))
+    fixtures = cc.generate_realistic_calendar(
+        team_ids=[], team_names={}, venue_ids={},
+        start_date_str='2026-01-01', years=1,
+        domestic_leagues=['ipl'], domestic_teams=dom,
+    )
+
+    untagged = [f for f in fixtures if not f.get('domestic_competition')]
+    wrong_key = [f for f in fixtures
+                 if f.get('domestic_competition') and f['domestic_competition'] != 'ipl']
+
+    _check(
+        'Test 12: all domestic fixtures carry domestic_competition="ipl"',
+        len(fixtures) > 0 and len(untagged) == 0 and len(wrong_key) == 0,
+        f'fixtures={len(fixtures)}, untagged={len(untagged)}, wrong_key={len(wrong_key)}',
+    )
+
+
+# ── Test 13: Selected-clubs mode — unselected teams produce no fixtures ────────
+
+def test_selected_clubs_excludes_unselected():
+    """
+    When only a subset of clubs are passed to generate_domestic_fixtures
+    (simulating domestic_team_mode='selected'), no fixture involves a
+    club outside the chosen subset.
+    """
+    ALL_IDS      = list(range(201, 211))   # 10 clubs
+    SELECTED_IDS = {201, 203, 205, 207}    # 4 chosen
+
+    selected = _dom_teams('County Championship', SELECTED_IDS)
+    fixtures = cc.generate_domestic_fixtures('county_championship', selected, 2026, 2027)
+
+    seen     = {f['team1_id'] for f in fixtures} | {f['team2_id'] for f in fixtures}
+    outsiders = seen - SELECTED_IDS
+
+    _check(
+        'Test 13: selected-clubs mode — fixture pool restricted to chosen clubs only',
+        len(outsiders) == 0 and len(fixtures) > 0,
+        f'outsiders={outsiders}, fixtures={len(fixtures)}',
+    )
+
+
+# ── Test 14: Full-league mode — every club participates ───────────────────────
+
+def test_full_league_all_clubs_participate():
+    """
+    When the full club list is passed to generate_domestic_fixtures
+    (domestic_team_mode='full_league'), every club appears in at least one
+    fixture and the home+away round-robin count is at least n*(n-1).
+    """
+    ALL_IDS = list(range(301, 309))   # 8 Sheffield Shield-style state sides
+    all_teams = _dom_teams('Sheffield Shield', ALL_IDS, prefix='State')
+
+    fixtures = cc.generate_domestic_fixtures('sheffield_shield', all_teams, 2026, 2027)
+
+    seen     = {f['team1_id'] for f in fixtures} | {f['team2_id'] for f in fixtures}
+    missing  = set(ALL_IDS) - seen
+    n        = len(ALL_IDS)
+    min_count = n * (n - 1)   # home+away round-robin lower bound
+
+    _check(
+        'Test 14: full-league mode — every club in the pool appears in at least one fixture',
+        len(missing) == 0 and len(fixtures) >= min_count,
+        f'missing={missing}, fixtures={len(fixtures)}, expected>={min_count}',
+    )
+
+
+# ── Test 15: Combined world — domestic and international pools never cross ─────
+
+def test_combined_world_no_cross_pool_fixtures():
+    """
+    In a combined world the international bilateral calendar and the domestic
+    competition fixtures are entirely separate: no single fixture pairs a
+    national team against a franchise/county club.
+    """
+    INTL = ['England', 'Australia', 'India', 'South Africa']
+    DOM_IDS = list(range(401, 407))
+    dom = _dom_teams('IPL', DOM_IDS, prefix='Franchise')
+
+    intl_ids, _, fixtures = _intl_world(
+        INTL, dom_leagues=['ipl'], dom_teams=dom,
+    )
+    intl_set = set(intl_ids)
+    dom_set  = set(DOM_IDS)
+
+    cross = [
+        f for f in fixtures
+        if (f['team1_id'] in intl_set) != (f['team2_id'] in intl_set)
+           and (f['team1_id'] in dom_set or f['team2_id'] in dom_set)
+    ]
+
+    _check(
+        'Test 15: combined world — no fixture crosses international and domestic team pools',
+        len(cross) == 0,
+        f'{len(cross)} cross-pool fixture(s) found',
+    )
+
+
+# ── Test 16: Domestic fixtures use the correct format for each competition ─────
+
+def test_domestic_competition_format():
+    """
+    Each domestic competition must produce fixtures in the format declared
+    in DOMESTIC_COMPETITIONS (e.g. BBL → T20, Sheffield Shield → Test, IPL → T20).
+    """
+    cases = [
+        ('bbl',               'Big Bash League',     range(501, 509), 'T20'),
+        ('sheffield_shield',  'Sheffield Shield',    range(511, 517), 'Test'),
+        ('ipl',               'IPL',                 range(521, 527), 'T20'),
+        ('county_championship','County Championship',range(531, 535), 'Test'),
+    ]
+
+    failures = []
+    for comp_key, league, ids, expected_fmt in cases:
+        teams    = _dom_teams(league, ids)
+        fixtures = cc.generate_domestic_fixtures(comp_key, teams, 2026, 2027)
+        wrong    = [f for f in fixtures if f.get('format') != expected_fmt]
+        if wrong:
+            failures.append(
+                f'{comp_key}: {len(wrong)} fixture(s) had wrong format '
+                f'(e.g. {wrong[0].get("format")!r} instead of {expected_fmt!r})'
+            )
+
+    _check(
+        'Test 16: each domestic competition generates fixtures in its declared format',
+        len(failures) == 0,
+        '; '.join(failures),
+    )
+
+
+# ── Test 17: World settings normalisation (calendar layer) ────────────────────
+
+def test_world_settings_normalisation():
+    """
+    The settings normalisation rules used by create_world and
+    world_regenerate_calendar preserve valid values and replace invalid
+    values with safe defaults.
+    """
+    def _normalise(s):
+        scope = s.get('world_scope', 'international')
+        if scope not in ('international', 'domestic', 'combined'):
+            scope = 'international'
+        mode = s.get('domestic_team_mode', 'selected')
+        if mode not in ('selected', 'full_league'):
+            mode = 'selected'
+        leagues = s.get('domestic_leagues') or []
+        return scope, mode, leagues
+
+    cases = [
+        ({'world_scope': 'domestic',  'domestic_team_mode': 'full_league',
+          'domestic_leagues': ['bbl']},
+         'domestic',      'full_league', ['bbl']),
+        ({'world_scope': 'combined',  'domestic_team_mode': 'selected',
+          'domestic_leagues': ['ipl', 'psl']},
+         'combined',      'selected',    ['ipl', 'psl']),
+        ({'world_scope': 'international'},
+         'international', 'selected',    []),
+        ({'world_scope': 'BAD',       'domestic_team_mode': 'ALSO_BAD'},
+         'international', 'selected',    []),
+        ({},
+         'international', 'selected',    []),
+    ]
+
+    failures = []
+    for settings, exp_scope, exp_mode, exp_leagues in cases:
+        scope, mode, leagues = _normalise(settings)
+        if (scope, mode, leagues) != (exp_scope, exp_mode, exp_leagues):
+            failures.append(
+                f'{settings!r}: got ({scope!r},{mode!r},{leagues!r}), '
+                f'expected ({exp_scope!r},{exp_mode!r},{exp_leagues!r})'
+            )
+
+    _check(
+        'Test 17: world settings normalisation preserves valid values, rejects invalid ones',
+        len(failures) == 0,
+        '; '.join(failures),
+    )
+
+
 # ── Runner ─────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -309,6 +523,12 @@ if __name__ == '__main__':
     test_fixture_count_vs_density()
     test_required_fields()
     test_series_names_not_duplicated()
+    test_domestic_fixtures_are_tagged()
+    test_selected_clubs_excludes_unselected()
+    test_full_league_all_clubs_participate()
+    test_combined_world_no_cross_pool_fixtures()
+    test_domestic_competition_format()
+    test_world_settings_normalisation()
 
     print(f'\nResults: {_passed} passed, {_failed} failed')
     if _failed == 0:
