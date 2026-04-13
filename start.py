@@ -35,6 +35,7 @@ except ImportError:
     sys.exit(1)
 
 import sqlite3
+import socket
 import threading
 import webbrowser
 import time
@@ -45,6 +46,17 @@ if '--dev' in sys.argv:
 
 DB_PATH = _cfg.DB_PATH
 SCHEMA_PATH = _cfg.SCHEMA_PATH
+
+
+def _get_lan_ip():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
 
 
 def init_db():
@@ -65,10 +77,15 @@ def init_db():
 
 def open_browser():
     time.sleep(1.5)
-    webbrowser.open(f'http://{_cfg.FLASK_HOST}:{_cfg.FLASK_PORT}')
+    browser_host = '127.0.0.1' if _cfg.FLASK_HOST == '0.0.0.0' else _cfg.FLASK_HOST
+    webbrowser.open(f'http://{browser_host}:{_cfg.FLASK_PORT}')
 
 
 if __name__ == '__main__':
+    if '--lan' in sys.argv:
+        _cfg.FLASK_HOST = '0.0.0.0'
+        print("LAN mode enabled — other devices on your network can connect.")
+
     if not os.path.exists(DB_PATH):
         init_db()
     else:
@@ -83,7 +100,15 @@ if __name__ == '__main__':
 
     print("=" * 50)
     print("  Roll It & Bowl It: Dice Cricket Done Digitally")
-    print(f"  Roll It & Bowl It is running at http://{_cfg.FLASK_HOST}:{_cfg.FLASK_PORT}")
+    print(f"  Local access: http://127.0.0.1:{_cfg.FLASK_PORT}")
+    if _cfg.FLASK_HOST == '0.0.0.0':
+        lan_ip = _get_lan_ip()
+        if lan_ip:
+            print(f"  LAN access:   http://{lan_ip}:{_cfg.FLASK_PORT}")
+        else:
+            print("  LAN access:   enabled, but local IP could not be detected automatically.")
+    else:
+        print(f"  Host bind:    {_cfg.FLASK_HOST}:{_cfg.FLASK_PORT}")
     print("=" * 50)
 
     t = threading.Thread(target=open_browser, daemon=True)

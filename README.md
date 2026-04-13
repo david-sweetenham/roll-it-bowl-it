@@ -57,6 +57,18 @@ python start.py
 
 Open `http://127.0.0.1:5000`.
 
+### LAN Hosting
+
+If you want to open the game from other devices on your local network, start it with:
+
+```bash
+python start.py --lan
+```
+
+The launcher will bind Flask to `0.0.0.0`, keep opening your own browser locally, and print a `LAN access` URL such as `http://192.168.1.20:5000` for phones, laptops, or other machines on the same network.
+
+This is the right first step for local multiplayer or showing the game on another device in your house. Proper internet hosting is a later-stage job and would need a production server setup, firewall/router rules or tunnelling, and some security hardening before exposing the app publicly.
+
 ### Direct Flask run
 
 If you prefer to start the app directly:
@@ -64,6 +76,12 @@ If you prefer to start the app directly:
 ```bash
 source .venv/bin/activate
 python app.py
+```
+
+You can also override the bind host and port directly with environment variables:
+
+```bash
+RIBI_HOST=0.0.0.0 RIBI_PORT=5000 python app.py
 ```
 
 The database is created and seeded automatically on first run. The seed includes international teams, associate nations, and major domestic competitions.
