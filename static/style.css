@@ -3637,38 +3637,38 @@ body.broadcast-mode .btn-howzat {
 .world-header { display:flex; align-items:center; justify-content:space-between;
   flex-wrap:wrap; gap:8px; }
 
-/* World current-date block */
-.wd-date-block {
+/* World current-date header group */
+.wd-date-header-group {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin: 8px 0 14px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 .wd-date-display {
-  font-size: 2rem;
+  font-size: 1.75rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--text, #e8f4fd);
+  color: #e8f4fd;
   line-height: 1;
+  white-space: nowrap;
 }
 .wd-date-fmt-group {
   display: flex;
-  gap: 4px;
+  gap: 3px;
 }
 .wd-fmt-btn {
-  padding: 3px 8px;
-  font-size: var(--fs-xs, 0.72rem);
-  font-family: var(--font-score, monospace);
+  padding: 2px 7px;
+  font-size: 0.7rem;
+  font-family: 'Courier New', monospace;
   background: transparent;
-  border: 1px solid var(--border, rgba(127,179,211,0.15));
+  border: 1px solid rgba(127,179,211,0.3);
   border-radius: 4px;
-  color: var(--text-muted, #7fb3d3);
+  color: #7fb3d3;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.wd-fmt-btn:hover { background: var(--surface2, #1a3060); color: var(--text, #e8f4fd); }
-.wd-fmt-btn.active { background: var(--accent, #2ecc71); color: #000; border-color: var(--accent, #2ecc71); }
+.wd-fmt-btn:hover { background: #1a3060; color: #e8f4fd; }
+.wd-fmt-btn.active { background: #2ecc71; color: #000; border-color: #2ecc71; }
 
 /* ── Wizard ──────────────────────────────────────────────────────────────── */
 .world-wizard { margin-top:16px; }

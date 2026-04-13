@@ -1241,16 +1241,15 @@
             <span id="wd-density-badge" class="badge" style="margin-left:6px"></span>
             <span id="wd-scope-badge" class="badge" style="margin-left:6px"></span>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="openWorldCalendar()">📅 Full Calendar</button>
-        </div>
-
-        <div class="wd-date-block">
-          <span id="wd-date-display" class="wd-date-display"></span>
-          <span class="wd-date-fmt-group">
-            <button id="wd-fmt-uk"  class="wd-fmt-btn active" onclick="setWorldDateFmt('uk')">DD/MM/YYYY</button>
-            <button id="wd-fmt-usa" class="wd-fmt-btn"        onclick="setWorldDateFmt('usa')">MM/DD/YYYY</button>
-            <button id="wd-fmt-iso" class="wd-fmt-btn"        onclick="setWorldDateFmt('iso')">YYYY-MM-DD</button>
-          </span>
+          <div class="wd-date-header-group">
+            <span id="wd-date-display" class="wd-date-display"></span>
+            <span class="wd-date-fmt-group">
+              <button id="wd-fmt-uk"  class="wd-fmt-btn active" onclick="setWorldDateFmt('uk')">DD/MM</button>
+              <button id="wd-fmt-usa" class="wd-fmt-btn"        onclick="setWorldDateFmt('usa')">MM/DD</button>
+              <button id="wd-fmt-iso" class="wd-fmt-btn"        onclick="setWorldDateFmt('iso')">ISO</button>
+            </span>
+            <button class="btn btn-secondary btn-sm" onclick="openWorldCalendar()">📅 Full Calendar</button>
+          </div>
         </div>
 
         <div class="world-progress" style="margin-top:10px">
