@@ -1951,17 +1951,21 @@ async function rollBall() {
   // Guard: don't start a new ball if one is in progress
   if (MatchUI.diceState !== DiceState.IDLE) return;
 
+  const currentState = MatchUI.lastState;
+  const needsHumanBowlerChoice =
+    currentState?.current_innings &&
+    currentState.current_bowler_id === null &&
+    !_isAiTurn(currentState);
+  if (needsHumanBowlerChoice && !MatchUI.chosenBowlerId) {
+    await _maybeShowBowlingPanel(currentState);
+    if (!MatchUI.chosenBowlerId) return;
+  }
+
   _setDiceState(DiceState.ROLLING_S1);
   MatchUI._ballInProgress = true;
 
   const btn = document.getElementById('btn-roll');
   if (btn) btn.disabled = true;
-
-  // For human bowling: show bowling change panel at start of over
-  const currentState = MatchUI.lastState;
-  if (currentState?.current_bowler_id === null && !_isAiTurn(currentState)) {
-    await _maybeShowBowlingPanel(currentState);
-  }
 
   const matchId = getMatchId();
   const animPromise = sleep(animMs(AppState.broadcastMode ? 1000 : 600, AppState.broadcastMode ? 300 : 200, 0));
@@ -3059,6 +3063,7 @@ async function bowlingPanelAiChoose() {
     context: { bowlers, innings_state: inningsState },
   });
   const chosen = res?.bowler_id ?? null;
+  if (chosen) _showToast(`AI captain recommends ${MatchUI.allPlayers[chosen]?.name || 'this bowler'}`, 1800);
   _bowlingPanelSelect(chosen);
 }
 
@@ -7309,6 +7314,7 @@ function _renderWorldOverview(data) {
   const upcoming = data.upcoming_fixtures || [];
   const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
   const hasTrackedTeam = !!settings.my_team_id;
+  const nextFix = (data.next_fixtures || [])[0] || null;
   const iccUpcoming = upcoming.filter(f => f.is_icc_event).length;
   const activeSeries = (WorldUI._seriesData || [])
     .filter(s => (s.matches_remaining || 0) > 0)
@@ -7325,7 +7331,11 @@ function _renderWorldOverview(data) {
       <div class="world-desk-card">
         <div class="world-desk-label">Calendar</div>
         <div class="world-desk-value">${escHtml(style)}</div>
-        <div class="world-desk-sub">${iccUpcoming} ICC fixture${iccUpcoming !== 1 ? 's' : ''} in the next 2 weeks</div>
+        <div class="world-desk-sub">${upcoming.length
+          ? `${iccUpcoming} ICC fixture${iccUpcoming !== 1 ? 's' : ''} in the next 2 weeks`
+          : nextFix
+            ? `Quiet short horizon. Next fixture is ${escHtml(nextFix.scheduled_date || '')}`
+            : 'No upcoming fixtures generated yet'}</div>
       </div>
       <div class="world-desk-card">
         <div class="world-desk-label">Active Series</div>
@@ -7348,7 +7358,6 @@ function _renderWorldOverview(data) {
   }
 
   // Next fixture card
-  const nextFix = (data.next_fixtures || [])[0];
   const nfEl = document.getElementById('wd-next-fixture');
   if (nfEl) {
     if (nextFix) {
@@ -7384,7 +7393,13 @@ function _renderWorldOverview(data) {
     const fixtures = data.upcoming_fixtures || [];
     upEl.innerHTML = fixtures.length
       ? fixtures.map(f => _fixtureRowHtml(f)).join('')
-      : '<p class="text-muted">No fixtures in the next 2 weeks.</p>';
+      : (nextFix
+          ? `<div class="empty-state-card">
+              <div class="empty-state-icon">📅</div>
+              <h3 class="empty-state-heading">No fixtures in the next 2 weeks</h3>
+              <p class="empty-state-sub">This realistic calendar is between blocks right now. The next scheduled fixture is <strong>${escHtml(nextFix.scheduled_date || '')}</strong>: ${escHtml(nextFix.team1_name || '?')} vs ${escHtml(nextFix.team2_name || '?')}.</p>
+            </div>`
+          : '<p class="text-muted">No fixtures in the next 2 weeks.</p>');
   }
 
   // Mini rankings — top 3 per format

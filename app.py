@@ -742,6 +742,13 @@ def bowl_ball_route(id):
         bowler_id = state['current_bowler_id']
         req_data  = request.get_json() or {}
         if bowler_id is None:
+            match_rec = state.get('match', {})
+            player_mode = match_rec.get('player_mode', 'ai_vs_ai')
+            human_team_id = match_rec.get('human_team_id')
+            human_bowling = (
+                player_mode == 'human_vs_human' or
+                (player_mode == 'human_vs_ai' and human_team_id and innings.get('bowling_team_id') == human_team_id)
+            )
             # Allow human to specify a bowler choice
             requested_bowler = req_data.get('bowler_id')
             bowler_list = [
@@ -756,6 +763,8 @@ def bowl_ball_route(id):
             ]
             cap_map = {'T20': 4, 'ODI': 10, 'Test': None}
             cap = cap_map.get(fmt)
+            if human_bowling and not requested_bowler:
+                return err('bowler_id required for human-controlled bowling changes')
             if requested_bowler:
                 rb = next((b for b in bowler_list if b['player_id'] == requested_bowler), None)
                 valid = (rb is not None
@@ -763,6 +772,8 @@ def bowl_ball_route(id):
                          and (cap is None or rb['overs_bowled'] < cap))
                 if valid:
                     bowler_id = requested_bowler
+                elif human_bowling:
+                    return err('Invalid bowler selection for this over')
             if bowler_id is None:
                 bowler_id = game_engine.select_bowler(
                     bowler_list, over_number, fmt, state['last_bowler_id']
