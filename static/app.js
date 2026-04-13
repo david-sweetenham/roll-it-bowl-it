@@ -3835,6 +3835,9 @@ async function showResultScreen(matchId) {
   document.getElementById('screen-match')?.classList.remove('archive-screen-mode');
 
   const match = state.match || sc?.match || {};
+  if (match.result_type && match.result_type !== 'draw' && match.result_type !== 'tie') {
+    SoundEngine.play('victory');
+  }
   document.getElementById('match-live').classList.add('hidden');
   document.getElementById('match-result-screen').classList.remove('hidden');
 
@@ -5878,30 +5881,38 @@ const SoundEngine = {
       const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * duration));
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
-      const color = tone === 'roar' ? 0.75 : tone === 'groan' ? 0.25 : 0.5;
-      let last = 0;
+      const color = tone === 'victory' ? 0.88 : tone === 'roar' ? 0.82 : 0.7;
+      let low = 0;
+      let mid = 0;
       for (let i = 0; i < bufferSize; i++) {
         const white = (Math.random() * 2) - 1;
-        last = (last * color) + (white * (1 - color));
-        data[i] = last;
+        low = (low * color) + (white * (1 - color));
+        mid = (mid * 0.42) + (white * 0.58);
+        const chatter = Math.sin((i / ctx.sampleRate) * Math.PI * (tone === 'victory' ? 24 : 18)) * 0.08;
+        data[i] = (low * 0.78) + (mid * 0.34) + chatter;
       }
 
       const src = ctx.createBufferSource();
       src.buffer = buffer;
 
-      const filter = ctx.createBiquadFilter();
-      filter.type = tone === 'groan' ? 'lowpass' : 'bandpass';
-      filter.frequency.setValueAtTime(tone === 'roar' ? 900 : tone === 'groan' ? 380 : 1200, ctx.currentTime);
-      filter.Q.setValueAtTime(tone === 'roar' ? 0.8 : 1.2, ctx.currentTime);
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.setValueAtTime(tone === 'victory' ? 160 : 210, ctx.currentTime);
+
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(tone === 'victory' ? 760 : tone === 'roar' ? 680 : 860, ctx.currentTime);
+      bp.Q.setValueAtTime(0.55, ctx.currentTime);
 
       const gain = ctx.createGain();
       const now = ctx.currentTime;
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), now + Math.min(0.18, duration * 0.25));
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), now + Math.min(0.24, duration * 0.3));
       gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
-      src.connect(filter);
-      filter.connect(gain);
+      src.connect(hp);
+      hp.connect(bp);
+      bp.connect(gain);
       gain.connect(ctx.destination);
       src.start(now);
       src.stop(now + duration);
@@ -5921,18 +5932,17 @@ const SoundEngine = {
       case 'four':
         // Sweep up — boundary crack
         this._tone(440, 660, 0.30, 0.40);
-        setTimeout(() => this._crowd(0.75, 0.055, 'cheer'), 60);
         break;
       case 'six':
         // Three-note ascending: 523 → 784 → 1047
         this._tone(523, 784, 0.20, 0.50);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.50), 200);
-        setTimeout(() => this._crowd(1.05, 0.09, 'roar'), 70);
+        setTimeout(() => this._crowd(1.2, 0.12, 'roar'), 70);
         break;
       case 'wicket':
         // Descending sweep
         this._tone(440, 110, 0.60, 0.50);
-        setTimeout(() => this._crowd(0.95, 0.08, 'roar'), 40);
+        setTimeout(() => this._crowd(1.05, 0.1, 'roar'), 40);
         break;
       case 'howzat':
         this._tone(330, 660, 0.40, 0.40); break;
@@ -5948,7 +5958,6 @@ const SoundEngine = {
         setTimeout(() => this._tone(659, 784,  0.20, 0.60), 200);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.60), 400);
         setTimeout(() => this._tone(1047, 1047, 0.40, 0.60), 700);
-        setTimeout(() => this._crowd(1.2, 0.085, 'roar'), 120);
         break;
       case 'record':
         // milestone x2
@@ -5960,7 +5969,13 @@ const SoundEngine = {
         setTimeout(() => this._tone(659, 784,  0.20, 0.60), 1400);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.60), 1600);
         setTimeout(() => this._tone(1047, 1047, 0.40, 0.60), 1900);
-        setTimeout(() => this._crowd(1.35, 0.1, 'roar'), 100);
+        break;
+      case 'victory':
+        this._tone(523, 659, 0.16, 0.58);
+        setTimeout(() => this._tone(659, 784, 0.16, 0.6), 150);
+        setTimeout(() => this._tone(784, 1047, 0.18, 0.62), 300);
+        setTimeout(() => this._tone(1047, 1319, 0.26, 0.68), 480);
+        setTimeout(() => this._crowd(1.8, 0.15, 'victory'), 90);
         break;
     }
   },
@@ -5973,7 +5988,6 @@ const SoundEngine = {
       case 'wicket':
         this._tone(440, 220, 0.25, 0.45);
         setTimeout(() => this._tone(220, 110, 0.30, 0.40), 250);
-        setTimeout(() => this._crowd(1.0, 0.085, 'roar'), 40);
         break;
       case 'duck':
         this._tone(300, 200, 0.20, 0.35);
@@ -5984,20 +5998,20 @@ const SoundEngine = {
         this._tone(523, 659, 0.15, 0.55);
         setTimeout(() => this._tone(659, 784, 0.15, 0.55), 150);
         setTimeout(() => this._tone(784, 784, 0.25, 0.55), 300);
-        setTimeout(() => this._crowd(0.9, 0.06, 'cheer'), 80);
         break;
       case 'century':
         this._tone(523, 659, 0.12, 0.60);
         setTimeout(() => this._tone(659, 784,  0.12, 0.60), 130);
         setTimeout(() => this._tone(784, 1047, 0.15, 0.65), 260);
         setTimeout(() => this._tone(1047, 1047,0.40, 0.70), 420);
-        setTimeout(() => this._crowd(1.3, 0.095, 'roar'), 100);
+        setTimeout(() => this._crowd(1.3, 0.11, 'roar'), 90);
         break;
       case 'one_fifty':
         this._tone(587, 698, 0.12, 0.60);
         setTimeout(() => this._tone(698, 880,  0.12, 0.60), 130);
         setTimeout(() => this._tone(880, 1175, 0.15, 0.65), 260);
         setTimeout(() => this._tone(1175,1175, 0.40, 0.70), 420);
+        setTimeout(() => this._crowd(1.45, 0.12, 'roar'), 90);
         break;
       case 'double_century':
         this._tone(523, 659, 0.10, 0.65);
@@ -6005,7 +6019,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(784, 1047, 0.10, 0.70), 220);
         setTimeout(() => this._tone(1047,1319, 0.12, 0.75), 330);
         setTimeout(() => this._tone(1319,1319, 0.50, 0.80), 460);
-        setTimeout(() => this._crowd(1.45, 0.11, 'roar'), 100);
+        setTimeout(() => this._crowd(1.6, 0.135, 'victory'), 80);
         break;
       case 'five_fer':
         this._tone(440, 550, 0.12, 0.55);
@@ -6013,6 +6027,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(660, 550, 0.12, 0.55), 240);
         setTimeout(() => this._tone(550, 440, 0.12, 0.55), 360);
         setTimeout(() => this._tone(440, 440, 0.30, 0.60), 480);
+        setTimeout(() => this._crowd(1.2, 0.1, 'roar'), 80);
         break;
       case 'ten_wicket':
         this._tone(330, 440, 0.10, 0.60);
@@ -6020,6 +6035,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(550, 660, 0.10, 0.70), 200);
         setTimeout(() => this._tone(660, 880, 0.10, 0.75), 300);
         setTimeout(() => this._tone(880, 880, 0.60, 0.80), 400);
+        setTimeout(() => this._crowd(1.45, 0.125, 'victory'), 80);
         break;
       case 'almanack_record':
         this._tone(659, 784, 0.15, 0.60);
@@ -6033,7 +6049,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(784, 1047, 0.10, 0.80), 330);
         setTimeout(() => this._tone(1047,1319, 0.15, 0.85), 440);
         setTimeout(() => this._tone(1319,1319, 0.55, 0.90), 580);
-        setTimeout(() => this._crowd(1.5, 0.11, 'roar'), 90);
+        setTimeout(() => this._crowd(1.7, 0.14, 'victory'), 70);
         break;
       case 'over_complete':
         this._tone(440, 440, 0.08, 0.20);
