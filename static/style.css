@@ -2010,6 +2010,7 @@ body.light-mode .situ-ball-wicket { background: #fef2f2; color: #991b1b; border-
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  position: relative;
   padding: 22px 18px;
   gap: 18px;
   border: 1px solid var(--border);
@@ -2108,6 +2109,93 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
   color: #ff8f8f;
   font-size: var(--fs-md);
   text-shadow: 0 0 18px rgba(231,76,60,0.28);
+}
+.umpire-signal {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 118px;
+  padding: 8px 8px 6px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(8,20,18,0.94), rgba(8,20,18,0.84));
+  box-shadow: 0 14px 30px rgba(0,0,0,0.28);
+  opacity: 0;
+  transform: translateY(-10px) scale(0.94);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+  z-index: 3;
+}
+.umpire-signal.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.umpire-signal.hidden {
+  display: block;
+  opacity: 0;
+  transform: translateY(-10px) scale(0.94);
+}
+.umpire-signal.out {
+  border-color: rgba(255,120,120,0.4);
+  box-shadow: 0 14px 30px rgba(120,20,20,0.24);
+}
+.umpire-signal.four {
+  border-color: rgba(46,204,113,0.35);
+}
+.umpire-signal.six {
+  border-color: rgba(241,196,15,0.42);
+  box-shadow: 0 14px 30px rgba(120,90,10,0.24);
+}
+.umpire-signal-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.umpire-signal-label {
+  margin-top: 4px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: var(--text);
+}
+.umpire-signal.out .umpire-signal-label { color: #ff9a9a; }
+.umpire-signal.four .umpire-signal-label { color: #4ade80; }
+.umpire-signal.six .umpire-signal-label { color: var(--gold); }
+.umpire-shadow {
+  fill: rgba(0,0,0,0.18);
+}
+.umpire-arm,
+.umpire-leg,
+.umpire-body-outline {
+  stroke: #243246;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.umpire-body {
+  fill: #f7f7f7;
+}
+.umpire-skin {
+  fill: #e1a77c;
+}
+.umpire-trousers {
+  fill: #20252e;
+}
+.umpire-hat {
+  fill: #f8f8f8;
+  stroke: #cfd5df;
+  stroke-width: 2;
+}
+.umpire-accent {
+  fill: #c53f32;
+}
+.umpire-sleeve {
+  fill: #f0f2f7;
+}
+.umpire-badge {
+  fill: #43c274;
 }
 .howzat-legend {
   display: flex;

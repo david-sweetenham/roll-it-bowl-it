@@ -903,6 +903,7 @@ const MatchUI = {
   _liveWagonShots:        [],       // recent shot lines for the mini live wagon wheel
   _liveWagonInningsId:    null,     // current innings being shown on the mini wheel
   _liveWagonOverNumber:   null,     // over currently being shown on the mini wheel
+  _umpireSignalTimer:     null,
 };
 
 // ── DiceState Machine ─────────────────────────────────────────────────────────
@@ -1209,6 +1210,15 @@ function initLiveView(state) {
   MatchUI._ballInProgress        = false;
   MatchUI._pendingRollModeSwitch = null;
   MatchUI._dismissedSuggestions  = [];
+  if (MatchUI._umpireSignalTimer) {
+    clearTimeout(MatchUI._umpireSignalTimer);
+    MatchUI._umpireSignalTimer = null;
+  }
+  const umpireSignalEl = document.getElementById('umpire-signal');
+  if (umpireSignalEl) {
+    umpireSignalEl.className = 'umpire-signal hidden';
+    umpireSignalEl.innerHTML = '';
+  }
 
   // Restore roll mode preference
   try {
@@ -1938,6 +1948,74 @@ function _autoStageFrames(delivery) {
   return frames;
 }
 
+function _umpireSignalMarkup(type) {
+  const signal = type === 'wicket' ? 'out' : type === 'six' ? 'six' : 'four';
+  const label = signal === 'out' ? 'Out' : signal === 'six' ? 'Six' : 'Four';
+
+  const armRight = signal === 'out'
+    ? '<line class="umpire-arm" x1="73" y1="64" x2="86" y2="26" />'
+    : signal === 'six'
+      ? '<line class="umpire-arm" x1="73" y1="64" x2="83" y2="28" />'
+      : '<line class="umpire-arm" x1="73" y1="64" x2="102" y2="58" />';
+
+  const armLeft = signal === 'six'
+    ? '<line class="umpire-arm" x1="45" y1="64" x2="35" y2="28" />'
+    : signal === 'four'
+      ? '<line class="umpire-arm" x1="45" y1="64" x2="16" y2="58" />'
+      : '<line class="umpire-arm" x1="45" y1="64" x2="30" y2="72" />';
+
+  const finger = signal === 'out'
+    ? '<circle class="umpire-skin" cx="87" cy="22" r="3" />'
+    : '';
+
+  return `
+    <svg class="umpire-signal-svg" viewBox="0 0 118 126" role="img" aria-label="Umpire signal ${label}">
+      <ellipse class="umpire-shadow" cx="59" cy="116" rx="30" ry="8" />
+      <ellipse class="umpire-hat" cx="59" cy="18" rx="27" ry="8" />
+      <rect class="umpire-hat" x="40" y="11" width="38" height="16" rx="8" />
+      <circle class="umpire-skin" cx="59" cy="34" r="14" />
+      <rect class="umpire-body" x="43" y="48" width="32" height="34" rx="6" />
+      <rect class="umpire-accent" x="56" y="52" width="6" height="24" rx="2" />
+      <circle class="umpire-badge" cx="69" cy="61" r="4" />
+      <rect class="umpire-sleeve" x="37" y="50" width="10" height="24" rx="5" />
+      <rect class="umpire-sleeve" x="71" y="50" width="10" height="24" rx="5" />
+      ${armLeft}
+      ${armRight}
+      ${finger}
+      <line class="umpire-leg" x1="53" y1="82" x2="49" y2="111" />
+      <line class="umpire-leg" x1="65" y1="82" x2="69" y2="111" />
+      <rect class="umpire-trousers" x="46" y="82" width="10" height="28" rx="4" />
+      <rect class="umpire-trousers" x="62" y="82" width="10" height="28" rx="4" />
+      <ellipse class="umpire-body" cx="48" cy="112" rx="8" ry="3" />
+      <ellipse class="umpire-body" cx="70" cy="112" rx="8" ry="3" />
+    </svg>
+    <div class="umpire-signal-label">${label}</div>`;
+}
+
+function showUmpireSignal(type) {
+  const signal = type === 'wicket' ? 'out' : type === 'six' ? 'six' : type === 'four' ? 'four' : null;
+  const el = document.getElementById('umpire-signal');
+  if (!signal || !el) return;
+
+  if (MatchUI._umpireSignalTimer) {
+    clearTimeout(MatchUI._umpireSignalTimer);
+    MatchUI._umpireSignalTimer = null;
+  }
+
+  el.classList.remove('hidden', 'visible', 'out', 'four', 'six');
+  el.classList.add(signal);
+  el.innerHTML = _umpireSignalMarkup(type);
+  requestAnimationFrame(() => el.classList.add('visible'));
+
+  MatchUI._umpireSignalTimer = setTimeout(() => {
+    el.classList.remove('visible');
+    MatchUI._umpireSignalTimer = setTimeout(() => {
+      el.classList.add('hidden');
+      el.classList.remove('out', 'four', 'six');
+    }, 220);
+  }, AppState.broadcastMode ? 1800 : 1300);
+}
+
 async function animateDice(delivery) {
   const dieEl = document.getElementById('die-face');
   dieEl.classList.add('rolling');
@@ -2062,6 +2140,9 @@ async function _completeBall(res, delivery) {
   // Sound
   const ot = delivery.outcome_type;
   SoundEngine.play(ot);
+  if (ot === 'wicket' || ot === 'four' || ot === 'six') {
+    showUmpireSignal(ot);
+  }
 
   // Update session stats
   if (ot !== 'wicket' && ot !== 'wide' && ot !== 'no_ball') {
@@ -5778,6 +5859,43 @@ const SoundEngine = {
     } catch (e) { /* audio errors are non-fatal */ }
   },
 
+  _crowd(duration = 0.9, peak = 0.12, tone = 'cheer') {
+    if (!AppState.soundEnabled || !this._ctx) return;
+    try {
+      const ctx = this._ctx;
+      const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * duration));
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      const color = tone === 'roar' ? 0.75 : tone === 'groan' ? 0.25 : 0.5;
+      let last = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = (Math.random() * 2) - 1;
+        last = (last * color) + (white * (1 - color));
+        data[i] = last;
+      }
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = tone === 'groan' ? 'lowpass' : 'bandpass';
+      filter.frequency.setValueAtTime(tone === 'roar' ? 900 : tone === 'groan' ? 380 : 1200, ctx.currentTime);
+      filter.Q.setValueAtTime(tone === 'roar' ? 0.8 : 1.2, ctx.currentTime);
+
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), now + Math.min(0.18, duration * 0.25));
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(now);
+      src.stop(now + duration);
+    } catch (e) { /* audio errors are non-fatal */ }
+  },
+
   play(type) {
     this.init();
     switch (type) {
@@ -5790,15 +5908,19 @@ const SoundEngine = {
         this._tone(370, 370, 0.18, 0.22); break;
       case 'four':
         // Sweep up — boundary crack
-        this._tone(440, 660, 0.30, 0.40); break;
+        this._tone(440, 660, 0.30, 0.40);
+        setTimeout(() => this._crowd(0.75, 0.055, 'cheer'), 60);
+        break;
       case 'six':
         // Three-note ascending: 523 → 784 → 1047
         this._tone(523, 784, 0.20, 0.50);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.50), 200);
+        setTimeout(() => this._crowd(1.05, 0.09, 'roar'), 70);
         break;
       case 'wicket':
         // Descending sweep
         this._tone(440, 110, 0.60, 0.50);
+        setTimeout(() => this._crowd(0.95, 0.08, 'roar'), 40);
         break;
       case 'howzat':
         this._tone(330, 660, 0.40, 0.40); break;
@@ -5814,6 +5936,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(659, 784,  0.20, 0.60), 200);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.60), 400);
         setTimeout(() => this._tone(1047, 1047, 0.40, 0.60), 700);
+        setTimeout(() => this._crowd(1.2, 0.085, 'roar'), 120);
         break;
       case 'record':
         // milestone x2
@@ -5825,6 +5948,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(659, 784,  0.20, 0.60), 1400);
         setTimeout(() => this._tone(784, 1047, 0.30, 0.60), 1600);
         setTimeout(() => this._tone(1047, 1047, 0.40, 0.60), 1900);
+        setTimeout(() => this._crowd(1.35, 0.1, 'roar'), 100);
         break;
     }
   },
@@ -5837,6 +5961,7 @@ const SoundEngine = {
       case 'wicket':
         this._tone(440, 220, 0.25, 0.45);
         setTimeout(() => this._tone(220, 110, 0.30, 0.40), 250);
+        setTimeout(() => this._crowd(1.0, 0.085, 'roar'), 40);
         break;
       case 'duck':
         this._tone(300, 200, 0.20, 0.35);
@@ -5847,12 +5972,14 @@ const SoundEngine = {
         this._tone(523, 659, 0.15, 0.55);
         setTimeout(() => this._tone(659, 784, 0.15, 0.55), 150);
         setTimeout(() => this._tone(784, 784, 0.25, 0.55), 300);
+        setTimeout(() => this._crowd(0.9, 0.06, 'cheer'), 80);
         break;
       case 'century':
         this._tone(523, 659, 0.12, 0.60);
         setTimeout(() => this._tone(659, 784,  0.12, 0.60), 130);
         setTimeout(() => this._tone(784, 1047, 0.15, 0.65), 260);
         setTimeout(() => this._tone(1047, 1047,0.40, 0.70), 420);
+        setTimeout(() => this._crowd(1.3, 0.095, 'roar'), 100);
         break;
       case 'one_fifty':
         this._tone(587, 698, 0.12, 0.60);
@@ -5866,6 +5993,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(784, 1047, 0.10, 0.70), 220);
         setTimeout(() => this._tone(1047,1319, 0.12, 0.75), 330);
         setTimeout(() => this._tone(1319,1319, 0.50, 0.80), 460);
+        setTimeout(() => this._crowd(1.45, 0.11, 'roar'), 100);
         break;
       case 'five_fer':
         this._tone(440, 550, 0.12, 0.55);
@@ -5893,6 +6021,7 @@ const SoundEngine = {
         setTimeout(() => this._tone(784, 1047, 0.10, 0.80), 330);
         setTimeout(() => this._tone(1047,1319, 0.15, 0.85), 440);
         setTimeout(() => this._tone(1319,1319, 0.55, 0.90), 580);
+        setTimeout(() => this._crowd(1.5, 0.11, 'roar'), 90);
         break;
       case 'over_complete':
         this._tone(440, 440, 0.08, 0.20);
