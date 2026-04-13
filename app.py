@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, render_template, Response
 from flask_cors import CORS
+import json
 import os
 import random
 import database
@@ -11,14 +12,21 @@ import config
 
 # ── Match helpers ─────────────────────────────────────────────────────────────
 
+def _players_for_match_team(db, match_id, team_id):
+    match = database.get_match(db, match_id)
+    world_id = match.get('world_id') if match else None
+    players = database.get_players_for_team(db, team_id, world_id=world_id) if world_id else database.get_players_for_team(db, team_id)
+    if world_id:
+        states = database.get_player_world_states(db, world_id)
+        players = [p for p in players if int((states.get(p['id']) or {}).get('active', 1) or 0) == 1]
+    return sorted(players, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
+
+
 def _start_innings(db, match_id, innings_number, batting_team_id, bowling_team_id):
     """Create innings, batter/bowler rows, and opening partnership."""
     innings_id = database.create_innings(db, match_id, innings_number,
                                          batting_team_id, bowling_team_id)
-    batting_players = sorted(
-        database.get_players_for_team(db, batting_team_id),
-        key=lambda p: p['batting_position'] or 99
-    )
+    batting_players = _players_for_match_team(db, match_id, batting_team_id)
     for p in batting_players:
         database.create_batter_innings(db, innings_id, p['id'], p['batting_position'])
 
@@ -32,7 +40,7 @@ def _start_innings(db, match_id, innings_number, batting_team_id, bowling_team_i
             database.update_batter_innings(db, row['id'], {'status': 'batting'})
 
     # Bowler innings for every player who can bowl
-    for p in database.get_players_for_team(db, bowling_team_id):
+    for p in _players_for_match_team(db, match_id, bowling_team_id):
         if p['bowling_type'] != 'none':
             database.create_bowler_innings(db, innings_id, p['id'])
 
@@ -2410,20 +2418,6 @@ def _build_world_state(db, world_id):
     my_team_id = settings.get('my_team_id')
     my_domestic_team_id = settings.get('my_domestic_team_id')
 
-    teams = {}
-    for tid in team_ids:
-        team = database.get_team(db, tid)
-        if not team:
-            continue
-        players = database.get_players_for_team(db, tid)
-        teams[tid] = {
-            'name':          team['name'],
-            'short_code':    team.get('short_code', ''),
-            'badge_colour':  team.get('badge_colour', '#666'),
-            'home_venue_id': team.get('home_venue_id'),
-            'players':       players,
-        }
-
     raw_states    = database.get_player_world_states(db, world_id)
     player_states = {}
     for pid, state in raw_states.items():
@@ -2435,14 +2429,290 @@ def _build_world_state(db, world_id):
                 ps['last_match_dates'] = []
         player_states[pid] = ps
 
+    teams = {}
+    team_roster_targets = {}
+    for tid in team_ids:
+        team = database.get_team(db, tid)
+        if not team:
+            continue
+        players = database.get_players_for_team(db, tid, world_id=world_id)
+        team_roster_targets[tid] = max(11, len(players))
+        active_players = [
+            p for p in players
+            if int((player_states.get(p['id']) or {}).get('active', 1) or 0) == 1
+        ]
+        teams[tid] = {
+            'name':          team['name'],
+            'short_code':    team.get('short_code', ''),
+            'badge_colour':  team.get('badge_colour', '#666'),
+            'home_venue_id': team.get('home_venue_id'),
+            'players':       active_players,
+        }
+
     return {
         'my_team_id':     my_team_id,
         'my_domestic_team_id': my_domestic_team_id,
         'user_team_ids':  list(_user_team_ids(settings)),
         'current_date':   world.get('current_date', ''),
+        'settings':       settings,
         'teams':          teams,
+        'team_roster_targets': team_roster_targets,
         'player_states':  player_states,
     }
+
+
+_REGEN_FIRST_NAMES = [
+    'Alex', 'Sam', 'Noah', 'Arjun', 'Liam', 'Mason', 'Ben', 'Isaac', 'Jay', 'Owen',
+    'Riley', 'Ethan', 'Kai', 'Zane', 'Rehan', 'Aadi', 'Cameron', 'Lewis', 'Jacob', 'Tom'
+]
+_REGEN_LAST_NAMES = [
+    'Shaw', 'Patel', 'Khan', 'Ali', 'Mills', 'Turner', 'Singh', 'Rahman', 'Hughes', 'Das',
+    'Simmons', 'Morgan', 'Iqbal', 'Taylor', 'Campbell', 'Reid', 'Butt', 'Nair', 'Brown', 'Joseph'
+]
+
+
+def _world_player_lifecycle_mode(world_state):
+    settings = world_state.get('settings') or {}
+    return 'realistic' if settings.get('player_lifecycle') == 'realistic' else 'ageless'
+
+
+def _initial_world_player_age(player):
+    roll = random.random()
+    if roll < 0.18:
+        age = random.randint(19, 22)
+    elif roll < 0.48:
+        age = random.randint(23, 27)
+    elif roll < 0.76:
+        age = random.randint(28, 31)
+    elif roll < 0.94:
+        age = random.randint(32, 35)
+    else:
+        age = random.randint(36, 38)
+    if (player.get('batting_rating') or 0) >= 4:
+        age = min(39, age + random.choice([0, 0, 1]))
+    if (player.get('bowling_rating') or 0) >= 4 and (player.get('batting_rating') or 0) <= 2:
+        age = max(19, age - random.choice([0, 1]))
+    return age
+
+
+def _initial_retire_age(player, current_age):
+    target = random.choices([34, 35, 36, 37, 38, 39, 40], weights=[6, 10, 16, 18, 16, 10, 6], k=1)[0]
+    if (player.get('bowling_rating') or 0) >= 4 and (player.get('batting_rating') or 0) <= 2:
+        target -= 1
+    if (player.get('batting_rating') or 0) >= 4:
+        target += 1
+    target = max(current_age + 1, min(41, target))
+    return target
+
+
+def _default_world_player_state(player, current_year):
+    age = _initial_world_player_age(player)
+    return {
+        'form_adjustment': 0,
+        'fatigue': 0,
+        'career_runs': 0,
+        'career_wickets': 0,
+        'career_matches': 0,
+        'last_match_dates': [],
+        'age': age,
+        'last_age_year': current_year,
+        'active': 1,
+        'retirement_reason': None,
+        'retired_on': None,
+        'regen_generation': 1 if player.get('is_regen') else 0,
+        'retire_age': _initial_retire_age(player, age),
+    }
+
+
+def _ensure_world_player_states(db, world_id, world_state):
+    current_year = int((world_state.get('current_date') or '2025-01-01')[:4] or '2025')
+    player_states = world_state.setdefault('player_states', {})
+    changed = False
+    for tid, team_data in (world_state.get('teams') or {}).items():
+        team_players = database.get_players_for_team(db, tid, world_id=world_id)
+        world_state.setdefault('team_roster_targets', {})[tid] = max(11, len(team_players))
+        active_players = []
+        for player in team_players:
+            pid = player['id']
+            state = player_states.get(pid)
+            if not state:
+                state = _default_world_player_state(player, current_year)
+                player_states[pid] = state
+                changed = True
+            state.setdefault('last_match_dates', [])
+            if state.get('active', 1):
+                active_players.append(player)
+        team_data['players'] = sorted(active_players, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
+    if changed:
+        for pid, state in player_states.items():
+            ps = dict(state)
+            if isinstance(ps.get('last_match_dates'), list):
+                ps['last_match_dates'] = json.dumps(ps['last_match_dates'])
+            database.upsert_player_world_state(db, world_id, pid, ps)
+
+
+def _world_sim_horizon_date(fixtures, world_state, target, target_date=None):
+    user_team_ids = set(world_state.get('user_team_ids') or [])
+    first_series_id = None
+    horizon = world_state.get('current_date') or ''
+    for fixture in fixtures:
+        if fixture.get('status', 'scheduled') != 'scheduled':
+            continue
+        f_date = fixture.get('scheduled_date', '') or horizon
+        if target == 'date' and target_date and f_date > target_date:
+            return target_date
+        if fixture.get('is_user_match'):
+            return f_date
+        if target == 'next_my_match' and user_team_ids:
+            if fixture.get('team1_id') in user_team_ids or fixture.get('team2_id') in user_team_ids:
+                return f_date
+        if target == 'end_of_series':
+            if first_series_id is None:
+                first_series_id = fixture.get('series_id')
+            elif fixture.get('series_id') != first_series_id:
+                return horizon
+        horizon = f_date
+        if target == 'next_match':
+            return horizon
+    return horizon
+
+
+def _should_retire_player(player, state):
+    age = int(state.get('age') or 0)
+    retire_age = int(state.get('retire_age') or max(age + 1, 36))
+    injury_risk = 0.003 + max(0, age - 31) * 0.003
+    if (player.get('bowling_rating') or 0) >= 4:
+        injury_risk += 0.004
+    if random.random() < min(0.16, injury_risk):
+        return 'injury'
+    if age >= retire_age:
+        chance = 0.38 + max(0, age - retire_age) * 0.18
+        if (player.get('batting_rating') or 0) >= 4 or (player.get('bowling_rating') or 0) >= 4:
+            chance -= 0.06
+        if random.random() < min(0.97, max(0.18, chance)):
+            return 'age'
+    if age >= retire_age - 1 and random.random() < 0.08:
+        return 'age'
+    return None
+
+
+def _generate_regen_name(team_name):
+    return f"{random.choice(_REGEN_FIRST_NAMES)} {random.choice(_REGEN_LAST_NAMES)}"
+
+
+def _create_world_regen_player(db, world_id, team_id, template_player, year):
+    bat_rating = max(1, min(5, int((template_player.get('batting_rating') or 3) + random.choice([-1, 0, 0, 1]))))
+    bowl_rating = max(0, min(5, int((template_player.get('bowling_rating') or 0) + random.choice([-1, 0, 0, 1]))))
+    if template_player.get('bowling_type') == 'none':
+        bowl_rating = 0
+    batting_position = template_player.get('batting_position') or random.randint(1, 11)
+    team = database.get_team(db, team_id) or {}
+    player_data = {
+        'team_id': team_id,
+        'name': _generate_regen_name(team.get('name', 'Regen XI')),
+        'batting_position': batting_position,
+        'batting_rating': bat_rating,
+        'batting_hand': random.choice(['right', 'left']),
+        'bowling_type': template_player.get('bowling_type') or 'none',
+        'bowling_action': template_player.get('bowling_action'),
+        'bowling_rating': bowl_rating,
+        'source_world_id': world_id,
+        'is_regen': 1,
+    }
+    player_id = database.create_player(db, player_data)
+    player = database.get_player(db, player_id)
+    state = {
+        'form_adjustment': 0,
+        'fatigue': 0,
+        'career_runs': 0,
+        'career_wickets': 0,
+        'career_matches': 0,
+        'last_match_dates': '[]',
+        'age': random.randint(18, 22),
+        'last_age_year': year,
+        'active': 1,
+        'retirement_reason': None,
+        'retired_on': None,
+        'regen_generation': int((template_player.get('regen_generation') or 0)) + 1,
+        'retire_age': random.randint(34, 39),
+    }
+    database.upsert_player_world_state(db, world_id, player_id, state)
+    return player
+
+
+def _apply_world_player_lifecycle(db, world_id, world_state, fixtures, target, target_date=None):
+    if _world_player_lifecycle_mode(world_state) != 'realistic':
+        return
+
+    _ensure_world_player_states(db, world_id, world_state)
+    current_date = world_state.get('current_date') or '2025-01-01'
+    horizon_date = _world_sim_horizon_date(fixtures, world_state, target, target_date)
+    if not horizon_date:
+        return
+
+    try:
+        current_year = int(current_date[:4])
+        horizon_year = int(horizon_date[:4])
+    except Exception:
+        return
+    if horizon_year <= current_year:
+        return
+
+    player_states = world_state.setdefault('player_states', {})
+    team_targets = world_state.setdefault('team_roster_targets', {})
+
+    for year in range(current_year + 1, horizon_year + 1):
+        for tid, team_data in (world_state.get('teams') or {}).items():
+            roster = database.get_players_for_team(db, tid, world_id=world_id)
+            retired_templates = []
+            for player in roster:
+                pid = player['id']
+                state = player_states.setdefault(pid, _default_world_player_state(player, current_year))
+                if not state.get('active', 1):
+                    continue
+                last_age_year = int(state.get('last_age_year') or current_year)
+                if year <= last_age_year:
+                    continue
+                state['age'] = int(state.get('age') or _initial_world_player_age(player)) + (year - last_age_year)
+                state['last_age_year'] = year
+                reason = _should_retire_player(player, state)
+                if reason:
+                    state['active'] = 0
+                    state['retirement_reason'] = reason
+                    state['retired_on'] = f'{year}-01-01'
+                    retired_templates.append((player, dict(state)))
+
+            roster = database.get_players_for_team(db, tid, world_id=world_id)
+            active_roster = [p for p in roster if int((player_states.get(p['id']) or {}).get('active', 1) or 0) == 1]
+            target_size = max(11, team_targets.get(tid) or len(roster) or 11)
+            team_targets[tid] = target_size
+            while len(active_roster) < target_size:
+                template_player = retired_templates[len(active_roster) % len(retired_templates)][0] if retired_templates else random.choice(roster or active_roster or team_data.get('players') or [{'batting_position': len(active_roster) + 1, 'batting_rating': 3, 'bowling_rating': 1, 'bowling_type': 'none'}])
+                regen = _create_world_regen_player(db, world_id, tid, template_player, year)
+                player_states[regen['id']] = {
+                    'form_adjustment': 0,
+                    'fatigue': 0,
+                    'career_runs': 0,
+                    'career_wickets': 0,
+                    'career_matches': 0,
+                    'last_match_dates': [],
+                    'age': random.randint(18, 22),
+                    'last_age_year': year,
+                    'active': 1,
+                    'retirement_reason': None,
+                    'retired_on': None,
+                    'regen_generation': 1,
+                    'retire_age': random.randint(34, 39),
+                }
+                active_roster.append(regen)
+
+            team_data['players'] = sorted(active_roster, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
+
+    for pid, state in player_states.items():
+        ps = dict(state)
+        if isinstance(ps.get('last_match_dates'), list):
+            ps['last_match_dates'] = json.dumps(ps['last_match_dates'])
+        database.upsert_player_world_state(db, world_id, pid, ps)
 
 
 def _check_world_records(db, world_id, match_id, match):
@@ -3052,11 +3322,14 @@ def create_world():
     cal_style         = body.get('calendar_style', 'random')  # 'realistic' | 'random'
     cal_years         = int(body.get('calendar_years', 2))
     cal_years         = max(1, min(10, cal_years))
+    player_lifecycle  = body.get('player_lifecycle', 'ageless')
     domestic_leagues  = body.get('domestic_leagues', [])   # e.g. ['ipl', 'bbl', 'county_championship']
     domestic_team_mode = body.get('domestic_team_mode', 'selected')
     world_scope       = body.get('world_scope', 'international')
     if world_scope not in ('international', 'domestic', 'combined'):
         world_scope = 'international'
+    if player_lifecycle not in ('ageless', 'realistic'):
+        player_lifecycle = 'ageless'
     if domestic_team_mode not in ('selected', 'full_league'):
         domestic_team_mode = 'selected'
 
@@ -3073,6 +3346,7 @@ def create_world():
                     'my_domestic_team_id': my_domestic_team_id,
                     'calendar_style': cal_style,
                     'calendar_years': cal_years,
+                    'player_lifecycle': player_lifecycle,
                     'domestic_leagues': domestic_leagues,
                     'domestic_team_mode': domestic_team_mode,
                     'world_scope': world_scope}
@@ -4064,6 +4338,13 @@ def fixture_start_live(id, fid):
         if fmt not in ('Test', 'ODI', 'T20'):
             fmt = 'T20'
 
+        world_state = _build_world_state(db, id)
+        if world_state:
+            _apply_world_player_lifecycle(
+                db, id, world_state, [dict(fixture)], target='date',
+                target_date=fixture.get('scheduled_date')
+            )
+
         match_id = database.create_match(db, {
             'world_id':     id,
             'format':       fmt,
@@ -4246,6 +4527,7 @@ def simulate_world(id):
             world_state['target_date'] = target_date
 
         fixtures = database.get_fixtures(db, world_id=id, status='scheduled')
+        _apply_world_player_lifecycle(db, id, world_state, fixtures, target, target_date)
 
         sim_result = game_engine.simulate_world_to(target, fixtures, world_state)
 

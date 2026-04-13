@@ -92,6 +92,10 @@ const WORLD_DOMESTIC_TEAM_MODE_META = {
   selected: 'Only the domestic clubs you choose in Step 3 will be included in the world.',
   full_league: 'Every club from your selected domestic leagues will be included automatically.'
 };
+const WORLD_PLAYER_LIFECYCLE_META = {
+  ageless: 'Classic sandbox mode. The same players keep going forever.',
+  realistic: 'Players age across the seasons, retire for age or injury, and are replaced by regens.'
+};
 
 // ── Disclaimer Text ───────────────────────────────────────────────────────────
 
@@ -7763,6 +7767,7 @@ const WorldUI = {
   wizardDomesticTeams: [],
   wizardDomesticLeagues: new Set(),
   wizardDomesticTeamMode: 'selected',
+  wizardPlayerLifecycle: 'ageless',
   wizardDomesticLeagueOptions: [],
   wizardScope:     'international',
   wizardCalendarYears: 2,
@@ -7828,11 +7833,13 @@ async function showWorldWizard() {
   WorldUI.wizardTeamIds       = new Set();
   WorldUI.wizardDomesticLeagues = new Set();
   WorldUI.wizardDomesticTeamMode = 'selected';
+  WorldUI.wizardPlayerLifecycle = 'ageless';
   WorldUI.wizardScope         = 'international';
   WorldUI.wizardCalendarYears = 2;
   _wizardShowPage(1);
   const yearsEl = document.getElementById('wc-years');
   if (yearsEl) yearsEl.value = '2';
+  syncWorldPlayerLifecycle();
 
   // Load teams for team-selection step
   const teams = await api('GET', '/api/teams');
@@ -7876,6 +7883,23 @@ function setWorldScope(scope) {
   if (helpEl) helpEl.textContent = WORLD_SCOPE_META[WorldUI.wizardScope];
   _syncDomesticSectionVisibility();
   _refreshWizardTeamPool();
+}
+
+function getWorldPlayerLifecycle() {
+  return WorldUI.wizardPlayerLifecycle === 'realistic' ? 'realistic' : 'ageless';
+}
+
+function syncWorldPlayerLifecycle() {
+  const mode = getWorldPlayerLifecycle();
+  document.getElementById('wc-player-lifecycle-ageless')?.classList.toggle('active', mode === 'ageless');
+  document.getElementById('wc-player-lifecycle-realistic')?.classList.toggle('active', mode === 'realistic');
+  const helpEl = document.getElementById('wc-player-lifecycle-help');
+  if (helpEl) helpEl.textContent = WORLD_PLAYER_LIFECYCLE_META[mode];
+}
+
+function setWorldPlayerLifecycle(mode) {
+  WorldUI.wizardPlayerLifecycle = mode === 'realistic' ? 'realistic' : 'ageless';
+  syncWorldPlayerLifecycle();
 }
 
 function getWorldDomesticTeamMode() {
@@ -8101,6 +8125,7 @@ function _wizardBuildSummary() {
   const calYears  = Math.max(1, Math.min(10, parseInt(document.getElementById('wc-years')?.value, 10) || 2));
   const worldScope = getWorldScope();
   const domesticTeamMode = getWorldDomesticTeamMode();
+  const playerLifecycle = getWorldPlayerLifecycle();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
   const myDomesticTeamId = parseInt(document.getElementById('wc-my-domestic-team')?.value) || null;
   const myTeam    = myTeamId ? (WorldUI.wizardInternationalTeams || []).find(t => t.id === myTeamId) : null;
@@ -8120,6 +8145,7 @@ function _wizardBuildSummary() {
     <div class="summary-row"><span>Density</span><strong>${density}</strong></div>
     <div class="summary-row"><span>Calendar Style</span><strong>${styleLabel}</strong></div>
     <div class="summary-row"><span>Fixture Horizon</span><strong>${calYears} year${calYears !== 1 ? 's' : ''}</strong></div>
+    <div class="summary-row"><span>Player Lifecycle</span><strong>${playerLifecycle === 'realistic' ? 'Retire & Regens' : 'Ageless Players'}</strong></div>
     ${worldScope === 'domestic' && calStyle === 'realistic' ? `<div class="summary-row"><span>Domestic Coverage</span><strong>${domesticTeamMode === 'full_league' ? 'Full League' : 'Selected Clubs'}</strong></div>` : ''}
     <div class="summary-row"><span>Managed International Team</span><strong>${myTeam ? myTeam.name : 'None'}</strong></div>
     ${worldScope !== 'international' ? `<div class="summary-row"><span>Managed Domestic Team</span><strong>${myDomesticTeam ? myDomesticTeam.name : 'None'}</strong></div>` : ''}
@@ -8139,6 +8165,7 @@ async function submitWorldWizard() {
   const calYears  = Math.max(1, Math.min(10, parseInt(document.getElementById('wc-years')?.value, 10) || 2));
   const worldScope = getWorldScope();
   const domesticTeamMode = getWorldDomesticTeamMode();
+  const playerLifecycle = getWorldPlayerLifecycle();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
   const myDomesticTeamId = parseInt(document.getElementById('wc-my-domestic-team')?.value) || null;
   const team_ids  = Array.from(WorldUI.wizardTeamIds);
@@ -8154,7 +8181,7 @@ async function submitWorldWizard() {
     name, start_date: start, calendar_density: density,
     calendar_style: calStyle, team_ids, my_team_id: myTeamId, my_domestic_team_id: myDomesticTeamId,
     domestic_leagues, world_scope: worldScope, domestic_team_mode: domesticTeamMode,
-    calendar_years: calYears,
+    calendar_years: calYears, player_lifecycle: playerLifecycle,
   });
 
   if (btn) { btn.disabled = false; btn.textContent = 'Create World'; }
@@ -8292,6 +8319,7 @@ function _renderWorldRules(data, settings) {
     ? settings.world_scope : 'international';
   const calStyle        = data.world?.calendar_style === 'realistic' ? 'Realistic FTP' : 'Random Calendar';
   const domesticMode    = settings.domestic_team_mode === 'full_league' ? 'Full League' : 'Selected Clubs';
+  const playerLifecycle = settings.player_lifecycle === 'realistic' ? 'Retire & Regens' : 'Ageless Players';
   const leagues         = Array.isArray(settings.domestic_leagues) ? settings.domestic_leagues : [];
   const myTeamId        = settings.my_team_id || null;
   const myDomesticTeamId = settings.my_domestic_team_id || null;
@@ -8320,6 +8348,7 @@ function _renderWorldRules(data, settings) {
   pills.push(`<span class="wrs-pill wrs-pill-scope">${scopeIcon} ${escHtml(scopeLabel)}</span>`);
   pills.push(`<span class="wrs-pill wrs-pill-calendar">📅 ${escHtml(calStyle)}</span>`);
   pills.push(`<span class="wrs-pill wrs-pill-horizon">⏳ ${calendarYears}-year block</span>`);
+  pills.push(`<span class="wrs-pill wrs-pill-lifecycle">🧬 ${escHtml(playerLifecycle)}</span>`);
   if (generatedThrough) pills.push(`<span class="wrs-pill wrs-pill-generated">→ ${escHtml(generatedThrough)}</span>`);
 
   if (worldScope !== 'international') {
@@ -8359,6 +8388,7 @@ function _renderWorldOverview(data) {
     ? settings.world_scope
     : 'international';
   const domesticTeamMode = settings.domestic_team_mode === 'full_league' ? 'full_league' : 'selected';
+  const playerLifecycle = settings.player_lifecycle === 'realistic' ? 'realistic' : 'ageless';
   const calendarYears = Math.max(1, Math.min(10, parseInt(settings.calendar_years, 10) || 2));
   const upcoming = data.upcoming_fixtures || [];
   const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
@@ -8397,6 +8427,13 @@ function _renderWorldOverview(data) {
         <div class="world-desk-label">Active Series</div>
         <div class="world-desk-value">${activeSeries.length}</div>
         <div class="world-desk-sub">${upcoming.length} fixture${upcoming.length !== 1 ? 's' : ''} on the short horizon · ${calendarYears}-year generation block</div>
+      </div>
+      <div class="world-desk-card">
+        <div class="world-desk-label">Players</div>
+        <div class="world-desk-value">${playerLifecycle === 'realistic' ? 'Retire & Regens' : 'Ageless'}</div>
+        <div class="world-desk-sub">${playerLifecycle === 'realistic'
+          ? 'Players age, retire at varied times, and new talent comes through.'
+          : 'The same squads carry on forever in this world save.'}</div>
       </div>
       <div class="world-desk-card">
         <div class="world-desk-label">Your Team</div>

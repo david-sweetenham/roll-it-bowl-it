@@ -88,11 +88,21 @@ def update_team(db, id, data):
     db.commit()
 
 
-def get_players_for_team(db, team_id):
-    rows = db.execute(
-        "SELECT * FROM players WHERE team_id = ? ORDER BY batting_position",
-        (team_id,)
-    ).fetchall()
+def get_players_for_team(db, team_id, world_id=None):
+    if world_id is None:
+        rows = db.execute(
+            "SELECT * FROM players "
+            "WHERE team_id = ? AND COALESCE(source_world_id, 0) = 0 "
+            "ORDER BY batting_position, id",
+            (team_id,)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM players "
+            "WHERE team_id = ? AND (source_world_id IS NULL OR source_world_id = ?) "
+            "ORDER BY batting_position, id",
+            (team_id, world_id)
+        ).fetchall()
     return dict_from_rows(rows)
 
 
@@ -110,9 +120,9 @@ def get_player(db, id):
 def create_player(db, data):
     cur = db.execute(
         "INSERT INTO players (team_id, name, batting_position, batting_rating, "
-        "batting_hand, bowling_type, bowling_action, bowling_rating) "
+        "batting_hand, bowling_type, bowling_action, bowling_rating, source_world_id, is_regen) "
         "VALUES (:team_id, :name, :batting_position, :batting_rating, "
-        ":batting_hand, :bowling_type, :bowling_action, :bowling_rating)",
+        ":batting_hand, :bowling_type, :bowling_action, :bowling_rating, :source_world_id, :is_regen)",
         {
             'team_id': data['team_id'],
             'name': data['name'],
@@ -122,6 +132,8 @@ def create_player(db, data):
             'bowling_type': data.get('bowling_type', 'none'),
             'bowling_action': data.get('bowling_action'),
             'bowling_rating': data.get('bowling_rating', 0),
+            'source_world_id': data.get('source_world_id'),
+            'is_regen': data.get('is_regen', 0),
         }
     )
     db.commit()
@@ -1117,7 +1129,9 @@ def upsert_player_world_state(db, world_id, player_id, data):
     ).fetchone()
     if existing:
         allowed = ['form_adjustment', 'fatigue', 'career_runs',
-                   'career_wickets', 'career_matches', 'last_match_dates']
+                   'career_wickets', 'career_matches', 'last_match_dates',
+                   'age', 'last_age_year', 'active', 'retirement_reason',
+                   'retired_on', 'regen_generation', 'retire_age']
         sets = ', '.join(f"{k} = :{k}" for k in allowed if k in data)
         if sets:
             data['_id'] = existing['id']
@@ -1126,9 +1140,11 @@ def upsert_player_world_state(db, world_id, player_id, data):
         db.execute(
             "INSERT INTO player_world_state "
             "(world_id, player_id, form_adjustment, fatigue, career_runs, "
-            " career_wickets, career_matches, last_match_dates) "
+            " career_wickets, career_matches, last_match_dates, age, last_age_year, "
+            " active, retirement_reason, retired_on, regen_generation, retire_age) "
             "VALUES (:world_id, :player_id, :form_adjustment, :fatigue, :career_runs, "
-            " :career_wickets, :career_matches, :last_match_dates)",
+            " :career_wickets, :career_matches, :last_match_dates, :age, :last_age_year, "
+            " :active, :retirement_reason, :retired_on, :regen_generation, :retire_age)",
             {
                 'world_id':          world_id,
                 'player_id':         player_id,
@@ -1138,6 +1154,13 @@ def upsert_player_world_state(db, world_id, player_id, data):
                 'career_wickets':    data.get('career_wickets', 0),
                 'career_matches':    data.get('career_matches', 0),
                 'last_match_dates':  data.get('last_match_dates', '[]'),
+                'age':               data.get('age'),
+                'last_age_year':     data.get('last_age_year'),
+                'active':            data.get('active', 1),
+                'retirement_reason': data.get('retirement_reason'),
+                'retired_on':        data.get('retired_on'),
+                'regen_generation':  data.get('regen_generation', 0),
+                'retire_age':        data.get('retire_age'),
             }
         )
     db.commit()
@@ -1169,6 +1192,8 @@ def run_migrations(db):
         # Domestic / franchise team type
         "ALTER TABLE teams ADD COLUMN team_type TEXT DEFAULT 'international'",
         "ALTER TABLE teams ADD COLUMN league TEXT",
+        "ALTER TABLE players ADD COLUMN source_world_id INTEGER",
+        "ALTER TABLE players ADD COLUMN is_regen INTEGER DEFAULT 0",
         # domestic_leagues on worlds settings (stored in settings_json; no column needed)
     ]
     for sql in migrations:
@@ -1189,11 +1214,32 @@ def run_migrations(db):
         "  career_wickets INTEGER DEFAULT 0,"
         "  career_matches INTEGER DEFAULT 0,"
         "  last_match_dates TEXT DEFAULT '[]',"
+        "  age INTEGER,"
+        "  last_age_year INTEGER,"
+        "  active INTEGER DEFAULT 1,"
+        "  retirement_reason TEXT,"
+        "  retired_on TEXT,"
+        "  regen_generation INTEGER DEFAULT 0,"
+        "  retire_age INTEGER,"
         "  UNIQUE(world_id, player_id),"
         "  FOREIGN KEY (world_id) REFERENCES worlds(id),"
         "  FOREIGN KEY (player_id) REFERENCES players(id)"
         ")"
     )
+
+    for sql in [
+        "ALTER TABLE player_world_state ADD COLUMN age INTEGER",
+        "ALTER TABLE player_world_state ADD COLUMN last_age_year INTEGER",
+        "ALTER TABLE player_world_state ADD COLUMN active INTEGER DEFAULT 1",
+        "ALTER TABLE player_world_state ADD COLUMN retirement_reason TEXT",
+        "ALTER TABLE player_world_state ADD COLUMN retired_on TEXT",
+        "ALTER TABLE player_world_state ADD COLUMN regen_generation INTEGER DEFAULT 0",
+        "ALTER TABLE player_world_state ADD COLUMN retire_age INTEGER",
+    ]:
+        try:
+            db.execute(sql)
+        except Exception:
+            pass
 
     # Audit log table for canon/result edits
     db.execute(

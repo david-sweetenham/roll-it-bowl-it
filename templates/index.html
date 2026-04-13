@@ -1152,6 +1152,18 @@
               <option value="10">10 years</option>
             </select>
             <p class="form-help">Choose how far ahead to generate fixtures now. When you reach the end of that block, you can generate more fixtures and keep the world going.</p>
+            <label class="form-label" style="margin-top:14px">Player Lifecycle</label>
+            <div class="scoring-mode-toggle">
+              <button id="wc-player-lifecycle-ageless" class="scoring-mode-btn active" type="button" onclick="setWorldPlayerLifecycle('ageless')">
+                <span class="scoring-mode-name">Ageless Players</span>
+                <span class="scoring-mode-sub">Players never retire. Great for evergreen sandbox worlds.</span>
+              </button>
+              <button id="wc-player-lifecycle-realistic" class="scoring-mode-btn" type="button" onclick="setWorldPlayerLifecycle('realistic')">
+                <span class="scoring-mode-name">Retire &amp; Regens</span>
+                <span class="scoring-mode-sub">Players age, retire at varied times, and get replaced by new generated talent.</span>
+              </button>
+            </div>
+            <p id="wc-player-lifecycle-help" class="form-help">Classic sandbox mode. The same players keep going forever.</p>
             <div id="wc-domestic-section" class="hidden" style="margin-top:14px">
               <label class="form-label">Domestic &amp; Franchise Leagues <span class="text-muted">(Realistic only)</span></label>
               <p class="form-help" style="margin-bottom:8px">Add these competitions to the world calendar alongside international cricket. Each league generates a full season of fixtures using its real teams.</p>

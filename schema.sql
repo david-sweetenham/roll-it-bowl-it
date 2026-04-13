@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS players (
     bowling_type TEXT CHECK(bowling_type IN ('pace','spin','none')),
     bowling_action TEXT,
     bowling_rating INTEGER CHECK(bowling_rating BETWEEN 0 AND 5),
+    source_world_id INTEGER,
+    is_regen INTEGER DEFAULT 0,
     FOREIGN KEY (team_id) REFERENCES teams(id)
 );
 
@@ -314,6 +316,13 @@ CREATE TABLE IF NOT EXISTS player_world_state (
     career_wickets INTEGER DEFAULT 0,
     career_matches INTEGER DEFAULT 0,
     last_match_dates TEXT DEFAULT '[]',
+    age INTEGER,
+    last_age_year INTEGER,
+    active INTEGER DEFAULT 1,
+    retirement_reason TEXT,
+    retired_on TEXT,
+    regen_generation INTEGER DEFAULT 0,
+    retire_age INTEGER,
     UNIQUE(world_id, player_id),
     FOREIGN KEY (world_id) REFERENCES worlds(id),
     FOREIGN KEY (player_id) REFERENCES players(id)
