@@ -1141,6 +1141,20 @@
               <label class="form-label">Domestic &amp; Franchise Leagues <span class="text-muted">(Realistic only)</span></label>
               <p class="form-help" style="margin-bottom:8px">Add these competitions to the world calendar alongside international cricket. Each league generates a full season of fixtures using its real teams.</p>
               <div id="wc-domestic-leagues" class="domestic-league-grid"></div>
+              <div id="wc-domestic-team-mode-section" class="hidden" style="margin-top:12px">
+                <label class="form-label">Domestic Team Coverage</label>
+                <div class="scoring-mode-toggle">
+                  <button id="wc-domestic-team-mode-selected" class="scoring-mode-btn" type="button" onclick="setWorldDomesticTeamMode('selected')">
+                    <span class="scoring-mode-name">Selected Clubs</span>
+                    <span class="scoring-mode-sub">Only use the clubs you pick in Step 3</span>
+                  </button>
+                  <button id="wc-domestic-team-mode-full" class="scoring-mode-btn" type="button" onclick="setWorldDomesticTeamMode('full_league')">
+                    <span class="scoring-mode-name">Full League</span>
+                    <span class="scoring-mode-sub">Include every club from the leagues you selected</span>
+                  </button>
+                </div>
+                <p id="wc-domestic-team-mode-help" class="form-help"></p>
+              </div>
             </div>
             <div class="wizard-nav">
               <button class="btn btn-secondary" onclick="wizardBack(2)">← Back</button>
@@ -1152,7 +1166,7 @@
           <div id="wizard-page-3" class="wizard-page hidden">
             <h3 id="wizard-team-step-title">Step 3 — Select Teams <span class="text-muted">(min 4)</span></h3>
             <div class="wizard-team-actions">
-              <button class="btn btn-secondary btn-sm" onclick="wizardSelectAllTeams()">Select All</button>
+              <button id="wizard-select-all-btn" class="btn btn-secondary btn-sm" onclick="wizardSelectAllTeams()">Select All</button>
               <span id="wizard-team-count" class="text-muted" style="font-size:var(--fs-sm)">0 selected</span>
             </div>
             <label class="form-label" style="margin-top:10px">Your Team (optional)</label>

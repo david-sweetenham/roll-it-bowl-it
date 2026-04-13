@@ -2706,9 +2706,12 @@ def create_world():
     cal_style         = body.get('calendar_style', 'random')  # 'realistic' | 'random'
     cal_years         = int(body.get('calendar_years', 2))
     domestic_leagues  = body.get('domestic_leagues', [])   # e.g. ['ipl', 'bbl', 'county_championship']
+    domestic_team_mode = body.get('domestic_team_mode', 'selected')
     world_scope       = body.get('world_scope', 'international')
     if world_scope not in ('international', 'domestic', 'combined'):
         world_scope = 'international'
+    if domestic_team_mode not in ('selected', 'full_league'):
+        domestic_team_mode = 'selected'
 
     if not name:
         return err('name required')
@@ -2722,6 +2725,7 @@ def create_world():
         settings = {'team_ids': team_ids, 'my_team_id': my_team_id,
                     'calendar_style': cal_style,
                     'domestic_leagues': domestic_leagues,
+                    'domestic_team_mode': domestic_team_mode,
                     'world_scope': world_scope}
         world_id = database.create_world(db, {
             'name':             name,
@@ -2774,7 +2778,7 @@ def create_world():
                     list(all_leagues_needed)
                 ).fetchall()
                 domestic_team_list = [dict(r) for r in dom_rows]
-                if world_scope == 'domestic':
+                if world_scope == 'domestic' and domestic_team_mode != 'full_league':
                     domestic_team_list = [
                         dt for dt in domestic_team_list
                         if dt.get('team_id') in selected_team_ids
@@ -2785,7 +2789,14 @@ def create_world():
                         team_venues.setdefault(dt['team_id'], dt['home_venue_id'])
 
         # ── Generate fixture calendar ─────────────────────────────────────────
-        calendar_team_ids = team_ids if world_scope != 'domestic' else []
+        effective_team_ids = list(team_ids)
+        if world_scope == 'domestic' and cal_style == 'realistic' and domestic_team_mode == 'full_league':
+            effective_team_ids = sorted({dt['team_id'] for dt in domestic_team_list if dt.get('team_id')})
+            settings['team_ids'] = effective_team_ids
+            db.execute("UPDATE worlds SET settings_json = ? WHERE id = ?", (json.dumps(settings), world_id))
+            db.commit()
+
+        calendar_team_ids = effective_team_ids if world_scope != 'domestic' else []
 
         if cal_style == 'realistic':
             raw_fixtures = cricket_calendar.generate_realistic_calendar(
@@ -3185,12 +3196,15 @@ def world_regenerate_calendar(id):
         # Get teams from settings
         settings_json = world.get('settings_json') or '{}'
         settings      = json.loads(settings_json)
-        team_ids         = settings.get('team_ids', [])
-        my_team_id       = settings.get('my_team_id')
-        domestic_leagues = settings.get('domestic_leagues', [])
-        world_scope      = settings.get('world_scope', 'international')
+        team_ids            = settings.get('team_ids', [])
+        my_team_id          = settings.get('my_team_id')
+        domestic_leagues    = settings.get('domestic_leagues', [])
+        domestic_team_mode  = settings.get('domestic_team_mode', 'selected')
+        world_scope         = settings.get('world_scope', 'international')
         if world_scope not in ('international', 'domestic', 'combined'):
             world_scope = 'international'
+        if domestic_team_mode not in ('selected', 'full_league'):
+            domestic_team_mode = 'selected'
 
         if not team_ids:
             return err('No teams found in world settings')
@@ -3228,7 +3242,7 @@ def world_regenerate_calendar(id):
                     list(all_leagues_needed)
                 ).fetchall()
                 domestic_team_list = [dict(r) for r in dom_rows]
-                if world_scope == 'domestic':
+                if world_scope == 'domestic' and domestic_team_mode != 'full_league':
                     domestic_team_list = [
                         dt for dt in domestic_team_list
                         if dt.get('team_id') in selected_team_ids

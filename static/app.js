@@ -70,6 +70,10 @@ const WORLD_SCOPE_META = {
   domestic: 'Domestic worlds focus on league and franchise cricket. In realistic mode, pick at least one domestic competition.',
   combined: 'Combined worlds generate the international calendar and layer selected domestic leagues into the same save.'
 };
+const WORLD_DOMESTIC_TEAM_MODE_META = {
+  selected: 'Only the domestic clubs you choose in Step 3 will be included in the world.',
+  full_league: 'Every club from your selected domestic leagues will be included automatically.'
+};
 
 // ── Disclaimer Text ───────────────────────────────────────────────────────────
 
@@ -6897,6 +6901,7 @@ const WorldUI = {
   wizardInternationalTeams: [],
   wizardDomesticTeams: [],
   wizardDomesticLeagues: new Set(),
+  wizardDomesticTeamMode: 'selected',
   wizardDomesticLeagueOptions: [],
   wizardScope:     'international',
   calendarFilter:  'all',
@@ -6942,6 +6947,7 @@ async function showWorldWizard() {
   WorldUI.wizardStep          = 1;
   WorldUI.wizardTeamIds       = new Set();
   WorldUI.wizardDomesticLeagues = new Set();
+  WorldUI.wizardDomesticTeamMode = 'selected';
   WorldUI.wizardScope         = 'international';
   _wizardShowPage(1);
 
@@ -6967,6 +6973,9 @@ function _syncDomesticSectionVisibility() {
   const calStyle = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
   const section = document.getElementById('wc-domestic-section');
   if (section) section.classList.toggle('hidden', calStyle !== 'realistic' || getWorldScope() === 'international');
+  const modeSection = document.getElementById('wc-domestic-team-mode-section');
+  if (modeSection) modeSection.classList.toggle('hidden', calStyle !== 'realistic' || getWorldScope() !== 'domestic');
+  syncWorldDomesticTeamMode();
 }
 
 function getWorldScope() {
@@ -6983,6 +6992,24 @@ function setWorldScope(scope) {
   const helpEl = document.getElementById('wc-scope-help');
   if (helpEl) helpEl.textContent = WORLD_SCOPE_META[WorldUI.wizardScope];
   _syncDomesticSectionVisibility();
+  _refreshWizardTeamPool();
+}
+
+function getWorldDomesticTeamMode() {
+  return WorldUI.wizardDomesticTeamMode === 'full_league' ? 'full_league' : 'selected';
+}
+
+function syncWorldDomesticTeamMode() {
+  const mode = getWorldDomesticTeamMode();
+  document.getElementById('wc-domestic-team-mode-selected')?.classList.toggle('active', mode === 'selected');
+  document.getElementById('wc-domestic-team-mode-full')?.classList.toggle('active', mode === 'full_league');
+  const helpEl = document.getElementById('wc-domestic-team-mode-help');
+  if (helpEl) helpEl.textContent = WORLD_DOMESTIC_TEAM_MODE_META[mode];
+}
+
+function setWorldDomesticTeamMode(mode) {
+  WorldUI.wizardDomesticTeamMode = mode === 'full_league' ? 'full_league' : 'selected';
+  syncWorldDomesticTeamMode();
   _refreshWizardTeamPool();
 }
 
@@ -7071,6 +7098,7 @@ function _renderWizardTeamBadges() {
 
 function _refreshWizardTeamPool() {
   const scope = getWorldScope();
+  const domesticMode = getWorldDomesticTeamMode();
   let pool = [];
   if (scope === 'domestic') {
     const selectedLeagueNames = new Set(
@@ -7085,12 +7113,23 @@ function _refreshWizardTeamPool() {
     pool = WorldUI.wizardInternationalTeams || [];
   }
   WorldUI.wizardAllTeams = pool;
-  WorldUI.wizardTeamIds = new Set(Array.from(WorldUI.wizardTeamIds).filter(id => pool.some(t => t.id === id)));
+  if (scope === 'domestic' && domesticMode === 'full_league') {
+    WorldUI.wizardTeamIds = new Set(pool.map(t => t.id));
+  } else {
+    WorldUI.wizardTeamIds = new Set(Array.from(WorldUI.wizardTeamIds).filter(id => pool.some(t => t.id === id)));
+  }
   _renderWizardTeamBadges();
   _refreshWizardMyTeamOptions();
+  const selectAllBtn = document.getElementById('wizard-select-all-btn');
+  if (selectAllBtn) {
+    const lockTeamSelection = scope === 'domestic' && domesticMode === 'full_league';
+    selectAllBtn.classList.toggle('hidden', lockTeamSelection);
+  }
   const titleEl = document.getElementById('wizard-team-step-title');
   if (titleEl) {
-    if (scope === 'domestic') {
+    if (scope === 'domestic' && domesticMode === 'full_league') {
+      titleEl.innerHTML = 'Step 3 — Review League Clubs <span class="text-muted">(all included)</span>';
+    } else if (scope === 'domestic') {
       titleEl.innerHTML = 'Step 3 — Select Domestic Teams <span class="text-muted">(min 2)</span>';
     } else if (scope === 'combined') {
       titleEl.innerHTML = 'Step 3 — Select International Teams <span class="text-muted">(min 4)</span>';
@@ -7112,6 +7151,7 @@ function _refreshWizardMyTeamOptions() {
 }
 
 function wizardToggleTeam(id) {
+  if (getWorldScope() === 'domestic' && getWorldDomesticTeamMode() === 'full_league') return;
   if (WorldUI.wizardTeamIds.has(id)) WorldUI.wizardTeamIds.delete(id);
   else WorldUI.wizardTeamIds.add(id);
   const el = document.getElementById(`wtb-${id}`);
@@ -7120,6 +7160,7 @@ function wizardToggleTeam(id) {
 }
 
 function wizardSelectAllTeams() {
+  if (getWorldScope() === 'domestic' && getWorldDomesticTeamMode() === 'full_league') return;
   const allSelected = WorldUI.wizardAllTeams.every(t => WorldUI.wizardTeamIds.has(t.id));
   if (allSelected) {
     WorldUI.wizardTeamIds.clear();
@@ -7131,7 +7172,12 @@ function wizardSelectAllTeams() {
 
 function _wizardUpdateCount() {
   const el = document.getElementById('wizard-team-count');
-  if (el) el.textContent = `${WorldUI.wizardTeamIds.size} selected`;
+  if (!el) return;
+  if (getWorldScope() === 'domestic' && getWorldDomesticTeamMode() === 'full_league') {
+    el.textContent = `All ${WorldUI.wizardAllTeams.length} clubs included`;
+  } else {
+    el.textContent = `${WorldUI.wizardTeamIds.size} selected`;
+  }
 }
 
 function _wizardBuildSummary() {
@@ -7142,6 +7188,7 @@ function _wizardBuildSummary() {
   const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
   const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
   const worldScope = getWorldScope();
+  const domesticTeamMode = getWorldDomesticTeamMode();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
   const myTeam    = myTeamId ? WorldUI.wizardAllTeams.find(t => t.id === myTeamId) : null;
   const teamList  = WorldUI.wizardAllTeams.filter(t => WorldUI.wizardTeamIds.has(t.id));
@@ -7158,9 +7205,12 @@ function _wizardBuildSummary() {
     <div class="summary-row"><span>Start Date</span><strong>${start}</strong></div>
     <div class="summary-row"><span>Density</span><strong>${density}</strong></div>
     <div class="summary-row"><span>Calendar Style</span><strong>${styleLabel}</strong></div>
+    ${worldScope === 'domestic' && calStyle === 'realistic' ? `<div class="summary-row"><span>Domestic Coverage</span><strong>${domesticTeamMode === 'full_league' ? 'Full League' : 'Selected Clubs'}</strong></div>` : ''}
     <div class="summary-row"><span>Your Team</span><strong>${myTeam ? myTeam.name : 'None (AI only)'}</strong></div>
     <div class="summary-row"><span>Teams (${teamList.length})</span>
-      <span>${teamList.map(t => t.short_code || t.name.slice(0,3)).join(', ')}</span>
+      <span>${worldScope === 'domestic' && domesticTeamMode === 'full_league'
+        ? `All clubs from the selected league set (${teamList.length})`
+        : teamList.map(t => t.short_code || t.name.slice(0,3)).join(', ')}</span>
     </div>
     ${domLeagueNames.length ? `<div class="summary-row"><span>Domestic Leagues</span><span>${domLeagueNames.join(', ')}</span></div>` : ''}`;
 }
@@ -7171,6 +7221,7 @@ async function submitWorldWizard() {
   const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
   const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
   const worldScope = getWorldScope();
+  const domesticTeamMode = getWorldDomesticTeamMode();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
   const team_ids  = Array.from(WorldUI.wizardTeamIds);
 
@@ -7184,7 +7235,7 @@ async function submitWorldWizard() {
   const res = await api('POST', '/api/worlds', {
     name, start_date: start, calendar_density: density,
     calendar_style: calStyle, team_ids, my_team_id: myTeamId,
-    domestic_leagues, world_scope: worldScope,
+    domestic_leagues, world_scope: worldScope, domestic_team_mode: domesticTeamMode,
   });
 
   if (btn) { btn.disabled = false; btn.textContent = 'Create World'; }
@@ -7311,6 +7362,7 @@ function _renderWorldOverview(data) {
   const worldScope = ['international', 'domestic', 'combined'].includes(settings.world_scope)
     ? settings.world_scope
     : 'international';
+  const domesticTeamMode = settings.domestic_team_mode === 'full_league' ? 'full_league' : 'selected';
   const upcoming = data.upcoming_fixtures || [];
   const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
   const hasTrackedTeam = !!settings.my_team_id;
@@ -7326,7 +7378,11 @@ function _renderWorldOverview(data) {
       <div class="world-desk-card">
         <div class="world-desk-label">World Type</div>
         <div class="world-desk-value">${escHtml(_titleCaseWords(worldScope))}</div>
-        <div class="world-desk-sub">${worldScope === 'combined' ? 'International calendar plus domestic leagues' : worldScope === 'domestic' ? 'Domestic and franchise cricket focus' : 'National teams and international fixtures only'}</div>
+        <div class="world-desk-sub">${worldScope === 'combined'
+          ? 'International calendar plus domestic leagues'
+          : worldScope === 'domestic'
+            ? `Domestic and franchise cricket focus · ${domesticTeamMode === 'full_league' ? 'Full league' : 'Selected clubs'}`
+            : 'National teams and international fixtures only'}</div>
       </div>
       <div class="world-desk-card">
         <div class="world-desk-label">Calendar</div>
