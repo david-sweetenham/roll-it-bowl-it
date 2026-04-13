@@ -3640,13 +3640,16 @@ body.broadcast-mode .btn-howzat {
 /* World current-date centred block */
 .wd-date-centre {
   text-align: center;
-  padding: 14px 0 8px;
+  padding: 12px 0 10px;
+  border-top: 1px solid rgba(127,179,211,0.15);
+  border-bottom: 1px solid rgba(127,179,211,0.15);
+  margin: 10px 0 12px;
 }
 .wd-date-display {
   font-size: 2.4rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #e8f4fd;
+  color: #e8f4fd !important;
   line-height: 1.1;
   margin-bottom: 8px;
 }
