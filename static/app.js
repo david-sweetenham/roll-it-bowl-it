@@ -235,6 +235,7 @@ function showScreen(name) {
         return;
       }
     }
+    _stopAiAutoPlay();
   }
 
   document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
@@ -819,6 +820,7 @@ async function _doStartMatch(playerMode, humanTeamId) {
   });
 
   if (res) {
+    _stopAiAutoPlay();
     AppState.historicalMatchView = false;
     AppState.activeMatch = res.match || res;
     AppState.activeMatch.match_id = res.match_id || res.match?.id;
@@ -832,7 +834,12 @@ async function _doStartMatch(playerMode, humanTeamId) {
     MatchUI.allPlayers = {};
     MatchUI.recordsBroken = [];
     MatchUI.chosenBowlerId = null;
-    _stopAiAutoPlay();
+    document.getElementById('match-live')?.classList.remove('archive-match-mode');
+    document.getElementById('screen-match')?.classList.remove('archive-screen-mode');
+    document.getElementById('match-result-screen')?.classList.add('hidden');
+    document.getElementById('match-innings-transition')?.classList.add('hidden');
+    document.getElementById('match-toss-screen')?.classList.remove('hidden');
+    document.getElementById('canvas-post-match')?.classList.add('hidden');
 
     // Switch screen
     document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
@@ -1121,6 +1128,14 @@ function initLiveView(state) {
   const playerMode = AppState.activeMatch?.playerMode || m.player_mode || 'ai_vs_ai';
   AppState.playerMode  = playerMode;
   AppState.humanTeamId = AppState.activeMatch?.humanTeamId || m.human_team_id || null;
+  AppState.historicalMatchView = false;
+
+  document.getElementById('screen-match')?.classList.remove('archive-screen-mode');
+  document.getElementById('match-live')?.classList.remove('archive-match-mode');
+  document.getElementById('match-toss-screen')?.classList.add('hidden');
+  document.getElementById('match-innings-transition')?.classList.add('hidden');
+  document.getElementById('match-result-screen')?.classList.add('hidden');
+  document.getElementById('canvas-post-match')?.classList.add('hidden');
 
   // Title
   document.getElementById('match-title').innerHTML =
@@ -1962,7 +1977,7 @@ async function rollBall() {
   const needsHumanBowlerChoice =
     currentState?.current_innings &&
     currentState.current_bowler_id === null &&
-    !_isAiTurn(currentState);
+    _humanIsBowling(currentState);
   if (needsHumanBowlerChoice && !MatchUI.chosenBowlerId) {
     await _maybeShowBowlingPanel(currentState);
     if (!MatchUI.chosenBowlerId) return;
@@ -2116,7 +2131,7 @@ async function _completeBall(res, delivery) {
   }
 
   // Check if human bowling change is needed for new over
-  if (freshState && freshState.current_bowler_id === null && !_isAiTurn(freshState)) {
+  if (freshState && freshState.current_bowler_id === null && _humanIsBowling(freshState)) {
     await _maybeShowBowlingPanel(freshState);
   }
 
@@ -2932,11 +2947,19 @@ function _stopAiAutoPlay() {
 
 async function _aiAutoPlayLoop() {
   if (!MatchUI.aiPlay.running || MatchUI.aiPlay.paused || MatchUI._transitionActive) return;
+  if (AppState.currentScreen !== 'match' || AppState.historicalMatchView) {
+    _stopAiAutoPlay();
+    return;
+  }
 
   // Roll the next ball
   await rollBall();
 
   if (!MatchUI.aiPlay.running || MatchUI.aiPlay.paused || MatchUI._transitionActive) return;
+  if (AppState.currentScreen !== 'match' || AppState.historicalMatchView) {
+    _stopAiAutoPlay();
+    return;
+  }
 
   const delayMs = _AI_SPEED_MS[MatchUI.aiPlay.speed] ?? 800;
   if (delayMs <= 0) {
