@@ -2168,6 +2168,7 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
 }
 .umpire-arm,
 .umpire-leg,
+.umpire-finger,
 .umpire-body-outline {
   stroke: #243246;
   stroke-width: 3;
@@ -2190,9 +2191,6 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
 }
 .umpire-accent {
   fill: #c53f32;
-}
-.umpire-sleeve {
-  fill: #f0f2f7;
 }
 .umpire-badge {
   fill: #43c274;

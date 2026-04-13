@@ -1950,35 +1950,47 @@ function _autoStageFrames(delivery) {
 
 function _umpireSignalMarkup(type) {
   const signal = type === 'wicket' ? 'out' : type === 'six' ? 'six' : 'four';
-  const label = signal === 'out' ? 'Out' : signal === 'six' ? 'Six' : 'Four';
+  const label = signal === 'out' ? 'Out' : signal === 'six' ? 'Six' : 'Boundary';
 
   const armRight = signal === 'out'
-    ? '<line class="umpire-arm" x1="73" y1="64" x2="86" y2="26" />'
+    ? `
+      <line class="umpire-arm" x1="73" y1="62" x2="91" y2="45" />
+      <line class="umpire-arm" x1="91" y1="45" x2="91" y2="17" />
+    `
     : signal === 'six'
-      ? '<line class="umpire-arm" x1="73" y1="64" x2="83" y2="28" />'
-      : '<line class="umpire-arm" x1="73" y1="64" x2="102" y2="58" />';
+      ? `
+        <line class="umpire-arm" x1="73" y1="62" x2="82" y2="39" />
+        <line class="umpire-arm" x1="82" y1="39" x2="82" y2="12" />
+      `
+      : `
+        <line class="umpire-arm" x1="73" y1="62" x2="90" y2="56" />
+        <line class="umpire-arm" x1="90" y1="56" x2="72" y2="50" />
+      `;
 
   const armLeft = signal === 'six'
-    ? '<line class="umpire-arm" x1="45" y1="64" x2="35" y2="28" />'
+    ? `
+      <line class="umpire-arm" x1="45" y1="62" x2="36" y2="39" />
+      <line class="umpire-arm" x1="36" y1="39" x2="36" y2="12" />
+    `
     : signal === 'four'
-      ? '<line class="umpire-arm" x1="45" y1="64" x2="16" y2="58" />'
-      : '<line class="umpire-arm" x1="45" y1="64" x2="30" y2="72" />';
+      ? `
+        <line class="umpire-arm" x1="45" y1="62" x2="34" y2="57" />
+      `
+      : '<line class="umpire-arm" x1="45" y1="62" x2="31" y2="73" />';
 
   const finger = signal === 'out'
-    ? '<circle class="umpire-skin" cx="87" cy="22" r="3" />'
+    ? '<line class="umpire-finger" x1="91" y1="17" x2="91" y2="8" />'
     : '';
 
   return `
     <svg class="umpire-signal-svg" viewBox="0 0 118 126" role="img" aria-label="Umpire signal ${label}">
       <ellipse class="umpire-shadow" cx="59" cy="116" rx="30" ry="8" />
-      <ellipse class="umpire-hat" cx="59" cy="18" rx="27" ry="8" />
-      <rect class="umpire-hat" x="40" y="11" width="38" height="16" rx="8" />
+      <ellipse class="umpire-hat" cx="59" cy="17" rx="28" ry="6" />
+      <rect class="umpire-hat" x="43" y="8" width="32" height="13" rx="5" />
       <circle class="umpire-skin" cx="59" cy="34" r="14" />
       <rect class="umpire-body" x="43" y="48" width="32" height="34" rx="6" />
       <rect class="umpire-accent" x="56" y="52" width="6" height="24" rx="2" />
       <circle class="umpire-badge" cx="69" cy="61" r="4" />
-      <rect class="umpire-sleeve" x="37" y="50" width="10" height="24" rx="5" />
-      <rect class="umpire-sleeve" x="71" y="50" width="10" height="24" rx="5" />
       ${armLeft}
       ${armRight}
       ${finger}
