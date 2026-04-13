@@ -3265,6 +3265,8 @@ async function showResultScreen(matchId) {
   ]);
   if (!state) return;
   MatchUI.lastState = state;
+  document.getElementById('match-live')?.classList.remove('archive-match-mode');
+  document.getElementById('screen-match')?.classList.remove('archive-screen-mode');
 
   const match = state.match || sc?.match || {};
   document.getElementById('match-live').classList.add('hidden');
@@ -3426,10 +3428,28 @@ async function showHistoricalMatchView(matchId, state) {
   document.getElementById('match-toss-screen').classList.add('hidden');
   document.getElementById('match-result-screen').classList.add('hidden');
   document.getElementById('match-live').classList.remove('hidden');
+  document.getElementById('match-live').classList.add('archive-match-mode');
+  document.getElementById('screen-match')?.classList.add('archive-screen-mode');
+
+  const match = sc.match || state.match || {};
+  const archiveHeader = `
+    <div class="archive-match-header">
+      <div class="archive-match-kicker">Match Archive</div>
+      <div class="archive-match-headline">${escHtml(sc.result_string || 'Completed match')}</div>
+      <div class="archive-match-meta">
+        ${escHtml(match.team1_name || '?')} vs ${escHtml(match.team2_name || '?')}
+        <span class="archive-match-sep">·</span>
+        ${escHtml(match.format || '')}
+        <span class="archive-match-sep">·</span>
+        ${escHtml(match.venue_name || '')}${match.venue_city ? ', ' + escHtml(match.venue_city) : ''}
+        <span class="archive-match-sep">·</span>
+        ${escHtml(match.match_date || '')}
+      </div>
+    </div>`;
 
   const scorecardEl = document.getElementById('scorecard-content');
   if (scorecardEl) {
-    scorecardEl.innerHTML = _renderFullScorecardHtml(sc);
+    scorecardEl.innerHTML = archiveHeader + _renderFullScorecardHtml(sc);
   }
 
   const deliveriesRes = await api('GET', `/api/matches/${matchId}/deliveries`);
@@ -3957,9 +3977,13 @@ async function loadMatchScreen() {
       await showResultScreen(matchId);
     }
   } else if (!state.current_innings && !(state.innings || []).length) {
+    document.getElementById('match-live')?.classList.remove('archive-match-mode');
+    document.getElementById('screen-match')?.classList.remove('archive-screen-mode');
     showMatchToss();
   } else {
     AppState.historicalMatchView = false;
+    document.getElementById('match-live')?.classList.remove('archive-match-mode');
+    document.getElementById('screen-match')?.classList.remove('archive-screen-mode');
     document.getElementById('match-toss-screen').classList.add('hidden');
     initLiveView(state);
   }

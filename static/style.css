@@ -1510,6 +1510,82 @@ select option { background: var(--surface); color: var(--text); }
 }
 #match-live.hidden { display: none; }
 
+#match-live.archive-match-mode {
+  padding: 22px 24px 28px;
+  width: 100%;
+}
+#match-live.archive-match-mode .match-topbar,
+#match-live.archive-match-mode .tension-suggestion,
+#match-live.archive-match-mode .hvh-team-banner,
+#match-live.archive-match-mode .ai-indicator,
+#match-live.archive-match-mode .ai-playback-controls,
+#match-live.archive-match-mode #match-scoreboard,
+#match-live.archive-match-mode .match-play-area {
+  display: none !important;
+}
+#match-live.archive-match-mode .match-tabs-area {
+  margin-top: 0;
+  background: transparent;
+  border-top: none;
+  width: 100%;
+}
+#match-live.archive-match-mode .match-tabs {
+  display: none;
+}
+#match-live.archive-match-mode #match-tab-scorecard {
+  display: block !important;
+}
+#match-live.archive-match-mode .match-tab-content {
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+#screen-match.archive-screen-mode .screen-inner {
+  max-width: none;
+  width: 100%;
+  padding: 0;
+}
+.archive-match-mode #scorecard-content {
+  width: 100%;
+}
+.archive-match-header {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0)),
+    radial-gradient(circle at top, rgba(46,204,113,0.10), rgba(46,204,113,0) 42%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px 20px;
+  margin: 0 0 18px;
+  box-shadow: var(--shadow);
+}
+.archive-match-kicker {
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.archive-match-headline {
+  font-family: var(--font-score);
+  font-size: clamp(24px, 3vw, 38px);
+  line-height: 1.1;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.archive-match-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.archive-match-sep {
+  color: var(--border-strong);
+}
+
 .match-topbar {
   background:
     linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0)),

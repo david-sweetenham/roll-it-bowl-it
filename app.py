@@ -330,7 +330,7 @@ def quick_stats():
             "LEFT JOIN teams wt ON m.winning_team_id = wt.id "
             "WHERE m.status = 'complete' "
             "  AND COALESCE(m.canon_status, 'canon') != 'deleted' "
-            "ORDER BY m.match_date DESC, m.id DESC LIMIT 5"
+            "ORDER BY COALESCE(m.created_at, m.match_date) DESC, m.id DESC LIMIT 5"
         ).fetchall()
         return jsonify({
             'matches':          int(totals['matches'] or 0),
