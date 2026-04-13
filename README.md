@@ -68,6 +68,16 @@ python app.py
 
 The database is created and seeded automatically on first run. The seed includes international teams, associate nations, and major domestic competitions.
 
+### Desktop launcher (Linux)
+
+To add a taskbar / app-menu shortcut with the bat-and-ball icon, run once from the project root:
+
+```bash
+bash install-launcher.sh
+```
+
+This writes a `.desktop` entry to `~/.local/share/applications/` pointing at your clone. On **KDE** right-click the entry in the application menu → *Pin to Taskbar*; on **GNOME** drag it from Activities to the dock. Clicking it starts the server and opens your browser automatically.
+
 ## Match Setup
 
 The Play screen supports:

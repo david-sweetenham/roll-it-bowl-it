@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background -->
+  <circle cx="32" cy="32" r="32" fill="#1b3d2a"/>
+
+  <!-- Bat group, rotated so blade points bottom-left -->
+  <g transform="translate(26,38) rotate(-42)">
+    <!-- Handle -->
+    <rect x="-2.2" y="-24" width="4.4" height="15" rx="2.2" fill="#a0784a"/>
+    <!-- Grip wrapping lines -->
+    <line x1="-2.2" y1="-21" x2="2.2" y2="-21" stroke="#3a2a1a" stroke-width="0.7" opacity="0.6"/>
+    <line x1="-2.2" y1="-18" x2="2.2" y2="-18" stroke="#3a2a1a" stroke-width="0.7" opacity="0.6"/>
+    <line x1="-2.2" y1="-15" x2="2.2" y2="-15" stroke="#3a2a1a" stroke-width="0.7" opacity="0.6"/>
+    <!-- Shoulder (taper from handle to blade) -->
+    <path d="M-2.2,-9 Q-5,-6 -6,-1 L6,-1 Q5,-6 2.2,-9 Z" fill="#c89a50"/>
+    <!-- Blade -->
+    <rect x="-6" y="-1" width="12" height="26" rx="3" fill="#c89a50"/>
+    <!-- Blade centre ridge -->
+    <line x1="0" y1="1" x2="0" y2="23" stroke="#b07830" stroke-width="1.4"/>
+  </g>
+
+  <!-- Cricket ball -->
+  <circle cx="43" cy="19" r="11.5" fill="#b22222"/>
+  <!-- Ball highlight -->
+  <circle cx="39.5" cy="15.5" r="4" fill="#cc3333" opacity="0.45"/>
+  <!-- Seam – left arc -->
+  <path d="M43,8.5 C38,12 38,26 43,29.5" stroke="#f5f0e8" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <!-- Seam – right arc -->
+  <path d="M43,8.5 C48,12 48,26 43,29.5" stroke="#f5f0e8" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <!-- Seam stitches left side -->
+  <line x1="39.2" y1="14.5" x2="41.2" y2="15.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <line x1="38.6" y1="17.5" x2="40.6" y2="18.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <line x1="38.6" y1="20.5" x2="40.6" y2="21.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <line x1="39.2" y1="23.5" x2="41.2" y2="24.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <!-- Seam stitches right side -->
+  <line x1="46.8" y1="14.5" x2="44.8" y2="15.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <line x1="47.4" y1="17.5" x2="45.4" y2="18.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <line x1="47.4" y1="20.5" x2="45.4" y2="21.2" stroke="#f5f0e8" stroke-width="0.9"/>
+  <line x1="46.8" y1="23.5" x2="44.8" y2="24.2" stroke="#f5f0e8" stroke-width="0.9"/>
+</svg>
