@@ -1,258 +1,224 @@
 # How to Play Roll It & Bowl It
 
-This guide covers everything from starting your first match to understanding the dice mechanics behind every delivery.
+This guide covers the practical flow of playing matches, choosing worlds, and understanding the dice system.
 
----
+## First Launch
 
-## First run
+On first run the app creates and seeds the database automatically with:
 
-When you open the app for the first time, the database is automatically created and seeded with:
 - international teams
 - associate nations
-- domestic and franchise competitions
-- venues across both international and domestic cricket
-- Full player rosters with individual ratings
+- domestic and franchise sides
+- venues
+- player squads
 
-Navigate to **http://127.0.0.1:5001** in your browser. You'll land on the home screen showing current standings and upcoming fixtures.
+Open:
 
-On first load, choose your default scoring style:
+```text
+http://127.0.0.1:5000
+```
 
-- `Classic` keeps the die literal: `1, 2, 3, 4, 6` score exactly those runs, `5` triggers the appeal chain
-- `Modern` keeps the same appeal chain but lightly reins in some boundary results in longer formats
+You can set defaults such as scoring style and roll mode from the app settings, but both can still be overridden match by match.
 
----
+## Starting a Match
 
-## Starting a match
-
-1. Open the **Play** screen
-2. Choose **Cricket Type**
-3. Choose **Format**
-4. Pick your two teams
-5. Choose **Scoring System**
+1. Open `Play`
+2. Choose `Cricket Type`
+3. Choose `Format`
+4. Pick teams
+5. Choose `Scoring System`
 6. Choose venue and date
-7. Click **Choose Mode**
-8. Select spectator, single-player, or two-player
-9. Take the toss and begin
+7. Choose player mode
+8. Take the toss
 
 ### Cricket Type
 
-- `International` shows national teams only
-- `Domestic` shows counties, states, and franchise sides only
+- `International` shows national teams
+- `Domestic` shows counties, states, and franchise sides
 
-If you choose domestic cricket, a **Domestic League** filter appears so you can narrow the selector to one competition like IPL or BBL.
+When domestic cricket is selected, a league filter appears to narrow the team list.
 
----
+### Format Labels
 
-## The live match screen
+International:
 
-The screen is divided into:
-- **Match header** — teams, score, overs, roll mode toggle
-- **Dice panel** — the die face, stage label, and action buttons
-- **Commentary feed** — ball-by-ball descriptions
-- **Scorecards** — batting and bowling figures, updated after every ball
+- `Test`
+- `ODI`
+- `T20`
 
----
+Domestic:
 
-## Rolling the dice
+- `First-Class`
+- `One-Day`
+- `T20`
 
-### Auto-Roll mode (default)
+The domestic labels map onto the same underlying engine formats.
 
-Click **Roll** (or press Space or R). The die spins and lands, and the result is immediately recorded. All dice stages resolve without waiting for you. This is fast and good for grinding through overs you don't want to dwell on.
+## Scoring Systems
 
-### Manual Roll mode
+### Classic
 
-Manual mode puts each dice stage under your control. Switch to it using the toggle in the match header, or press **M** when no ball is in flight.
+- `1` = 1 run
+- `2` = 2 runs
+- `3` = 3 runs
+- `4` = 4 runs
+- `5` = appeal
+- `6` = 6 runs
 
-Here's what a full delivery looks like in Manual mode:
+### Modern
 
-1. **Press Roll** — Stage 1 resolves. The die shows the delivery type.
-   - If it's a clean outcome (boundary, dot, runs), the ball is recorded immediately.
-   - If an appeal is possible, you get...
+Modern keeps the same readable face meanings and the same appeal chain, but some scoring results are lightly moderated in longer formats to keep totals more cricket-shaped.
 
-2. **HOWZAT!** — The display flashes up with the fielding team's appeal. The die is held, waiting.
+## Roll Modes
 
-3. **Press Appeal** (or A) — Stage 2 rolls. The die decides: is the batter out?
-   - **NOT OUT**: Press **Continue** (or C) to move on. Stage 3 resolves what actually happened.
-   - **OUT**: Press **Dismissal** (or D) to roll Stage 4 — the dismissal type.
+### Auto
 
-4. **If caught**: A **Caught Where?** button appears. Press it to roll Stage 4b — which fielder took it and where on the field.
+- faster
+- resolves the ball flow automatically
+- good for AI vs AI, streaming, and faster play
 
-5. The ball is recorded. Commentary appears. Scorecards update.
+### Manual
 
-Manual mode is more work but the tension of waiting on that Stage 2 roll is the whole point. When a tail-ender is hanging on and you hear "HOWZAT!" and have to decide whether to appeal — that's the game working as intended.
+- preserves the full HOWZAT tension
+- lets you step through appeals and dismissal outcomes
+- best for close finishes, milestones, and dramatic sessions
 
----
+You can also set a default roll mode in Settings.
 
-## The HOWZAT! Engine explained
+## The HOWZAT Chain
 
-Every delivery passes through the dice engine in up to four stages. You never roll dice that aren't relevant — a no-ball that goes for four doesn't need an appeal.
+Rolling a `5` starts the appeal sequence.
 
-### Stage 1 — The visible scoring roll
+The game can then move through:
 
-In `Classic`:
+1. appeal outcome
+2. not-out resolution
+3. dismissal type
+4. catch location
 
-- **1** = 1 run
-- **2** = 2 runs
-- **3** = 3 runs
-- **4** = 4 runs
-- **5** = appeal ball
-- **6** = 6 runs
+That is the signature part of the system. Normal scoring stays simple, but wickets become multi-step dramatic events.
 
-In `Modern`, the same faces are used, but some `4` and `6` outcomes in longer formats can be pulled back a little for realism.
+## Batter and Bowler Ratings
 
-On a free hit, a `5` still creates drama, but the batter is protected from normal dismissal outcomes.
+Players have ratings from `1` to `5`.
 
-### Stage 2 — Appeal outcome
+- batting rating influences how difficult a player is to dismiss
+- bowling rating influences how dangerous their deliveries are
 
-Is the batter out?
+Higher-rated batters survive appeal balls more often. Higher-rated bowlers create more pressure and better wicket chances.
 
-This is where batter rating matters most. The die result is compared against the batter's threshold:
+## Live Match Screen
 
-| Batter rating | Out if roll is... | Wicket chance per appeal |
-|--------------|-------------------|--------------------------|
-| 5 (best)     | ≥ 6               | ~6.2% |
-| 4            | ≥ 5               | ~11.2% |
-| 3            | ≥ 4               | ~16.2% |
-| 2            | ≥ 3               | ~21.2% |
-| 1 (weakest)  | ≥ 2               | ~27.2% |
+The live match view is built around:
 
-A rating-5 batter needs the die to show a 6 to be dismissed. A rating-1 batter is out on anything but a 1.
+- scoreboard and match context
+- batting and bowling cards
+- dice panel
+- mini live wagon wheel
+- commentary feed
+- scorecard tabs
+- story strip and alerts
 
-### Stage 3 — Not-out resolution
+Broadcast Mode is designed for 1080p/1440p recording and spectator play.
 
-When the batter survives the appeal, Stage 3 says what actually happened: an inside edge past leg stump, a thick outside edge that fell short, a brilliant defensive shot, a bottom edge through to fine leg. These generate the commentary detail.
+## Innings Breaks and Results
 
-### Stage 4 — Dismissal type
+At innings breaks the game now pauses deliberately and shows:
 
-When the batter is out, Stage 4 rolls for how: bowled, caught, lbw, run out, stumped, hit wicket. The available modes depend on the delivery — a spinner can't bowl you out in a way that only fast bowling can produce.
+- the innings score
+- target or next-innings stakes
+- auto-continue countdown
+- a `Continue` button
 
-### Stage 4b — Catch location
+Result screens show:
 
-When the dismissal is caught, one more roll determines who took the catch and where: slip cordon, mid-on, deep square, the keeper... This feeds the commentary ("caught at third slip") and fielding statistics.
+- winner and margin
+- result summary
+- notes cards and headline context
 
----
+## Worlds
 
-## Batter and bowler ratings
+Worlds let you build a longer-running save with its own fixtures, records, and rankings.
 
-Players have ratings from 1 to 5.
+### World Types
 
-**Batter rating** controls how hard they are to dismiss (see Stage 2 table above). It also influences scoring — higher-rated batters are more likely to score runs on scoring deliveries.
+- `International`
+- `Domestic`
+- `Combined`
 
-**Bowler rating** influences how often they generate wicket-possible deliveries in Stage 1. A rating-5 pace bowler beats the bat more often than a rating-1 part-timer.
+### Calendar Style
 
-You can see individual player ratings on the team roster pages.
+- `Realistic`
+- `Random`
 
----
+### Domestic Coverage
 
-## Match formats
+For realistic domestic worlds:
 
-### T20
-- 20 overs per side
-- One innings each
-- Usually completed in one sitting
-- **Tip**: The tension banner is most active here — close chases with 2 overs left are where Manual mode shines
+- `Selected Clubs`
+- `Full League`
 
-### ODI
-- 50 overs per side
-- One innings each
-- Fast-sim the powerplay and death overs if you want, play the middle overs manually
-- In domestic mode this is labelled **One-Day**
+### Managed Teams
 
-### Test
-- Up to 5 days
-- Two innings per side
-- Follow-on rule applies (team trailing by 200+ runs in a two-innings match may be asked to bat again)
-- Declarations are supported
-- In domestic mode this is labelled **First-Class**
+World saves can be:
 
----
+- AI only
+- one managed international team
+- one managed domestic team
+- one managed international plus one managed domestic team
 
-## Tension suggestion banner
+### Player Lifecycle
 
-When the game detects a tense situation, a banner slides in suggesting you switch to Manual mode. Conditions that trigger it:
+Each world can be created with:
 
-- **T20 finish**: ≤ 2 overs remaining with fewer than 15 runs needed
-- **Last wicket**: the final batting pair is at the crease
-- **Century approach**: a batter is on 95 or more
-- **High required rate**: run rate needed exceeds 12 per over
-- **Tied match**: scores are level with 1 over or fewer to play
+- `Ageless Players`
+- `Retire & Regens`
 
-Click the banner to switch to Manual mode immediately, or dismiss it (× button) to not see it again that innings.
+In `Retire & Regens` worlds, players age per world save, retire at varied times, and get replaced by world-specific regens.
 
----
+## Almanack
 
-## Fast sim
+The Dice Cricketers' Almanack tracks the long-form history of the save:
 
-Press **F** or use the fast-sim button to resolve the rest of the current match instantly. The AI plays out every remaining ball using the same dice engine — same probabilities, same rules, just without the animation delay. Useful for:
+- batting
+- bowling
+- all-rounders
+- teams
+- matches
+- partnerships
+- honours
 
-- Skipping through a match you've already won comfortably
-- Simulating unplayed fixtures in the schedule
-- Running through Test matches quickly
+It also surfaces:
 
----
+- records under threat
+- players in form
+- upcoming milestone chances
 
-## AI vs AI matches
+## Archive Matches
 
-When both teams are controlled by the AI (fast-sim or world simulation), the roll mode toggle is locked to Auto and hidden. Manual mode requires a human to press the buttons.
+Completed matches can be opened from history and viewed in archive mode.
 
----
+- full playable matches show full scorecards
+- simulated matches show reconstructed newspaper-style scorecards and summaries
 
-## Keyboard shortcuts reference
+## LAN Play / Viewing
 
-| Key | What it does |
-|-----|--------------|
-| **Space** or **R** | Roll the next ball (when idle) |
-| **A** | Appeal — roll Stage 2 (Manual mode, after HOWZAT!) |
-| **C** | Continue — not out, move on (Manual mode) |
-| **D** | Dismissal — roll Stage 4 (Manual mode, batter out) |
-| **D** | Toggle dark mode (when not in a dismissal state) |
-| **M** | Switch roll mode between Auto and Manual |
-| **F** | Fast-sim the rest of this match |
+To expose the app to other machines on your local network:
 
----
+```bash
+python start.py --lan
+```
 
-## Scorecards and records
+This is useful for:
 
-Every ball is recorded to the database. After the match:
-
-- Full batting and bowling scorecards are available
-- Partnership records update
-- Individual career records update (highest score, best bowling figures, etc.)
-- Team head-to-head records update
-- Season standings update with points, NRR, and run totals
-
-Records are permanent unless you reset the world from the admin panel.
-
-Canon and exhibition are tracked separately, so you can still run one-off fun matches without polluting the Almanack.
-
----
-
-## World creation
-
-When creating a world you now choose a **World Type**:
-
-- `International` for national teams only
-- `Domestic` for league/franchise cricket only
-- `Combined` for international cricket plus domestic leagues in the same save
-
-In realistic worlds:
-
-- `International` builds an international FTP-style calendar
-- `Domestic` uses the domestic competitions you selected
-- `Combined` runs both side by side
-
----
-
-## Broadcast mode
-
-Broadcast mode slows down all animations and adds dramatic pauses between stages. The HOWZAT! display holds for two seconds before the Appeal button appears, giving a streamed audience time to react. Toggle it from the settings panel in the match screen.
-
----
+- showing the game on a second screen
+- local household play
+- remote-control style streaming setups on the same network
 
 ## Tips
 
-- **Rating 1 batters are fragile** — don't expect tail-enders to hang around. A 27% dismissal rate per wicket-possible ball means they'll usually fall within a few overs.
-- **Manual mode for the last five overs of a T20 chase** is where the game is at its best. Every appeal is genuinely tense when you have to press the button.
-- **Fast-sim group stages**, play the knockouts manually. The world sim keeps everything consistent.
-- **The tension banner is opt-in** — it won't keep pestering you if you dismiss it. One dismiss per innings.
-- **Test cricket in Manual mode** is a commitment. Consider Auto for the first three days and switching to Manual when the match gets tight.
+- `Classic + Manual` is the strongest “tabletop dice cricket” experience
+- `Modern + Auto` is best for fast world progression
+- Manual mode shines most in the last overs of a chase or around batting milestones
+- Combined worlds get much richer if you choose managed international and domestic sides together
+- `Retire & Regens` is best for deep alternate-history saves

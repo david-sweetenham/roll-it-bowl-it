@@ -1,184 +1,88 @@
 # Changelog
 
-> Independent fan project — not affiliated with any cricket board or governing body.
-
 All notable changes to Roll It & Bowl It are documented here.
 
----
+## [0.3.0-dev] — 2026-04-13
+
+### Added
+
+- International, domestic, and combined world creation flows
+- Managed world teams for:
+  - AI-only worlds
+  - one international side
+  - one domestic side
+  - one international plus one domestic side
+- World fixture horizons from `1` to `10` years
+- Extendable world calendars so saves can continue beyond the initial generated block
+- Domestic world coverage rules:
+  - `Selected Clubs`
+  - `Full League`
+- `Ageless Players` and `Retire & Regens` world lifecycle modes
+- World-only regen players with per-world retirement timing
+- Country-aware and league-aware regen naming pools
+- Domestic and associate nation expansion in the seed data
+- Local LAN startup mode via `python start.py --lan`
+- Story desk panels on World and Almanack screens
+- Archive match layouts for completed matches
+- Synthetic scorecards for simulated world matches
+- Crowd reactions for major events
+- Umpire pop-up signals for `OUT`, `FOUR`, and `SIX`
+- Live mini wagon wheel in the match panel
+
+### Changed
+
+- Match presentation now leans more heavily into sports-broadcast hierarchy
+- Auto mode ball resolution is clearer and more outcome-led
+- Archive matches now open into archive-focused scorecard layouts rather than the live match shell
+- World overview now surfaces more context about world rules, schedules, and active series
+- Recent results on the Home screen are now recency-aware for newly completed matches
+
+### Fixed
+
+- Completed matches opening into the toss screen instead of an archive/result view
+- Archive scorecards being trapped in a small scroll area instead of filling the screen
+- Almanack batting tab failing to load data on first open
+- Almanack filters being hidden behind an expandable control
+- Light-mode selector mismatch in the live score UI
+- Required-rate calculation using incorrect over math
+- World `My Next Match` misbehaviour when no managed team was selected
+- Domestic realistic worlds ignoring selected teams
+- Duplicate or broken world series naming in overview feeds
+- Toss choice buttons not resetting cleanly between matches
+- Batting-first roll button being blocked by bowling-selection logic
+- Autoplay continuing while away from the match screen
+- Played matches and journal links not opening the proper scorecard/archive view
 
 ## [0.2.0-dev] — 2026-04-12
 
 ### Added
 
-**Scoring system choice**
-- Added `Classic` and `Modern` scoring modes to the engine, match setup, settings, and live match UI
-- Added first-run default scoring choice on the welcome screen
-- Added match-level persistence for `scoring_mode`
-
-**International / domestic split**
-- Play screen now supports `International` and `Domestic` setup modes
-- Domestic setup includes a league filter so large team pools stay usable
-- Domestic mode relabels formats as `First-Class`, `One-Day`, and `T20` while preserving engine compatibility
-
-**World structure choice**
-- World wizard now supports `International`, `Domestic`, and `Combined` saves
-- Domestic worlds can be generated from selected domestic competitions
-- Combined worlds run international calendars alongside selected domestic leagues
-- World detail screen now shows the world type in the header and overview
-
-**Expanded cricket data**
-- Added additional international and associate sides
-- Added seeded domestic and franchise competitions and squads
-- World scheduling updated to treat expanded international and associate sets more sensibly
-
-**Broadcast graphic system** (`static/app.js`, `static/style.css`)
-- TV-style full/partial overlay cards appear on 11 milestone types: WICKET, DUCK, FIFTY, CENTURY, ONE-FIFTY, DOUBLE CENTURY, FIVE-WICKET HAUL, TEN-WICKET HAUL, NEW ALMANACK RECORD, WORLD RECORD BEATEN, OVER COMPLETE
-- `GraphicQueue` — serialised priority queue (world record = 13 down to over complete = 1); over-complete cards skipped if anything higher-priority is pending
-- `GRAPHIC_TIMING` constants: distinct `hold`, `animIn`, `animOut` durations per type in normal and broadcast modes; broadcast mode extends all holds (century 8 s, world record 15 s)
-- Three layout classes: `.graphic-banner` (slides up from bottom), `.graphic-card` (fades/scales in from centre), `.graphic-lower-third` (slides in from right)
-- CSS keyframe animations: `duck-waddle`, `star-shimmer`, `century-digit-in`, `confetti-fall`, `globe-spin`, `bowling-ball-covered`, `lightning-pulse`, `gwr-glow`
-- Confetti burst on century, double century, world record: randomised `.confetti-piece` elements via JS
-- Dimmed backdrop (`#graphic-backdrop`, `rgba(0,0,0,0.62)`) behind modal cards; pointer-events: none on overlay so Roll button never blocked
-- `SoundEngine.playGraphic(type)` — distinct tone sequences for all 11 types (AudioContext, no external assets)
-- Instant / fast-sim suppression: graphics skipped when `animationSpeed === 'instant'`; fast-sim shows a single `showFastSimSummary` blocking card with key events from `res.sim_digest` instead of individual cards
-- Enhanced innings break: `showInningsTransition` now builds a rich `.innings-break-graphic` card with team score, target, required RR, top scorer, best bowling; broadcast mode waits for click OR 8 s
-- Pre-ball state capture in `_completeBall` preserves striker's batting record (runs, balls) before state refresh — needed for dismissal graphic data
-- `GraphicQueue.clear()` called before innings-break and match-result flows to prevent overlap
-
-**Cricket Calendar Engine** (`cricket_calendar.py`)
-- Realistic FTP-style calendar generator: home seasons locked to real-world windows (England: May–Sep, India: Oct–Mar, Australia: Oct–Apr, etc.), away tours filling the gaps
-- ICC event scheduling: Champions Trophy (ODI), World Test Championship Final, T20 World Cup placed at correct intervals, hosted by rotating neutral venues
-- ICC double-booking fix: `team_last_date` tracking prevents the same team appearing in two ICC fixtures on the same date
-- Relaxed density fix: reciprocal tour skipped in `_schedule_bilateral()` when `density == 'relaxed'` — prevents paradox where relaxed mode produced more fixtures than moderate
-- Calendar Style option in World Wizard Step 2: **Realistic** (FTP logic, seasons & ICC events) or **Random** (original rotation — faster to generate)
-- Calendar preview panel shown after world creation in Realistic mode: total fixtures, series count, ICC events, first 30 upcoming fixtures
-
-**UAT suite** (`uat/`)
-- `test_calendar.py` — 10 acceptance tests: England/India home-season months enforced, Ashes present/absent by density, no double-booking on same date, avoid_months respected, India-Pakistan only at ICC events, format order within series, fixture count ordering by density, required fields present on every fixture
-- `run_uat.py` — orchestrator running suites as subprocesses, prints pass/fail summary
-
-**Almanack: real-world records benchmarks**
-- `real_world_records` table seeded on startup (idempotent) with 28 reference records: Test/ODI/T20 batting and bowling bests, team totals — sourced from official ICC records
-- New API endpoint `GET /api/almanack/honours/with-world-records` — returns in-game records enriched with `real_world` entry and `pct_of_world_record` percentage
-- Honours board enriched view: two-panel cards showing in-game achievement alongside real-world benchmark, progress bar (clamped at 100%), gold "BEATEN" badge when the in-game record surpasses the real-world mark
+- `Classic` and `Modern` scoring systems
+- first-run scoring choice
+- international and domestic setup split
+- realistic and random world calendars
+- expanded international/associate data
+- major domestic competitions and squads
+- broadcast-style graphic system
+- Almanack honours enrichment against real-world record benchmarks
 
 ### Fixed
 
-**Dice identity and setup clarity**
-- Restored a visible direct `3-run` scoring path through the new scoring-mode system
-- Added a permanent live dice guide that matches the active scoring system
-- Fixed England flag presentation to use the St George's Cross instead of the Union flag
-- Fixed world button copy from `Next My Match` to `My Next Match`
-
-**Almanack — Batting/Bowling tabs empty (BUG 1)**
-- Root cause: batting and bowling API endpoints returned `{'records': rows}` but the frontend read `data.rows`. Key renamed to `rows` in both endpoints.
-- View status filter also excluded `status='batting'` not-outs (batters still at the crease when stumps were drawn). Fixed by changing `WHERE bi.status = 'dismissed'` to `WHERE bi.status != 'yet_to_bat'`.
-- Exhibition fallback banner added: appears in the Almanack when no canon matches exist, explaining how to promote matches to official records via the Manage tab.
-
-**Almanack — Bowling figures format (BUG 2)**
-- Bowling records and honours were displaying wickets only. All bowling values now rendered as `W/R` format (e.g. `6/32`) via `formatBowlingFigures(wickets, runs)`. Real-world bowling records seeded with pre-formatted `display_value` strings in the same format.
-
-**Almanack — Honours label names (BUG 3)**
-- Honours board was showing raw database key names (`highest_score_test`, `best_bowling_odi`, etc.). All keys mapped through `HONOURS_LABELS` constant with human-readable labels; unmapped keys fall back to title-case conversion.
-
----
+- Almanack batting and bowling empty-state/API wiring issues
+- honours labels using raw DB keys
+- bowling figures display inconsistencies
+- several setup and presentation issues discovered during review
 
 ## [0.1.0-dev] — 2026-04-12
 
-Initial development release. Core game engine, full season simulation, live match play, and two rolling modes.
+Initial development release.
 
 ### Added
 
-**HOWZAT! Engine**
-- 4-stage dice system for every delivery: Stage 1 (delivery type), Stage 2 (appeal outcome), Stage 3 (not-out resolution), Stage 4 (dismissal type), Stage 4b (catch location)
-- Batter rating system (1–5) with per-rating dismissal thresholds: rating 5 needs roll ≥ 6 to be out; each step down adds one pip (rating 1 is out on ≥ 2)
-- Real wicket rates confirmed over 5,000-delivery automated runs: 27.2% / 21.2% / 16.2% / 11.2% / 6.2% per appeal by rating
-- Bowler rating (1–5) influencing wicket-possible frequency in Stage 1
-- Free hit mechanic: wicket-possible deliveries after a no-ball skip the appeal and cannot dismiss the batter
-- All formats supported: T20 (20 overs), ODI (50 overs), Test (two innings, up to 5 days)
-
-**Manual Roll mode**
-- 13-state DiceState machine (`IDLE`, `ROLLING_S1`, `HOWZAT`, `ROLLING_S2`, `NOT_OUT`, `OUT_PENDING`, `ROLLING_S3`, `ROLLING_S4`, `ROLLING_S4B`, `RESULT`, `FREE_HIT`, `INNINGS_END`, `MATCH_END`)
-- Each dice stage waits for a button press: Appeal, Continue, Dismissal, Caught Where?
-- HOWZAT! display with fielding team name and animated die during appeal state
-- NOT OUT / OUT result labels with entrance animations
-- Roll mode toggle in match header, persisted to localStorage (`ribi_roll_mode`)
-- Mid-ball mode switching: Manual → Auto queued to end of current ball; Auto → Manual immediate
-- Broadcast mode: slower animations (700ms → 1200ms flicker), 2-second hold before Appeal button appears
-- Free hit banner visible throughout free-hit deliveries in Manual mode
-
-**Auto-Roll mode**
-- All dice stages resolve immediately on Roll press
-- Same underlying engine, no waiting
-- Default mode for new sessions
-
-**Tension detection**
-- `GET /api/matches/<id>/tension` endpoint
-- Five tension conditions: T20 finish (≤ 2 overs, < 15 runs needed), last wicket, century approach (95+ runs), required rate > 12, tied match (≤ 1 over left)
-- Suggestion banner appears when any condition is met; user can dismiss per-innings
-- Click banner to switch to Manual mode immediately
-- Dismissed suggestions reset at innings change
-
-**Keyboard shortcuts**
-- Space / R: Roll (when idle)
-- A: Appeal (Manual mode, HOWZAT state)
-- C: Continue / not out (Manual mode)
-- D: Dismissal (Manual mode, out pending) or toggle dark mode (otherwise)
-- M: Toggle roll mode (when idle, not AI vs AI)
-- F: Fast-sim current match
-
-**Teams and venues**
-- 10 seeded international teams: England, Australia, India, Pakistan, New Zealand, South Africa, West Indies, Sri Lanka, Bangladesh, Afghanistan
-- 18 venues with home-ground advantage modelling
-- Full player rosters with individual batter and bowler ratings
-
-**Season management**
-- Full season schedule generated on first run
-- Fast-sim: simulate remaining balls in the current match instantly
-- World sim: sim-day and sim-season endpoints for unattended season progression
-- Standings updated after every match: points, NRR, wins, losses, no results
-
-**Statistics and records**
-- Ball-by-ball recording to SQLite (25+ tables)
-- Career batting and bowling aggregates
-- Partnership records
-- All-time records: highest individual scores, best bowling figures, highest team totals
-- Head-to-head team records
-
-**API**
-- 71 REST endpoints covering match lifecycle, world simulation, statistics, and records
-- All responses in JSON
-
-**Frontend**
-- Single-page application (vanilla JavaScript, no build step)
-- Live scorecards updating after every ball
-- Ball-by-ball commentary feed
-- Dark mode toggle
-- Broadcast mode
-- CSS animations: die face flicker, HOWZAT entrance/flash, appeal pulse, not-out/out result entrances, free hit glow, tension suggestion pulse
-
-**Packaging**
-- PyInstaller spec (`ribi.spec`) for single-binary distribution
-- Dev config excluded from packaged builds
-- `console=False` for clean desktop experience
-
-### Fixed (pre-release review — all BLOCKER and MINOR issues resolved)
-
-- **BLOCKER-1**: `bi.runs_scored` reference corrected — was referencing wrong variable in innings total calculation
-- **BLOCKER-2**: Stale table names removed — several queries referenced table names from an earlier schema revision
-- **MINOR-1**: SQL injection risk eliminated — parameterised queries used throughout `app.py`
-- **MINOR-2**: NRR calculation corrected — net run rate now uses overs faced correctly in edge cases (all-out vs overs complete)
-- **MINOR-3**: `dir()` anti-pattern removed — config loading now uses explicit attribute access
-- **MINOR-4**: localStorage persistence implemented — roll mode and dark mode preference now survive page refresh
-
-### Deferred (POLISH — no impact on gameplay or correctness)
-
-- Follow-on enforcement in Test matches (threshold tracked, not yet enforced)
-- Duplicate import statements in `app.py` (cosmetic)
-- Schedule pagination for very long seasons
-- `PRAGMA foreign_keys = ON` not present in `schema.sql` (set at connection time in `database.py`)
-
-### Technical
-
-- Python 3.14.3 (GCC 15.2.1), Flask 3.1.3, SQLite via built-in `sqlite3`
-- 118 automated tests passing in the current suite
+- core HOWZAT dice engine
+- manual and auto roll modes
+- live match screen
+- scorecards and commentary
+- season/world simulation
+- SQLite-backed stats and records
+- packaging support
