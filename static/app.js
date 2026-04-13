@@ -7308,6 +7308,7 @@ function _renderWorldOverview(data) {
     : 'international';
   const upcoming = data.upcoming_fixtures || [];
   const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
+  const hasTrackedTeam = !!settings.my_team_id;
   const iccUpcoming = upcoming.filter(f => f.is_icc_event).length;
   const activeSeries = (WorldUI._seriesData || [])
     .filter(s => (s.matches_remaining || 0) > 0)
@@ -7333,9 +7334,17 @@ function _renderWorldOverview(data) {
       </div>
       <div class="world-desk-card">
         <div class="world-desk-label">Your Team</div>
-        <div class="world-desk-value">${myNext ? 'User Controlled' : (settings.my_team_id ? 'Tracking Enabled' : 'AI Only')}</div>
-        <div class="world-desk-sub">${myNext ? `Next playable fixture: ${escHtml(myNext.scheduled_date || '')}` : (settings.my_team_id ? 'No flagged fixture on the short horizon' : 'No user-controlled side selected')}</div>
+        <div class="world-desk-value">${myNext ? 'User Controlled' : (hasTrackedTeam ? 'Tracking Enabled' : 'AI Only')}</div>
+        <div class="world-desk-sub">${myNext ? `Next playable fixture: ${escHtml(myNext.scheduled_date || '')}` : (hasTrackedTeam ? 'No flagged fixture on the short horizon' : 'No user-controlled side selected')}</div>
       </div>`;
+  }
+
+  const nextMyMatchBtn = document.getElementById('btn-world-next-my-match');
+  if (nextMyMatchBtn) {
+    nextMyMatchBtn.disabled = !hasTrackedTeam;
+    nextMyMatchBtn.title = hasTrackedTeam
+      ? 'Simulate until your next user-controlled fixture'
+      : 'Set a user-controlled team in this world to use My Next Match';
   }
 
   // Next fixture card
@@ -7697,6 +7706,15 @@ async function playWorldFixture(fixtureId) {
 async function simulateWorld(target) {
   const id = WorldUI.activeWorldId;
   if (!id) return;
+  const settings = (() => {
+    try { return JSON.parse(WorldUI._worldData?.world?.settings_json || '{}'); }
+    catch (_) { return {}; }
+  })();
+
+  if (target === 'next_my_match' && !settings.my_team_id) {
+    alert('Set a user-controlled team for this world before using My Next Match.');
+    return;
+  }
 
   const body = { target };
   if (target === 'date') {

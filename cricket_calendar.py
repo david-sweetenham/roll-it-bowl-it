@@ -948,13 +948,17 @@ def _schedule_bilateral(team_ids, id_to_name, venue_lookup, sched,
 
         series_name_base = special.get('name', f'{n1} v {n2}') if special else f'{n1} v {n2}'
         tmpl             = _pick_template(n1, n2, density, special)
+        host_label_1     = f'{n1} v {n2}'
+        host_label_2     = f'{n2} v {n1}'
+        series_name_1    = series_name_base if series_name_base == host_label_1 else f'{series_name_base} — {host_label_1}'
+        series_name_2    = series_name_base if series_name_base == host_label_2 else f'{series_name_base} — {host_label_2}'
 
         # Tour 1: t1 hosts t2 — search from start of period
         series_ctr[0] += 1
         key1_str   = f's{series_ctr[0]:04d}'
         fxs, t1end = _schedule_one_tour(
             t1, t2, n1, n2, tmpl,
-            f'{series_name_base} — {n1} v {n2}',
+            series_name_1,
             key1_str,
             start_date, end_date, venue_lookup, sched,
         )
@@ -976,7 +980,7 @@ def _schedule_bilateral(team_ids, id_to_name, venue_lookup, sched,
             key2_str   = f's{series_ctr[0]:04d}'
             fxs2, _ = _schedule_one_tour(
                 t2, t1, n2, n1, tmpl,
-                f'{series_name_base} — {n2} v {n1}',
+                series_name_2,
                 key2_str,
                 mid_date, end_date, venue_lookup, sched,
             )

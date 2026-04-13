@@ -1590,6 +1590,16 @@ def simulate_world_to(target, fixtures, world_state):
     target_date  = world_state.get('target_date')
     current_date = world_state.get('current_date', '')
 
+    if target == 'next_my_match' and not my_team_id:
+        return {
+            'results': [],
+            'new_current_date': current_date,
+            'paused_at_fixture': None,
+            'matches_simulated': 0,
+            'updated_player_states': world_state.get('player_states', {}),
+            'truncated': False,
+        }
+
     results    = []
     paused_at  = None
     truncated  = False

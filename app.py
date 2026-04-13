@@ -2746,6 +2746,7 @@ def create_world():
         fallback_venue = venues[0]['id'] if venues else None
 
         # ── Build domestic team lookup (for leagues opted in) ─────────────────
+        selected_team_ids = set(team_ids)
         domestic_team_list = []
         if domestic_leagues and cal_style == 'realistic':
             all_leagues_needed = set()
@@ -2762,6 +2763,11 @@ def create_world():
                     list(all_leagues_needed)
                 ).fetchall()
                 domestic_team_list = [dict(r) for r in dom_rows]
+                if world_scope == 'domestic':
+                    domestic_team_list = [
+                        dt for dt in domestic_team_list
+                        if dt.get('team_id') in selected_team_ids
+                    ]
                 # Also add their home venues to the fallback map
                 for dt in domestic_team_list:
                     if dt.get('home_venue_id'):
@@ -3168,8 +3174,12 @@ def world_regenerate_calendar(id):
         # Get teams from settings
         settings_json = world.get('settings_json') or '{}'
         settings      = json.loads(settings_json)
-        team_ids      = settings.get('team_ids', [])
-        my_team_id    = settings.get('my_team_id')
+        team_ids         = settings.get('team_ids', [])
+        my_team_id       = settings.get('my_team_id')
+        domestic_leagues = settings.get('domestic_leagues', [])
+        world_scope      = settings.get('world_scope', 'international')
+        if world_scope not in ('international', 'domestic', 'combined'):
+            world_scope = 'international'
 
         if not team_ids:
             return err('No teams found in world settings')
@@ -3190,14 +3200,44 @@ def world_regenerate_calendar(id):
         venues         = database.get_venues(db)
         fallback_venue = venues[0]['id'] if venues else None
 
+        selected_team_ids = set(team_ids)
+        domestic_team_list = []
+        if domestic_leagues and style == 'realistic':
+            all_leagues_needed = set()
+            for comp_key in domestic_leagues:
+                comp = cricket_calendar.DOMESTIC_COMPETITIONS.get(comp_key)
+                if comp:
+                    all_leagues_needed.add(comp['league'])
+            if all_leagues_needed:
+                dom_rows = db.execute(
+                    "SELECT t.id as team_id, t.name, t.league, t.home_venue_id "
+                    "FROM teams t WHERE t.league IN ({})".format(
+                        ','.join('?' * len(all_leagues_needed))
+                    ),
+                    list(all_leagues_needed)
+                ).fetchall()
+                domestic_team_list = [dict(r) for r in dom_rows]
+                if world_scope == 'domestic':
+                    domestic_team_list = [
+                        dt for dt in domestic_team_list
+                        if dt.get('team_id') in selected_team_ids
+                    ]
+                for dt in domestic_team_list:
+                    if dt.get('home_venue_id'):
+                        team_venues.setdefault(dt['team_id'], dt['home_venue_id'])
+
+        calendar_team_ids = team_ids if world_scope != 'domestic' else []
+
         if style == 'realistic':
             raw_fixtures = cricket_calendar.generate_realistic_calendar(
-                team_ids       = team_ids,
+                team_ids       = calendar_team_ids,
                 team_names     = team_name_map,
                 venue_ids      = venue_name_map,
                 start_date_str = from_date,
                 density        = density,
                 years          = years,
+                domestic_leagues = domestic_leagues or None,
+                domestic_teams   = domestic_team_list or None,
             )
         else:
             raw_fixtures = game_engine.generate_fixture_calendar(
@@ -3344,6 +3384,14 @@ def simulate_world(id):
         world = database.get_world(db, id)
         if not world:
             return err('World not found', 404)
+        settings = {}
+        if world.get('settings_json'):
+            try:
+                settings = json.loads(world['settings_json'])
+            except Exception:
+                settings = {}
+        if target == 'next_my_match' and not settings.get('my_team_id'):
+            return err('No user-controlled team selected for this world')
 
         world_state = _build_world_state(db, id)
         if not world_state:

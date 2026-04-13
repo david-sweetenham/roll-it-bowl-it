@@ -204,6 +204,24 @@ def test_4_date_and_digest():
            ok, detail)
 
 
+# ── Test 5: next_my_match with no my_team_id simulates nothing ────────────────
+
+def test_5_next_my_match_without_team():
+    """simulate_world_to('next_my_match') should not advance when no user team is set."""
+    random.seed(55)
+    world_state = _make_world_state([1, 2, 3], my_team_id=None)
+    fixtures = _make_fixtures([(1, 2), (2, 3), (1, 3)])
+
+    result = game_engine.simulate_world_to('next_my_match', fixtures, world_state)
+    ok = (
+        result['matches_simulated'] == 0
+        and result['paused_at_fixture'] is None
+        and result['results'] == []
+    )
+    _check('Test 5: simulate_world_to(next_my_match) requires a user team',
+           ok, f"matches_simulated={result['matches_simulated']}, paused_at={result['paused_at_fixture']}")
+
+
 # ── Run all tests ──────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -211,6 +229,7 @@ if __name__ == '__main__':
     test_2_next_match()
     test_3_end_of_series()
     test_4_date_and_digest()
+    test_5_next_my_match_without_team()
 
     print()
     print(f'Results: {_passed} passed, {_failed} failed')

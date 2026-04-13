@@ -272,6 +272,28 @@ def test_required_fields():
     )
 
 
+# ── Test 11: Bilateral series names are not duplicated ───────────────────────
+
+def test_series_names_not_duplicated():
+    nations = ['England', 'Scotland', 'Ireland', 'Netherlands']
+    _, _, fixtures = _make_world(nations, density='moderate', years=2)
+
+    duplicated = []
+    for fx in fixtures:
+        name = fx.get('series_name') or ''
+        if ' — ' not in name:
+            continue
+        left, right = name.split(' — ', 1)
+        if left == right:
+            duplicated.append(name)
+
+    _check(
+        'Test 11: Bilateral series names are not duplicated',
+        len(duplicated) == 0,
+        f'Found {len(duplicated)} duplicated name(s): {duplicated[:3]}',
+    )
+
+
 # ── Runner ─────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -286,6 +308,7 @@ if __name__ == '__main__':
     test_format_order_within_series()
     test_fixture_count_vs_density()
     test_required_fields()
+    test_series_names_not_duplicated()
 
     print(f'\nResults: {_passed} passed, {_failed} failed')
     if _failed == 0:
