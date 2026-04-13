@@ -43,6 +43,8 @@ const BroadcastState = {
   paused:              false, // between-match pause
   speed:               'normal',
   autoAdvance:         true,
+  channelMode:         false, // true = always-on, auto-refills when queue runs out
+  _totalPlayed:        0,     // running count across all refills in channel mode
   _interstitialTimeout: null,
   _waitingForResume:   false,
 };
@@ -3018,17 +3020,29 @@ function setAiSpeed(speed) {
 
 const _BROADCAST_INTERSTITIAL_MS = 4000; // countdown between matches
 
-async function startBroadcast(worldId, scope) {
+async function startBroadcast(worldId, scope, { channelMode = false } = {}) {
   const res = await api('GET', `/api/worlds/${worldId}/broadcast/queue?scope=${encodeURIComponent(scope)}`);
   if (!res || !res.fixtures?.length) {
+    if (channelMode) {
+      // Channel mode: try extending calendar then retry
+      await api('POST', `/api/worlds/${worldId}/extend-calendar`, { years: 1 });
+      const res2 = await api('GET', `/api/worlds/${worldId}/broadcast/queue?scope=${encodeURIComponent(scope)}`);
+      if (!res2?.fixtures?.length) {
+        alert('No fixtures available — try generating the calendar first.');
+        return;
+      }
+      return startBroadcast(worldId, scope, { channelMode });
+    }
     alert('No upcoming scheduled fixtures found for this scope.');
     return;
   }
-  BroadcastState.active        = true;
-  BroadcastState.worldId       = worldId;
-  BroadcastState.queue         = res.fixtures;
-  BroadcastState.currentIndex  = -1;
-  BroadcastState.paused        = false;
+  BroadcastState.active         = true;
+  BroadcastState.worldId        = worldId;
+  BroadcastState.queue          = res.fixtures;
+  BroadcastState.currentIndex   = -1;
+  BroadcastState.paused         = false;
+  BroadcastState.channelMode    = channelMode;
+  BroadcastState._totalPlayed   = 0;
   BroadcastState.currentMatchId = null;
   BroadcastState._waitingForResume = false;
   setAiSpeed(BroadcastState.speed);
@@ -3043,11 +3057,16 @@ function _broadcastNext() {
   }
   BroadcastState.currentIndex++;
   const fixture = BroadcastState.queue[BroadcastState.currentIndex];
-  if (!fixture) { _broadcastComplete(); return; }
+  if (!fixture) {
+    if (BroadcastState.channelMode) { _broadcastRefill(); return; }
+    _broadcastComplete();
+    return;
+  }
+  const isChannel = BroadcastState.channelMode;
   _broadcastShowInterstitial('up-next', {
     fixture,
-    idx:   BroadcastState.currentIndex + 1,
-    total: BroadcastState.queue.length,
+    idx:   BroadcastState._totalPlayed + BroadcastState.currentIndex + 1,
+    total: isChannel ? null : BroadcastState.queue.length,
   });
 }
 
@@ -3063,7 +3082,7 @@ function _broadcastShowInterstitial(type, data) {
       ? `<div class="bcast-series">${escHtml(f.series_name)}</div>` : '';
     overlay.innerHTML = `
       <div class="bcast-card bcast-up-next">
-        <div class="bcast-kicker">Up Next &middot; ${data.idx} of ${data.total}</div>
+        <div class="bcast-kicker">Up Next &middot; ${data.total != null ? `${data.idx} of ${data.total}` : `Match ${data.idx}`}</div>
         <div class="bcast-teams">
           <span class="bcast-team">${escHtml(f.team1_name || '?')}</span>
           <span class="bcast-vs">vs</span>
@@ -3104,12 +3123,16 @@ function _broadcastShowInterstitial(type, data) {
              </div>`).join('')}
          </div>` : '';
     const nextFix = BroadcastState.queue[BroadcastState.currentIndex + 1];
+    const isChannel = BroadcastState.channelMode;
+    const matchNum  = BroadcastState._totalPlayed + BroadcastState.currentIndex + 1;
     const nextHtml = nextFix
       ? `<div class="bcast-next-preview">Up next: <strong>${escHtml(nextFix.team1_name || '?')}</strong> vs <strong>${escHtml(nextFix.team2_name || '?')}</strong></div>`
-      : `<div class="bcast-next-preview bcast-next-last">Broadcast complete after this match.</div>`;
+      : isChannel
+        ? `<div class="bcast-next-preview">Fetching next fixtures…</div>`
+        : `<div class="bcast-next-preview bcast-next-last">Broadcast complete after this match.</div>`;
     overlay.innerHTML = `
       <div class="bcast-card bcast-full-time">
-        <div class="bcast-kicker">Full Time &middot; ${BroadcastState.currentIndex + 1} of ${BroadcastState.queue.length}</div>
+        <div class="bcast-kicker">Full Time &middot; ${isChannel ? `Match ${matchNum}` : `${BroadcastState.currentIndex + 1} of ${BroadcastState.queue.length}`}</div>
         <div class="bcast-result">${escHtml(r.result_string || 'Match complete')}</div>
         ${r.player_of_match_name ? `<div class="bcast-pom">Player of the Match: <strong>${escHtml(r.player_of_match_name)}</strong></div>` : ''}
         ${rankHtml}
@@ -3136,6 +3159,17 @@ function _broadcastShowInterstitial(type, data) {
         <div class="bcast-complete-msg">${data.total} match${data.total !== 1 ? 'es' : ''} played.</div>
         <div class="bcast-controls">
           <button class="btn btn-primary" onclick="broadcastAbort()">Back to World</button>
+        </div>
+      </div>`;
+
+  } else if (type === 'channel-wrap') {
+    overlay.innerHTML = `
+      <div class="bcast-card bcast-channel-wrap">
+        <div class="bcast-kicker">📡 World Channel</div>
+        <div class="bcast-channel-msg">Fetching next fixtures…</div>
+        <div class="bcast-channel-spinner"></div>
+        <div class="bcast-controls" style="margin-top:20px">
+          <button class="btn btn-ghost btn-sm" onclick="broadcastAbort()">✕ End Channel</button>
         </div>
       </div>`;
   }
@@ -3197,6 +3231,7 @@ async function _broadcastMatchComplete(matchId) {
   BroadcastState.currentMatchId = null;
   if (!res) { broadcastAbort(); return; }
 
+  BroadcastState._totalPlayed++;   // track running total for channel mode counter
   _broadcastShowInterstitial('full-time', {
     result:   res.result,
     rankings: res.rankings,
@@ -3206,8 +3241,38 @@ async function _broadcastMatchComplete(matchId) {
 
 function _broadcastComplete() {
   BroadcastState.active = false;
-  const total = BroadcastState.queue.length;
+  const total = BroadcastState._totalPlayed;
   _broadcastShowInterstitial('complete', { total });
+}
+
+async function _broadcastRefill() {
+  _broadcastShowInterstitial('channel-wrap', {});
+
+  const worldId = BroadcastState.worldId;
+
+  // Try fetching the next batch from the current world date
+  let res = await api('GET', `/api/worlds/${worldId}/broadcast/queue?scope=next20`);
+
+  if (!res?.fixtures?.length) {
+    // Extend calendar by one year then try again
+    await api('POST', `/api/worlds/${worldId}/extend-calendar`, { years: 1 });
+    res = await api('GET', `/api/worlds/${worldId}/broadcast/queue?scope=next20`);
+  }
+
+  if (!res?.fixtures?.length) {
+    // Calendar genuinely exhausted — end channel gracefully
+    BroadcastState.channelMode = false;
+    _broadcastComplete();
+    return;
+  }
+
+  // Carry total played forward, reset queue index
+  BroadcastState._totalPlayed += BroadcastState.queue.length > 0
+    ? 0   // already incremented per match in _broadcastMatchComplete
+    : 0;
+  BroadcastState.queue        = res.fixtures;
+  BroadcastState.currentIndex = -1;
+  _broadcastNext();
 }
 
 function broadcastPause() {
@@ -3271,11 +3336,13 @@ function _broadcastUpdateControlBar() {
   }
   if (!BroadcastState.active) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  const idx   = BroadcastState.currentIndex + 1;
+  bar.classList.toggle('channel-mode', BroadcastState.channelMode);
+  const isChannel = BroadcastState.channelMode;
+  const idx   = BroadcastState._totalPlayed + BroadcastState.currentIndex + 1;
   const total = BroadcastState.queue.length;
   const speeds = ['slow', 'normal', 'fast', 'instant'];
   bar.innerHTML = `
-    <span class="bcast-bar-label">📡 ${idx}/${total}</span>
+    <span class="bcast-bar-label">📡 ${isChannel ? `Match ${idx}` : `${idx}/${total}`}${isChannel ? ' ∞' : ''}</span>
     <div class="bcast-bar-speeds">
       ${speeds.map(s => `<button class="btn-bcast-speed ${s === BroadcastState.speed ? 'active' : ''}" onclick="broadcastSetSpeed('${s}')">${s}</button>`).join('')}
     </div>
@@ -3314,6 +3381,13 @@ function showBroadcastPicker() {
       <div class="bcast-picker-options">
         ${yearOptions}
       </div>
+      <div class="bcast-picker-section-label">Always-On Channel</div>
+      <div class="bcast-picker-channel">
+        <button class="btn btn-accent bcast-channel-btn" onclick="_bcastPickChannel()">
+          📡 Start Channel
+        </button>
+        <span class="bcast-channel-desc">Plays continuously — extends the calendar automatically when fixtures run out.</span>
+      </div>
       <div class="bcast-picker-speed">
         <span class="bcast-picker-speed-label">Speed:</span>
         ${['slow', 'normal', 'fast', 'instant'].map(s =>
@@ -3330,6 +3404,11 @@ function showBroadcastPicker() {
 function _bcastPickStart(scope) {
   document.getElementById('broadcast-picker')?.remove();
   startBroadcast(WorldUI.activeWorldId, scope);
+}
+
+function _bcastPickChannel() {
+  document.getElementById('broadcast-picker')?.remove();
+  startBroadcast(WorldUI.activeWorldId, 'next20', { channelMode: true });
 }
 
 // ── Bowling change panel ────────────────────────────────────────────────────────

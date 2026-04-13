@@ -6640,3 +6640,64 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
   font-size: var(--fs-xs);
   color: var(--text-muted);
 }
+
+/* ── Always-On Channel additions ─────────────────────────────────────────── */
+
+.bcast-channel-wrap .bcast-channel-msg {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  margin: 12px 0 16px;
+}
+
+/* Pulsing dot spinner */
+.bcast-channel-spinner {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.bcast-channel-spinner::before,
+.bcast-channel-spinner::after,
+.bcast-channel-spinner {
+  /* use a pseudo approach via box-shadow dots */
+}
+.bcast-channel-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 18px 0 0 var(--accent), 36px 0 0 var(--accent);
+  animation: bcast-dots 1s infinite ease-in-out alternate;
+  margin: 0 auto;
+}
+@keyframes bcast-dots {
+  0%   { opacity: 1; }
+  33%  { box-shadow: 18px 0 0 rgba(var(--accent-rgb, 76,175,80),.3), 36px 0 0 var(--accent); }
+  66%  { box-shadow: 18px 0 0 var(--accent), 36px 0 0 rgba(var(--accent-rgb, 76,175,80),.3); }
+  100% { opacity: .4; }
+}
+
+/* Channel picker row */
+.bcast-picker-channel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.bcast-channel-btn {
+  width: 100%;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.bcast-channel-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Channel mode: accent border on control bar */
+.broadcast-control-bar.channel-mode {
+  border-top-color: var(--accent);
+  box-shadow: 0 -2px 12px rgba(76,175,80,.25);
+}
