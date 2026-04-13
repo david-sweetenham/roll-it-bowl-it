@@ -3942,6 +3942,252 @@ def world_records(id):
         database.close_db(db)
 
 
+# ── Broadcast World ───────────────────────────────────────────────────────────
+
+@app.route('/api/worlds/<int:id>/broadcast/queue', methods=['GET'])
+def world_broadcast_queue(id):
+    """Ordered list of upcoming scheduled fixtures for broadcast playthrough."""
+    scope = request.args.get('scope', 'next5')
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+
+        from datetime import date as _date
+        today = world.get('current_date') or _date.today().isoformat()
+
+        limit = 10
+        extra_where = ''
+        extra_params: list = []
+
+        if scope.startswith('next'):
+            try:
+                limit = int(scope[4:]) if scope[4:] else 5
+            except ValueError:
+                limit = 5
+        elif scope.startswith('series:'):
+            extra_where = ' AND f.series_name = ?'
+            extra_params = [scope[7:]]
+            limit = 200
+        elif scope.startswith('to_date:'):
+            extra_where = ' AND f.scheduled_date <= ?'
+            extra_params = [scope[8:]]
+            limit = 200
+
+        rows = db.execute(
+            "SELECT f.id, f.team1_id, f.team2_id, f.scheduled_date, f.format, f.status, "
+            " f.is_user_match, f.series_name, f.match_number_in_series, f.series_length, "
+            " f.venue_id, f.match_id, "
+            " t1.name as team1_name, t1.short_code as team1_code, "
+            " t2.name as team2_name, t2.short_code as team2_code, "
+            " v.name as venue_name, v.city as venue_city "
+            "FROM fixtures f "
+            "JOIN teams t1 ON f.team1_id = t1.id "
+            "JOIN teams t2 ON f.team2_id = t2.id "
+            "LEFT JOIN venues v ON f.venue_id = v.id "
+            f"WHERE f.world_id = ? AND f.scheduled_date >= ? AND f.status = 'scheduled'{extra_where} "
+            "ORDER BY f.scheduled_date, f.id "
+            f"LIMIT {limit}",
+            [id, today] + extra_params,
+        ).fetchall()
+
+        return jsonify({
+            'fixtures': [dict(r) for r in rows],
+            'world_id': id,
+            'from_date': today,
+            'scope': scope,
+        })
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/fixtures/<int:fid>/start-live', methods=['POST'])
+def fixture_start_live(id, fid):
+    """Create a live match for a world fixture (auto-toss included)."""
+    import random as _random
+    from datetime import date as _date
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+
+        row = db.execute(
+            "SELECT f.id, f.team1_id, f.team2_id, f.scheduled_date, f.format, "
+            " f.venue_id, f.match_id, f.series_id, f.series_name "
+            "FROM fixtures f WHERE f.id = ? AND f.world_id = ?",
+            (fid, id),
+        ).fetchone()
+        if not row:
+            return err('Fixture not found', 404)
+        fixture = dict(row)
+
+        # Return existing in-progress match rather than create a duplicate
+        if fixture.get('match_id'):
+            existing = database.get_match(db, fixture['match_id'])
+            if existing and existing.get('status') == 'in_progress':
+                state = database.get_match_state(db, fixture['match_id'])
+                return jsonify({'match_id': fixture['match_id'], 'match': state, 'reused': True})
+
+        # Venue fallback
+        venue_id = fixture.get('venue_id')
+        if not venue_id:
+            fb = db.execute("SELECT id FROM venues ORDER BY RANDOM() LIMIT 1").fetchone()
+            venue_id = fb['id'] if fb else None
+
+        fmt = fixture.get('format', 'T20')
+        if fmt not in ('Test', 'ODI', 'T20'):
+            fmt = 'T20'
+
+        match_id = database.create_match(db, {
+            'world_id':     id,
+            'format':       fmt,
+            'venue_id':     venue_id,
+            'match_date':   fixture.get('scheduled_date') or _date.today().isoformat(),
+            'team1_id':     fixture['team1_id'],
+            'team2_id':     fixture['team2_id'],
+            'player_mode':  'ai_vs_ai',
+            'canon_status': 'canon',
+            'series_id':    fixture.get('series_id'),
+        })
+        database.update_fixture(db, fid, {'match_id': match_id})
+
+        # Auto-toss
+        toss_winner_id = _random.choice([fixture['team1_id'], fixture['team2_id']])
+        toss_choice    = _random.choice(['bat', 'field'])
+        other_id = fixture['team2_id'] if toss_winner_id == fixture['team1_id'] else fixture['team1_id']
+        batting_team_id = toss_winner_id if toss_choice == 'bat' else other_id
+        bowling_team_id = other_id       if toss_choice == 'bat' else toss_winner_id
+
+        database.update_match(db, match_id, {
+            'toss_winner_id': toss_winner_id,
+            'toss_choice':    toss_choice,
+        })
+        _start_innings(db, match_id, 1, batting_team_id, bowling_team_id)
+
+        state = database.get_match_state(db, match_id)
+        return jsonify({'match_id': match_id, 'match': state,
+                        'fixture': fixture, 'reused': False}), 201
+    finally:
+        database.close_db(db)
+
+
+def _broadcast_auto_pom(db, match_id):
+    """Pick POM from live scorecard: highest scorer, or most wickets as tie-break."""
+    all_innings = database.get_innings(db, match_id)
+    best_pid, best_runs, best_wkts = None, 0, 0
+    for inn in all_innings:
+        for b in database.get_batter_innings(db, inn['id']):
+            if (b.get('runs') or 0) > best_runs:
+                best_runs = b['runs']
+                best_pid  = b['player_id']
+        for bw in database.get_bowler_innings(db, inn['id']):
+            if (bw.get('wickets') or 0) > best_wkts:
+                best_wkts = bw['wickets']
+                if best_pid is None:
+                    best_pid = bw['player_id']
+    return best_pid
+
+
+@app.route('/api/matches/<int:id>/broadcast-complete', methods=['POST'])
+def broadcast_complete_match(id):
+    """Auto-complete a broadcast match: pick POM and update world calendar + rankings."""
+    db = database.get_db()
+    try:
+        match = database.get_match(db, id)
+        if not match:
+            return err('Match not found', 404)
+
+        if match['status'] != 'complete':
+            all_innings = database.get_innings(db, id)
+            _calculate_and_complete_match(db, id, match, all_innings)
+            post = database.get_match(db, id)
+            if not post.get('result_type'):
+                return err('Result could not be determined', 400)
+
+        pom_id = _broadcast_auto_pom(db, id)
+        database.update_match(db, id, {
+            'status': 'complete',
+            **(({'player_of_match_id': pom_id}) if pom_id else {}),
+        })
+
+        updated = database.get_match(db, id)
+        all_innings = database.get_innings(db, id)
+        result_string = _build_result_description(updated, all_innings)
+
+        world_id = updated.get('world_id')
+        rankings = []
+        if world_id:
+            _check_world_records(db, world_id, id, updated)
+
+            # Mark fixture complete
+            fx_row = db.execute(
+                "SELECT id FROM fixtures WHERE match_id=? AND world_id=?", (id, world_id)
+            ).fetchone()
+            if fx_row:
+                database.update_fixture(db, fx_row['id'], {'status': 'complete'})
+
+            # Update world rankings for this format
+            fmt = updated.get('format', 'T20')
+            rank_rows = db.execute(
+                "SELECT team_id, points, matches_counted FROM world_rankings "
+                "WHERE world_id=? AND format=?", (world_id, fmt)
+            ).fetchall()
+            cur_pts  = {r['team_id']: r['points']          for r in rank_rows}
+            cur_mc   = {r['team_id']: r['matches_counted']  for r in rank_rows}
+
+            t1, t2 = updated.get('team1_id'), updated.get('team2_id')
+            w_id   = updated.get('winning_team_id')
+            l_id   = (t2 if w_id == t1 else t1) if w_id else None
+            new_pts = game_engine.update_rankings(cur_pts, {
+                'winning_team_id': w_id,
+                'losing_team_id':  l_id,
+                'team1_id':        t1,
+                'team2_id':        t2,
+                'is_draw':         updated.get('result_type') == 'draw',
+            })
+            sorted_teams = sorted(new_pts.items(), key=lambda x: -x[1])
+            for pos, (tid, pts) in enumerate(sorted_teams, 1):
+                mc = cur_mc.get(tid, 0) + (1 if tid in (t1, t2) else 0)
+                database.upsert_world_ranking(db, world_id, tid, fmt, pts, pos, mc)
+
+            # Advance world current_date
+            md = updated.get('match_date') or ''
+            world = database.get_world(db, world_id)
+            if md and md >= (world.get('current_date') or ''):
+                database.update_world(db, world_id, {'current_date': md})
+
+            # Rankings for response
+            rank_rows2 = db.execute(
+                "SELECT wr.team_id, t.name as team_name, t.short_code, wr.points, wr.position "
+                "FROM world_rankings wr JOIN teams t ON wr.team_id = t.id "
+                "WHERE wr.world_id=? AND wr.format=? ORDER BY wr.position LIMIT 8",
+                (world_id, fmt)
+            ).fetchall()
+            rankings = [dict(r) for r in rank_rows2]
+
+        db.commit()
+        return jsonify({
+            'success': True,
+            'result': {
+                'result_type':           updated.get('result_type'),
+                'winning_team_name':     updated.get('winning_team_name'),
+                'winning_team_id':       updated.get('winning_team_id'),
+                'team1_id':              updated.get('team1_id'),
+                'team2_id':              updated.get('team2_id'),
+                'margin_runs':           updated.get('margin_runs'),
+                'margin_wickets':        updated.get('margin_wickets'),
+                'player_of_match_name':  updated.get('player_of_match_name'),
+                'result_string':         result_string,
+            },
+            'rankings': rankings,
+            'format':   updated.get('format', 'T20'),
+        })
+    finally:
+        database.close_db(db)
+
+
 @app.route('/api/worlds/<int:id>/simulate', methods=['POST'])
 def simulate_world(id):
     import json

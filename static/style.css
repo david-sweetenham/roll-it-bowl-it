@@ -6371,3 +6371,263 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
   color: var(--text-muted);
   line-height: 1.55;
 }
+
+/* ── Broadcast World ──────────────────────────────────────────────────────── */
+
+/* Full-viewport interstitial overlay */
+.broadcast-interstitial {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(6px);
+}
+.broadcast-interstitial.hidden { display: none; }
+
+/* Card base */
+.bcast-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 36px 40px 28px;
+  max-width: 520px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0,0,0,.6);
+}
+
+.bcast-kicker {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+
+/* Up Next card */
+.bcast-up-next .bcast-teams {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.bcast-team {
+  font-family: var(--font-score);
+  font-size: clamp(22px, 4vw, 34px);
+  font-weight: 700;
+  color: var(--text);
+}
+.bcast-vs {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.bcast-series {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  font-style: italic;
+}
+.bcast-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.bcast-meta-item {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* Full Time card */
+.bcast-result {
+  font-family: var(--font-score);
+  font-size: clamp(18px, 3vw, 26px);
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.bcast-pom {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+.bcast-rankings {
+  margin: 16px 0;
+  text-align: left;
+}
+.bcast-section-label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.bcast-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.bcast-rank-pos {
+  width: 20px;
+  color: var(--text-muted);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.bcast-rank-team { flex: 1; color: var(--text); }
+.bcast-rank-pts  { color: var(--accent); font-weight: 700; }
+
+.bcast-next-preview {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin: 12px 0 4px;
+}
+.bcast-next-last { color: var(--accent); }
+
+/* Complete card */
+.bcast-complete-msg {
+  font-size: var(--fs-lg);
+  color: var(--text);
+  margin-bottom: 20px;
+}
+
+/* Progress bar (countdown) */
+.bcast-progress-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 20px 0 16px;
+}
+.bcast-progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Interstitial button row */
+.bcast-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── Broadcast Control Bar (persistent, bottom of viewport) ───────────────── */
+.broadcast-control-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 8500;
+  background: rgba(10, 18, 12, 0.95);
+  border-top: 1px solid var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  font-size: var(--fs-xs);
+}
+.broadcast-control-bar.hidden { display: none; }
+
+.bcast-bar-label {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.bcast-bar-speeds {
+  display: flex;
+  gap: 4px;
+}
+.btn-bcast-speed {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.btn-bcast-speed.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+  font-weight: 700;
+}
+.btn-bcast-ctrl {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.btn-bcast-ctrl:hover { border-color: var(--accent); color: var(--accent); }
+.btn-bcast-ctrl.btn-bcast-end { color: var(--error, #e55); }
+.btn-bcast-ctrl.btn-bcast-end:hover { border-color: var(--error, #e55); }
+.btn-bcast-ctrl.hidden { display: none; }
+
+/* ── Broadcast Scope Picker Modal ─────────────────────────────────────────── */
+.broadcast-picker-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.7);
+  backdrop-filter: blur(4px);
+}
+.bcast-picker-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px 24px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+}
+.bcast-picker-title {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.bcast-picker-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+.bcast-picker-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.bcast-picker-speed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.bcast-picker-speed-label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}

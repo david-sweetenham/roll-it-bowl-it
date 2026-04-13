@@ -33,6 +33,20 @@ const AppState = {
   }
 };
 
+// ── Broadcast World State ─────────────────────────────────────────────────────
+const BroadcastState = {
+  active:              false,
+  worldId:             null,
+  queue:               [],   // ordered fixture objects
+  currentIndex:        -1,
+  currentMatchId:      null,
+  paused:              false, // between-match pause
+  speed:               'normal',
+  autoAdvance:         true,
+  _interstitialTimeout: null,
+  _waitingForResume:   false,
+};
+
 // ── Animation Speed Helper ────────────────────────────────────────────────────
 
 /**
@@ -3000,6 +3014,312 @@ function setAiSpeed(speed) {
   try { localStorage.setItem('ribi_ai_speed', speed); } catch (_) {}
 }
 
+// ── Broadcast World ───────────────────────────────────────────────────────────
+
+const _BROADCAST_INTERSTITIAL_MS = 4000; // countdown between matches
+
+async function startBroadcast(worldId, scope) {
+  const res = await api('GET', `/api/worlds/${worldId}/broadcast/queue?scope=${encodeURIComponent(scope)}`);
+  if (!res || !res.fixtures?.length) {
+    alert('No upcoming scheduled fixtures found for this scope.');
+    return;
+  }
+  BroadcastState.active        = true;
+  BroadcastState.worldId       = worldId;
+  BroadcastState.queue         = res.fixtures;
+  BroadcastState.currentIndex  = -1;
+  BroadcastState.paused        = false;
+  BroadcastState.currentMatchId = null;
+  BroadcastState._waitingForResume = false;
+  setAiSpeed(BroadcastState.speed);
+  _broadcastNext();
+}
+
+function _broadcastNext() {
+  if (BroadcastState.paused) {
+    BroadcastState._waitingForResume = true;
+    _broadcastUpdateControlBar();
+    return;
+  }
+  BroadcastState.currentIndex++;
+  const fixture = BroadcastState.queue[BroadcastState.currentIndex];
+  if (!fixture) { _broadcastComplete(); return; }
+  _broadcastShowInterstitial('up-next', {
+    fixture,
+    idx:   BroadcastState.currentIndex + 1,
+    total: BroadcastState.queue.length,
+  });
+}
+
+function _broadcastShowInterstitial(type, data) {
+  const overlay = _getBroadcastOverlay();
+  overlay.classList.remove('hidden');
+  overlay.dataset.type = type;
+
+  if (type === 'up-next') {
+    const f = data.fixture;
+    const venue = [f.venue_name, f.venue_city].filter(Boolean).join(', ');
+    const seriesLine = f.series_name
+      ? `<div class="bcast-series">${escHtml(f.series_name)}</div>` : '';
+    overlay.innerHTML = `
+      <div class="bcast-card bcast-up-next">
+        <div class="bcast-kicker">Up Next &middot; ${data.idx} of ${data.total}</div>
+        <div class="bcast-teams">
+          <span class="bcast-team">${escHtml(f.team1_name || '?')}</span>
+          <span class="bcast-vs">vs</span>
+          <span class="bcast-team">${escHtml(f.team2_name || '?')}</span>
+        </div>
+        ${seriesLine}
+        <div class="bcast-meta">
+          <span class="badge badge-${(f.format || '').toLowerCase()}">${escHtml(f.format || '')}</span>
+          ${venue ? `<span class="bcast-meta-item">${escHtml(venue)}</span>` : ''}
+          <span class="bcast-meta-item">${escHtml(f.scheduled_date || '')}</span>
+        </div>
+        <div class="bcast-progress-bar"><div class="bcast-progress-fill" id="bcast-progress-fill"></div></div>
+        <div class="bcast-controls">
+          <button class="btn btn-ghost btn-sm" onclick="broadcastPause()">⏸ Pause</button>
+          <button class="btn btn-primary btn-sm" onclick="_broadcastStartFixture()">▶ Play Now</button>
+          <button class="btn btn-ghost btn-sm" onclick="broadcastAbort()">✕ End</button>
+        </div>
+      </div>`;
+    requestAnimationFrame(() => {
+      const fill = document.getElementById('bcast-progress-fill');
+      if (fill) { fill.style.transition = `width ${_BROADCAST_INTERSTITIAL_MS}ms linear`; fill.style.width = '100%'; }
+    });
+    if (BroadcastState.autoAdvance) {
+      BroadcastState._interstitialTimeout = setTimeout(_broadcastStartFixture, _BROADCAST_INTERSTITIAL_MS);
+    }
+
+  } else if (type === 'full-time') {
+    const r = data.result || {};
+    const rankings = data.rankings || [];
+    const rankHtml = rankings.length
+      ? `<div class="bcast-rankings">
+           <div class="bcast-section-label">${escHtml(data.format || '')} Rankings</div>
+           ${rankings.slice(0, 5).map((rk, i) => `
+             <div class="bcast-rank-row">
+               <span class="bcast-rank-pos">${i + 1}</span>
+               <span class="bcast-rank-team">${escHtml(rk.team_name || '')}</span>
+               <span class="bcast-rank-pts">${(rk.points ?? 0).toFixed(1)}</span>
+             </div>`).join('')}
+         </div>` : '';
+    const nextFix = BroadcastState.queue[BroadcastState.currentIndex + 1];
+    const nextHtml = nextFix
+      ? `<div class="bcast-next-preview">Up next: <strong>${escHtml(nextFix.team1_name || '?')}</strong> vs <strong>${escHtml(nextFix.team2_name || '?')}</strong></div>`
+      : `<div class="bcast-next-preview bcast-next-last">Broadcast complete after this match.</div>`;
+    overlay.innerHTML = `
+      <div class="bcast-card bcast-full-time">
+        <div class="bcast-kicker">Full Time &middot; ${BroadcastState.currentIndex + 1} of ${BroadcastState.queue.length}</div>
+        <div class="bcast-result">${escHtml(r.result_string || 'Match complete')}</div>
+        ${r.player_of_match_name ? `<div class="bcast-pom">Player of the Match: <strong>${escHtml(r.player_of_match_name)}</strong></div>` : ''}
+        ${rankHtml}
+        ${nextHtml}
+        <div class="bcast-progress-bar"><div class="bcast-progress-fill" id="bcast-progress-fill"></div></div>
+        <div class="bcast-controls">
+          <button class="btn btn-ghost btn-sm" onclick="broadcastPause()">⏸ Pause</button>
+          <button class="btn btn-ghost btn-sm" onclick="broadcastAbort()">✕ End</button>
+          ${nextFix ? `<button class="btn btn-primary btn-sm" onclick="_broadcastContinue()">▶ Continue</button>` : `<button class="btn btn-primary btn-sm" onclick="broadcastAbort()">Back to World</button>`}
+        </div>
+      </div>`;
+    requestAnimationFrame(() => {
+      const fill = document.getElementById('bcast-progress-fill');
+      if (fill) { fill.style.transition = `width ${_BROADCAST_INTERSTITIAL_MS}ms linear`; fill.style.width = '100%'; }
+    });
+    if (BroadcastState.autoAdvance && nextFix && !BroadcastState.paused) {
+      BroadcastState._interstitialTimeout = setTimeout(_broadcastContinue, _BROADCAST_INTERSTITIAL_MS);
+    }
+
+  } else if (type === 'complete') {
+    overlay.innerHTML = `
+      <div class="bcast-card bcast-complete">
+        <div class="bcast-kicker">Broadcast Complete</div>
+        <div class="bcast-complete-msg">${data.total} match${data.total !== 1 ? 'es' : ''} played.</div>
+        <div class="bcast-controls">
+          <button class="btn btn-primary" onclick="broadcastAbort()">Back to World</button>
+        </div>
+      </div>`;
+  }
+
+  _broadcastUpdateControlBar();
+}
+
+function _getBroadcastOverlay() {
+  let el = document.getElementById('broadcast-interstitial');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'broadcast-interstitial';
+    el.className = 'broadcast-interstitial hidden';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function _broadcastHideInterstitial() {
+  if (BroadcastState._interstitialTimeout) {
+    clearTimeout(BroadcastState._interstitialTimeout);
+    BroadcastState._interstitialTimeout = null;
+  }
+  document.getElementById('broadcast-interstitial')?.classList.add('hidden');
+}
+
+async function _broadcastStartFixture() {
+  _broadcastHideInterstitial();
+  const fixture = BroadcastState.queue[BroadcastState.currentIndex];
+  if (!fixture) return;
+
+  const res = await api('POST', `/api/worlds/${BroadcastState.worldId}/fixtures/${fixture.id}/start-live`);
+  if (!res || !res.match_id) {
+    alert('Failed to start broadcast match. The fixture may already have a match.');
+    broadcastAbort();
+    return;
+  }
+
+  BroadcastState.currentMatchId = res.match_id;
+  AppState.activeMatch  = { id: res.match_id };
+  AppState.playerMode   = 'ai_vs_ai';
+  setAiSpeed(BroadcastState.speed);
+  _broadcastUpdateControlBar();
+  showScreen('match');
+  // loadMatchScreen is triggered by showScreen('match') → case 'match'
+}
+
+function _broadcastContinue() {
+  _broadcastHideInterstitial();
+  _broadcastNext();
+}
+
+async function _broadcastMatchComplete(matchId) {
+  _stopAiAutoPlay();
+  GraphicQueue.clear();
+  _broadcastHideInterstitial();
+
+  const res = await api('POST', `/api/matches/${matchId}/broadcast-complete`);
+  BroadcastState.currentMatchId = null;
+  if (!res) { broadcastAbort(); return; }
+
+  _broadcastShowInterstitial('full-time', {
+    result:   res.result,
+    rankings: res.rankings,
+    format:   res.format,
+  });
+}
+
+function _broadcastComplete() {
+  BroadcastState.active = false;
+  const total = BroadcastState.queue.length;
+  _broadcastShowInterstitial('complete', { total });
+}
+
+function broadcastPause() {
+  BroadcastState.paused = true;
+  if (BroadcastState._interstitialTimeout) {
+    clearTimeout(BroadcastState._interstitialTimeout);
+    BroadcastState._interstitialTimeout = null;
+  }
+  // Pause progress bar animation
+  const fill = document.getElementById('bcast-progress-fill');
+  if (fill) {
+    const computed = getComputedStyle(fill).width;
+    fill.style.transition = 'none';
+    fill.style.width = computed;
+  }
+  if (AppState.currentScreen === 'match') aiPlaybackPause();
+  _broadcastUpdateControlBar();
+}
+
+function broadcastResume() {
+  BroadcastState.paused = false;
+  if (BroadcastState._waitingForResume) {
+    BroadcastState._waitingForResume = false;
+    _broadcastNext();
+    return;
+  }
+  if (AppState.currentScreen === 'match' && BroadcastState.currentMatchId) {
+    aiPlaybackResume();
+  } else {
+    _broadcastContinue();
+  }
+  _broadcastUpdateControlBar();
+}
+
+function broadcastSetSpeed(speed) {
+  BroadcastState.speed = speed;
+  setAiSpeed(speed);
+  _broadcastUpdateControlBar();
+}
+
+function broadcastAbort() {
+  _stopAiAutoPlay();
+  _broadcastHideInterstitial();
+  const worldId = BroadcastState.worldId;
+  BroadcastState.active            = false;
+  BroadcastState.paused            = false;
+  BroadcastState.currentMatchId    = null;
+  BroadcastState._waitingForResume = false;
+  document.getElementById('broadcast-control-bar')?.classList.add('hidden');
+  if (worldId) loadWorldDetail(worldId);
+  else showScreen('world');
+}
+
+function _broadcastUpdateControlBar() {
+  let bar = document.getElementById('broadcast-control-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'broadcast-control-bar';
+    bar.className = 'broadcast-control-bar';
+    document.body.appendChild(bar);
+  }
+  if (!BroadcastState.active) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  const idx   = BroadcastState.currentIndex + 1;
+  const total = BroadcastState.queue.length;
+  const speeds = ['slow', 'normal', 'fast', 'instant'];
+  bar.innerHTML = `
+    <span class="bcast-bar-label">📡 ${idx}/${total}</span>
+    <div class="bcast-bar-speeds">
+      ${speeds.map(s => `<button class="btn-bcast-speed ${s === BroadcastState.speed ? 'active' : ''}" onclick="broadcastSetSpeed('${s}')">${s}</button>`).join('')}
+    </div>
+    <button class="btn-bcast-ctrl${BroadcastState.paused ? ' hidden' : ''}" onclick="broadcastPause()">⏸</button>
+    <button class="btn-bcast-ctrl${BroadcastState.paused ? '' : ' hidden'}" onclick="broadcastResume()">▶</button>
+    <button class="btn-bcast-ctrl btn-bcast-end" onclick="broadcastAbort()">✕</button>`;
+}
+
+function showBroadcastPicker() {
+  const worldId = WorldUI.activeWorldId;
+  if (!worldId) return;
+  document.getElementById('broadcast-picker')?.remove();
+
+  const el = document.createElement('div');
+  el.id = 'broadcast-picker';
+  el.className = 'broadcast-picker-modal';
+  el.innerHTML = `
+    <div class="bcast-picker-card">
+      <div class="bcast-picker-title">📡 Broadcast</div>
+      <div class="bcast-picker-sub">Play upcoming fixtures ball-by-ball, automatically. Choose scope:</div>
+      <div class="bcast-picker-options">
+        <button class="btn btn-secondary" onclick="_bcastPickStart('next1')">Next Match</button>
+        <button class="btn btn-secondary" onclick="_bcastPickStart('next5')">Next 5</button>
+        <button class="btn btn-secondary" onclick="_bcastPickStart('next10')">Next 10</button>
+        <button class="btn btn-secondary" onclick="_bcastPickStart('next20')">Next 20</button>
+      </div>
+      <div class="bcast-picker-speed">
+        <span class="bcast-picker-speed-label">Speed:</span>
+        ${['slow', 'normal', 'fast', 'instant'].map(s =>
+          `<button class="btn-bcast-speed ${s === BroadcastState.speed ? 'active' : ''}"
+            onclick="BroadcastState.speed='${s}';this.closest('.bcast-picker-speed').querySelectorAll('.btn-bcast-speed').forEach(b=>b.classList.remove('active'));this.classList.add('active')">${s}</button>`
+        ).join('')}
+      </div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="document.getElementById('broadcast-picker').remove()">Cancel</button>
+    </div>`;
+  el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+  document.body.appendChild(el);
+}
+
+function _bcastPickStart(scope) {
+  document.getElementById('broadcast-picker')?.remove();
+  startBroadcast(WorldUI.activeWorldId, scope);
+}
+
 // ── Bowling change panel ────────────────────────────────────────────────────────
 
 /**
@@ -3315,6 +3635,11 @@ function closeHandoverCard() {
 // ── Result screen ─────────────────────────────────────────────────────────────
 
 async function showResultScreen(matchId) {
+  // In broadcast mode hand off to broadcast handler — no POM screen, auto-advance
+  if (BroadcastState.active) {
+    await _broadcastMatchComplete(matchId);
+    return;
+  }
   // Fetch full scorecard for innings data and POM selection
   const [state, sc] = await Promise.all([
     api('GET', `/api/matches/${matchId}`),
@@ -7821,6 +8146,7 @@ function _renderWorldOverview(data) {
         <div class="nf-actions">
           <button class="btn btn-primary btn-sm" onclick="simulateWorld('next_match')">▶ Simulate</button>
           ${nextFix.is_user_match ? `<button class="btn btn-accent btn-sm" onclick="playWorldFixture(${nextFix.id})">🏏 Play Now</button>` : ''}
+          <button class="btn btn-secondary btn-sm" onclick="showBroadcastPicker()">📡 Broadcast</button>
         </div>`;
     } else {
       nfEl.innerHTML = `<p class="text-muted">No upcoming fixtures.${generatedThrough ? ` Current block runs through ${escHtml(generatedThrough)}.` : ''}</p>
