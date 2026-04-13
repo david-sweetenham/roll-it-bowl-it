@@ -10,6 +10,7 @@
 const AppState = {
   currentScreen:     'home',
   activeMatch:       null,
+  historicalMatchView: false,
   activeWorld:       null,
   activeTournament:  null,
   almanackFilters:   {},
@@ -818,6 +819,7 @@ async function _doStartMatch(playerMode, humanTeamId) {
   });
 
   if (res) {
+    AppState.historicalMatchView = false;
     AppState.activeMatch = res.match || res;
     AppState.activeMatch.match_id = res.match_id || res.match?.id;
     AppState.activeMatch.playerMode  = playerMode;
@@ -3416,6 +3418,37 @@ async function showResultScreen(matchId) {
   document.getElementById('result-notes').value = '';
 }
 
+async function showHistoricalMatchView(matchId, state) {
+  const sc = await api('GET', `/api/matches/${matchId}/scorecard`);
+  if (!sc) return;
+
+  MatchUI.lastState = state;
+  document.getElementById('match-toss-screen').classList.add('hidden');
+  document.getElementById('match-result-screen').classList.add('hidden');
+  document.getElementById('match-live').classList.remove('hidden');
+
+  const scorecardEl = document.getElementById('scorecard-content');
+  if (scorecardEl) {
+    scorecardEl.innerHTML = _renderFullScorecardHtml(sc);
+  }
+
+  const postWrap = document.getElementById('canvas-post-match');
+  if (postWrap) {
+    postWrap.classList.toggle('hidden', !(sc.innings && sc.innings.length));
+  }
+
+  if (sc.innings && sc.innings.length) {
+    const deliveriesRes = await api('GET', `/api/matches/${matchId}/deliveries`);
+    const deliveries = deliveriesRes?.deliveries || [];
+    const inn1Del = deliveries.filter(d => d.innings_number === 1);
+    const inn2Del = deliveries.filter(d => d.innings_number === 2);
+    drawManhattan('canvas-manhattan', inn1Del, inn2Del);
+    drawRunRateGraph('canvas-runrate', inn2Del.length ? inn2Del : inn1Del, sc.match?.target ?? null);
+  }
+
+  switchMatchTab('scorecard');
+}
+
 async function saveMatchToAlmanack() {
   const matchId = getMatchId();
   const pom   = document.getElementById('result-pom').value;
@@ -3764,7 +3797,32 @@ async function showScorecardPopup(matchId) {
 
 function _renderFullScorecardHtml(sc) {
   const innings = sc.innings || [];
-  if (!innings.length) return '<p class="text-muted">No innings data.</p>';
+  if (!innings.length) {
+    const m = sc.match || {};
+    let notes = {};
+    try { notes = JSON.parse(m.match_notes || '{}'); } catch (_) { notes = {}; }
+    const t1 = escHtml(m.team1_name || 'Team 1');
+    const t2 = escHtml(m.team2_name || 'Team 2');
+    const t1Score = escHtml(notes.team1_score || '—');
+    const t2Score = escHtml(notes.team2_score || '—');
+    const topScorer = notes.top_scorer?.name
+      ? `${escHtml(notes.top_scorer.name)} ${escHtml(String(notes.top_scorer.runs || 0))}`
+      : null;
+    const topBowler = notes.top_bowler?.name
+      ? `${escHtml(notes.top_bowler.name)} ${escHtml(String(notes.top_bowler.wickets || 0))}/${escHtml(String(notes.top_bowler.runs || 0))}`
+      : null;
+    const pom = m.player_of_match_name ? escHtml(m.player_of_match_name) : null;
+    return `
+      ${sc.result_string ? `<div class="sc-innings-header" style="margin-bottom:12px">${escHtml(sc.result_string)}</div>` : ''}
+      <div class="result-note-grid" style="margin-bottom:16px">
+        <div class="result-note-card"><div class="result-note-label">${t1}</div><div class="result-note-value">${t1Score}</div></div>
+        <div class="result-note-card"><div class="result-note-label">${t2}</div><div class="result-note-value">${t2Score}</div></div>
+        ${pom ? `<div class="result-note-card"><div class="result-note-label">Player of the Match</div><div class="result-note-value">${pom}</div></div>` : ''}
+        ${topScorer ? `<div class="result-note-card"><div class="result-note-label">Top score</div><div class="result-note-value">${topScorer}</div></div>` : ''}
+        ${topBowler ? `<div class="result-note-card"><div class="result-note-label">Best bowling</div><div class="result-note-value">${topBowler}</div></div>` : ''}
+      </div>
+      <p class="text-muted">This was a simulated match, so full ball-by-ball innings tables were not stored for this result.</p>`;
+  }
 
   let html = '';
 
@@ -3892,11 +3950,16 @@ async function loadMatchScreen() {
   }
 
   if (state.match?.status === 'complete') {
-    initLiveView(state);
-    await showResultScreen(matchId);
+    if (AppState.historicalMatchView) {
+      await showHistoricalMatchView(matchId, state);
+    } else {
+      initLiveView(state);
+      await showResultScreen(matchId);
+    }
   } else if (!state.current_innings && !(state.innings || []).length) {
     showMatchToss();
   } else {
+    AppState.historicalMatchView = false;
     document.getElementById('match-toss-screen').classList.add('hidden');
     initLiveView(state);
   }
@@ -4494,6 +4557,7 @@ function goToMatch(matchId) {
 function openPlayedMatch(matchId) {
   if (!matchId) return;
   // Match screen expects an object-like active match, not a raw id.
+  AppState.historicalMatchView = true;
   AppState.activeMatch = { id: matchId, match_id: matchId };
   AppState.activeMatchId = matchId;
   showScreen('match');

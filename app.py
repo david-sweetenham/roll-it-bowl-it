@@ -2590,6 +2590,17 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
     """Persist simulate_world_to() results into the database."""
     import json
 
+    def _pick_quick_sim_pom_id(match_result):
+        top_bat = match_result.get('top_scorer') or {}
+        top_bowl = match_result.get('top_bowler') or {}
+        bat_score = (top_bat.get('runs') or 0)
+        bowl_score = (top_bowl.get('wickets') or 0) * 20 - (top_bowl.get('runs') or 0) * 0.1
+        if top_bat.get('player_id') and bat_score >= bowl_score:
+            return top_bat.get('player_id')
+        if top_bowl.get('player_id'):
+            return top_bowl.get('player_id')
+        return top_bat.get('player_id') or None
+
     # Default venue fallback
     venues = database.get_venues(db)
     fallback_venue_id = venues[0]['id'] if venues else 1
@@ -2631,6 +2642,7 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
             'winning_team_id':  winner_id,
             'margin_runs':      res.get('margin_runs'),
             'margin_wickets':   res.get('margin_wickets'),
+            'player_of_match_id': _pick_quick_sim_pom_id(res),
             'status':           'complete',
             'match_notes':      json.dumps({
                 'quick_sim':   True,
