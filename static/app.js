@@ -8255,6 +8255,33 @@ async function _showCalendarPreview(worldId) {
   contentEl.innerHTML = statHtml;
 }
 
+// ── World date format ─────────────────────────────────────────────────────────
+
+function _wdDateFmt() {
+  return localStorage.getItem('ribi_world_date_fmt') || 'uk';
+}
+
+function setWorldDateFmt(fmt) {
+  localStorage.setItem('ribi_world_date_fmt', fmt);
+  ['uk', 'usa', 'iso'].forEach(f => {
+    document.getElementById(`wd-fmt-${f}`)?.classList.toggle('active', f === fmt);
+  });
+  // Re-render the date display with the stored raw ISO date
+  const raw = WorldUI._worldData?.world?.current_date || '';
+  const el = document.getElementById('wd-date-display');
+  if (el && raw) el.textContent = _formatWorldDate(raw);
+}
+
+function _formatWorldDate(iso) {
+  if (!iso) return '?';
+  const fmt = _wdDateFmt();
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  if (fmt === 'usa') return `${m}/${d}/${y}`;
+  if (fmt === 'iso') return iso;
+  return `${d}/${m}/${y}`; // UK default
+}
+
 // ── World Dashboard ───────────────────────────────────────────────────────────
 
 async function loadWorldDetail(worldId) {
@@ -8281,7 +8308,13 @@ async function loadWorldDetail(worldId) {
     ? settings.world_scope
     : 'international';
   if (nameEl) nameEl.textContent = w.name || 'World';
-  document.getElementById('wd-date-badge').textContent  = `📅 ${w.current_date || '?'}`;
+  // Large date display with format toggle
+  const _dateFmt = _wdDateFmt();
+  ['uk', 'usa', 'iso'].forEach(f => {
+    document.getElementById(`wd-fmt-${f}`)?.classList.toggle('active', f === _dateFmt);
+  });
+  const dateDisplayEl = document.getElementById('wd-date-display');
+  if (dateDisplayEl) dateDisplayEl.textContent = _formatWorldDate(w.current_date || '');
   document.getElementById('wd-density-badge').textContent = w.calendar_density || 'moderate';
   document.getElementById('wd-scope-badge').textContent = _titleCaseWords(worldScope);
 
