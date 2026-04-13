@@ -7053,7 +7053,10 @@ async function loadWorldsScreen() {
     const pct    = total > 0 ? Math.round(played / total * 100) : 0;
     return `
     <div class="world-card" onclick="loadWorldDetail(${w.id})">
-      <div class="world-card-name">${w.name}</div>
+      <div class="world-card-header">
+        <div class="world-card-name">${w.name}</div>
+        <button class="world-card-delete" title="Delete world" onclick="event.stopPropagation(); deleteWorld(${w.id}, '${escHtml(String(w.name || '').replace(/'/g, '&#39;'))}')">✕</button>
+      </div>
       <div class="world-card-meta">
         <span class="badge">${w.calendar_density || 'moderate'}</span>
         <span class="text-muted">${w.current_date || ''}</span>
@@ -7064,6 +7067,21 @@ async function loadWorldsScreen() {
       </div>
     </div>`;
   }).join('');
+}
+
+async function deleteWorld(worldId, worldName) {
+  const label = worldName || 'this world';
+  if (!confirm(`Delete ${label}?\n\nThis removes the world, its fixtures, rankings, records, and any world-linked matches created for it.`)) {
+    return;
+  }
+  const res = await api('DELETE', `/api/worlds/${worldId}`, { confirm: 'DELETE' });
+  if (!res?.deleted) return;
+  if (WorldUI.activeWorldId === worldId) {
+    WorldUI.activeWorldId = null;
+    showScreen('world');
+  }
+  _showToast(`Deleted ${label}`, 1800);
+  await loadWorldsScreen();
 }
 
 // ── World creation wizard ─────────────────────────────────────────────────────

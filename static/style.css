@@ -3412,9 +3412,29 @@ body.broadcast-mode .btn-howzat {
 .world-card { background:var(--surface); border:1px solid var(--border); border-radius:10px;
   padding:16px; margin-bottom:8px; cursor:pointer; transition:border-color .15s; }
 .world-card:hover { border-color:var(--accent); }
+.world-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
 .world-card-name { font-size:var(--fs-md); font-weight:700; }
 .world-card-meta { display:flex; gap:8px; align-items:center; font-size:var(--fs-xs);
   margin-top:4px; flex-wrap:wrap; }
+.world-card-delete {
+  border: 1px solid rgba(248,113,113,.28);
+  background: rgba(248,113,113,.08);
+  color: #fca5a5;
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+  font-size: 14px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background var(--transition), border-color var(--transition), color var(--transition), transform var(--transition);
+}
+.world-card-delete:hover {
+  background: rgba(248,113,113,.16);
+  border-color: rgba(248,113,113,.5);
+  color: #fff;
+  transform: translateY(-1px);
+}
 
 /* World header */
 .world-header { display:flex; align-items:center; justify-content:space-between;

@@ -1,260 +1,202 @@
 # Roll It & Bowl It
 
-**Dice Cricket Done Digitally** — a local-first cricket simulation built around visible dice rules, long-form stats, and a world that keeps its own history.
+**Dice Cricket Done Digitally** is a local-first cricket sim built around visible dice rules, long-form stats, broadcast-style presentation, and persistent worlds that keep their own history.
 
-The project is designed to keep the old-school feel of tabletop dice cricket while adding the things pen-and-paper versions struggle with: full scorecards, persistent records, world calendars, domestic leagues, broadcast-friendly presentation, and a proper statistical archive.
+It is designed to preserve the old-school tabletop feel of dice cricket while adding the things paper play struggles to track well: scorecards, records, domestic leagues, world calendars, and a proper statistical archive.
 
----
+## Highlights
 
-## What it does
-
-- **Live match play** with a multi-stage HOWZAT dice engine for appeals, dismissals, and catch locations
-- **Two scoring systems**:
-  `Classic` keeps the die literal: `1, 2, 3, 4, 6` score exactly that, `5` triggers the appeal chain
-  `Modern` keeps the same face meanings but lightly tones down some boundary results in longer formats
-- **Two roll modes**:
-  `Auto` resolves every stage for speed
-  `Manual` lets you press through each appeal stage yourself
-- **International and domestic cricket**:
-  national sides, counties, states, and franchise leagues can now be separated at setup time
-- **Persistent worlds** with `International`, `Domestic`, or `Combined` structures
-- **Realistic or random calendars** depending on how simulation-heavy you want the save to be
-- **The Dice Cricketers' Almanack** with career stats, honours, records, and canon filtering
-- **Broadcast mode** and story graphics built for recorded play and long-form series
-
----
+- Visible dice-led match play with a multi-stage HOWZAT appeal chain
+- Two scoring systems:
+  - `Classic`: literal dice scoring, where `1/2/3/4/6` score exactly that and `5` triggers the appeal mechanic
+  - `Modern`: the same readable face meanings, with light realism tuning in longer formats
+- Two roll styles:
+  - `Auto` for faster play
+  - `Manual` for step-by-step appeal drama
+- International and domestic cricket, with separate setup flows
+- Persistent worlds in `International`, `Domestic`, or `Combined` formats
+- Domestic world coverage rules: `Selected Clubs` or `Full League`
+- Broadcast-friendly live match screen with story strips, lower-thirds, flags, and a live mini wagon wheel
+- The Dice Cricketers' Almanack for career stats, records, honours, and canon-aware filtering
+- World and Almanack story desks that surface in-form players, record threats, and milestone watches
 
 ## Core Dice Rules
 
-Every delivery starts with a visible Stage 1 roll:
+Every ball starts with a visible Stage 1 roll.
 
 | Face | Classic | Modern |
 |------|---------|--------|
-| **1** | 1 run | 1 run |
-| **2** | 2 runs | 2 runs |
-| **3** | 3 runs | 3 runs |
-| **4** | 4 runs | usually 4, sometimes cut back in longer formats |
-| **5** | HOWZAT appeal chain | HOWZAT appeal chain |
-| **6** | 6 runs | usually 6, sometimes cut back in longer formats |
+| `1` | 1 run | 1 run |
+| `2` | 2 runs | 2 runs |
+| `3` | 3 runs | 3 runs |
+| `4` | 4 runs | Usually 4, sometimes moderated in longer formats |
+| `5` | HOWZAT appeal chain | HOWZAT appeal chain |
+| `6` | 6 runs | Usually 6, sometimes moderated in longer formats |
 
-After a `5`, the ball can move through the appeal and dismissal stages:
+When a `5` is rolled, the game moves into the appeal chain:
 
-| Stage | Die roll decides |
-|-------|-----------------|
-| **Stage 2** | Appeal outcome — out or not out |
-| **Stage 3** | Not-out resolution — dot, bye, leg-bye, wide, no-ball |
-| **Stage 4** | Dismissal type — bowled, lbw, caught, run out, stumped |
-| **Stage 4b** | Catch location — if caught, where it went |
+| Stage | Purpose |
+|------|---------|
+| Stage 2 | Out / not out decision |
+| Stage 3 | Not-out resolution such as dot, wide, no-ball, bye, leg-bye |
+| Stage 4 | Dismissal type |
+| Stage 4b | Catch location, if required |
 
-That gives the game its identity: literal run faces for scoring, multi-roll drama for wickets.
-
----
+That keeps scoring faces readable while making wickets the dramatic, multi-roll event.
 
 ## Quick Start
 
+### Recommended
+
 ```bash
-# Clone and set up
-git clone <repo>
-cd roll-it-bowl-it
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# Run (development)
 python start.py
-
-# Open http://127.0.0.1:5001 in your browser
 ```
 
-The database is created and seeded automatically on first run. The seed now includes international sides and major domestic competitions.
+Open `http://127.0.0.1:5000`.
 
----
+### Direct Flask run
+
+If you prefer to start the app directly:
+
+```bash
+source .venv/bin/activate
+python app.py
+```
+
+The database is created and seeded automatically on first run. The seed includes international teams, associate nations, and major domestic competitions.
 
 ## Match Setup
 
-The Play screen now lets you choose:
+The Play screen supports:
 
-- **Cricket Type**: `International` or `Domestic`
-- **Format**: `Test/ODI/T20` in international mode, or `First-Class/One-Day/T20` in domestic mode
-- **Scoring System**: `Classic` or `Modern`
-- **Domestic League**: optional filter when domestic mode is active
+- `Cricket Type`: `International` or `Domestic`
+- `Format`:
+  - international: `Test`, `ODI`, `T20`
+  - domestic: `First-Class`, `One-Day`, `T20`
+- `Scoring System`: `Classic` or `Modern`
+- domestic league filtering when domestic cricket is selected
 
-That means you can quickly set up:
+You can also choose a default scoring preference on first launch and change it later in Settings, while still overriding it match by match.
 
-- England vs New Zealand in a Test
-- Surrey vs Yorkshire in a First-Class match
-- Mumbai Indians vs Chennai Super Kings in T20
+## Live Match Presentation
 
-without mixing all teams into one picker.
+The live screen is built for long-form play and recording:
 
-## Rolling Modes
+- broadcast mode for cleaner large-format presentation
+- commentary-first layout with stronger event hierarchy
+- story strip and story alerts for pressure, milestones, and momentum
+- small national flags where appropriate
+- live mini wagon wheel beside the die
+- visible dice guide so viewers can learn the rules as they watch
 
-### Auto-Roll (default)
-Every dice stage resolves the moment you click **Roll** (or press Space/R). The die face animates, the result appears, and the ball is immediately recorded. Great for fast play and simming through innings you care less about.
+## Worlds
 
-### Manual Roll
-Each dice stage waits for you. After Stage 1 triggers an appeal:
+World creation supports three structures:
 
-1. "HOWZAT!" flashes up — the fielding team appealing
-2. You press **Appeal!** to roll Stage 2
-3. The die lands — either **NOT OUT** (press Continue) or **OUT** (press Dismissal)
-4. If out via caught, you press **Caught Where?** to roll Stage 4b
+- `International`: national teams only
+- `Domestic`: domestic and franchise cricket only
+- `Combined`: international cricket plus selected domestic leagues
 
-Switch modes with the toggle in the match header, or press **M** while no ball is in flight. Switching Manual → Auto mid-over queues the change until the current ball completes.
+Calendar generation supports:
 
----
+- `Realistic` or `Random` scheduling
+- domestic coverage rules for realistic domestic worlds:
+  - `Selected Clubs`
+  - `Full League`
 
-## Keyboard shortcuts
+The World screen includes:
 
-| Key | Action |
-|-----|--------|
-| Space / R | Roll (when idle) |
-| A | Appeal (Manual mode, HOWZAT state) |
-| C | Continue / Not Out (Manual mode) |
-| D | Dismissal (Manual mode, out pending) / Toggle dark mode (otherwise) |
-| M | Toggle roll mode (when idle, not AI vs AI) |
-| F | Fast-sim current match |
+- overview, rankings, and records tabs
+- active series and event summaries
+- world story desk panels
+- simulation controls including `My Next Match`
+- world deletion directly from the worlds list
 
----
+## Almanack
 
-## Tension suggestion banner
+The Dice Cricketers' Almanack is the long-form stats archive for the save.
 
-When the match situation is tense, a banner appears suggesting you switch to Manual mode:
+It includes:
 
-- T20 with ≤ 2 overs left and < 15 runs needed
-- Last wicket standing
-- Batter on 95+ runs (century approach)
-- Required run rate > 12
-- Scores tied with ≤ 1 over left
+- batting, bowling, all-round, team, match, partnership, and honours views
+- visible format filters
+- canon-aware stats handling
+- story panels for records under threat, players in form, and milestone chances
 
-The banner is per-innings — dismiss it and it won't reappear for that innings.
+## Project Layout
 
----
-
-## Project layout
-
-```
+```text
 roll-it-bowl-it/
-├── app.py              # Flask app — all API routes
-├── game_engine.py      # HOWZAT! dice engine — do not modify
-├── database.py         # DB access layer — do not modify
-├── cricket_calendar.py # FTP-style calendar engine
-├── schema.sql          # SQLite schema (25+ tables)
-├── seed_data.py        # Initial teams, players, venues, world records
-├── config.py           # Production config
-├── config_dev.py       # Development overrides (not packaged)
-├── start.py            # Entry point for both dev and packaged exe
+├── app.py
+├── cricket_calendar.py
+├── database.py
+├── game_engine.py
+├── schema.sql
+├── seed_data.py
+├── config.py
+├── start.py
 ├── templates/
-│   └── index.html      # Single-page app shell
+│   └── index.html
 ├── static/
-│   ├── app.js          # All client-side logic
-│   └── style.css       # Styles + animations
-├── tests/
-│   ├── test_engine.py          # 5 engine unit tests
-│   ├── test_sim_controls.py    # 5 simulation-control tests
-│   ├── test_world_sim.py       # 4 world-simulation tests
-│   └── test_canon_system.py    # 94 API + system tests
+│   ├── app.js
+│   ├── style.css
+│   └── canvas.js
 ├── uat/
-│   ├── test_calendar.py        # 10 calendar engine UAT tests
-│   └── run_uat.py              # UAT orchestrator
-├── screenshots/        # Application screenshots
-└── ribi.spec           # PyInstaller packaging spec
+│   ├── run_uat.py
+│   └── test_calendar.py
+├── test_engine.py
+├── test_sim_controls.py
+├── test_world_sim.py
+├── test_canon_system.py
+├── screenshots/
+└── ribi.spec
 ```
 
----
+## Testing
 
-## Running the tests
+Run the automated test suite with:
 
 ```bash
 source .venv/bin/activate
 pytest -q
 ```
 
-The current suite passes end to end and covers engine behavior, simulation controls, world simulation, and canon/stat filtering.
-
-### UAT suite (calendar engine)
+The repository also includes calendar-focused UAT coverage:
 
 ```bash
 python uat/run_uat.py
-# or run a suite directly:
-python uat/test_calendar.py
 ```
 
-10 acceptance tests covering: home-season month enforcement, ICC event placement, double-booking prevention, avoid_months respected, India-Pakistan isolation, format ordering, fixture count by density.
+## Packaging
 
----
-
-## Screenshots
-
-### Match in progress — HOWZAT! appeal (dark mode)
-![Match HOWZAT](screenshots/match-howzat.png)
-
-### Match result screen
-![Match Result](screenshots/match-result.png)
-
-### Match start — batting and bowling panels
-![Match Start](screenshots/match-start-dark.png)
-
-### The Dice Cricketers' Almanack — Teams tab
-![Almanack Teams](screenshots/almanack-teams.png)
-
-### The Dice Cricketers' Almanack — Batting records
-![Almanack Batting](screenshots/almanack-batting.png)
-
-### The Dice Cricketers' Almanack — Honours with real-world benchmarks
-![Almanack Honours](screenshots/almanack-honours.png)
-
-### Series & Tournaments
-![Series and Tournaments](screenshots/series-tournaments.png)
-
----
-
-## Building a standalone executable
+To build a standalone executable:
 
 ```bash
 pip install pyinstaller
 pyinstaller ribi.spec
 ```
 
-The output is `dist/RollItBowlIt` (Linux/Mac) or `dist/RollItBowlIt.exe` (Windows). The development config (`config_dev.py`) is excluded from the build by the spec file.
+## Screenshots
 
----
+- Match in progress: `screenshots/match-howzat.png`
+- Match result: `screenshots/match-result.png`
+- Match start: `screenshots/match-start-dark.png`
+- Almanack teams: `screenshots/almanack-teams.png`
+- Almanack batting: `screenshots/almanack-batting.png`
+- Almanack honours: `screenshots/almanack-honours.png`
+- Series and tournaments: `screenshots/series-tournaments.png`
 
-## World Modes
+## Notes
 
-World creation now supports three structures:
+This is a local-first fan project made for personal entertainment. It is not affiliated with the ICC, any domestic board, any broadcaster, or any commercial cricket organisation.
 
-- **International**: national teams only, international calendar focus
-- **Domestic**: league and franchise cricket only
-- **Combined**: international cricket plus selected domestic competitions in the same save
+`The Dice Cricketers' Almanack` is an original project feature and is not affiliated with Wisden.
 
-In realistic worlds, domestic competitions can be layered into the calendar using the domestic league selector in the wizard.
+## More
 
----
-
-## Disclaimer
-
-Roll It & Bowl It is an independent fan-made project created for personal
-entertainment. It is not affiliated with, endorsed by, or connected to any
-cricket board, governing body, broadcaster, or commercial cricket organisation,
-including but not limited to the ICC, ECB, Cricket Australia, BCCI, or any
-other national or international cricket authority.
-
-Player names used in pre-loaded squads are included for entertainment purposes
-only in the spirit of the dice cricket tradition. No association with or
-endorsement by any named individual is implied or should be inferred.
-
-"The Dice Cricketers' Almanack" is an original name created for this project
-and is not affiliated with Wisden or John Wisden & Co. in any commercial sense.
-
-This is a free, open source personal project. It is not a commercial product.
-
----
-
-## Version
-
-`0.2.0-dev` — Python 3.14.3, Flask 3.1.3
-
-See [CHANGELOG.md](CHANGELOG.md) for what's in this release.
-For how to play, see [HOWTO_PLAY.md](HOWTO_PLAY.md).
-For development notes, see [DEVELOPMENT.md](DEVELOPMENT.md).
+- [HOWTO_PLAY.md](HOWTO_PLAY.md)
+- [DEVELOPMENT.md](DEVELOPMENT.md)
+- [CHANGELOG.md](CHANGELOG.md)

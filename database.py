@@ -951,6 +951,60 @@ def update_world(db, id, data):
     db.commit()
 
 
+def delete_world(db, world_id):
+    """Delete a world and all world-scoped data linked to it."""
+    world = get_world(db, world_id)
+    if not world:
+        return False
+
+    match_rows = db.execute(
+        "SELECT id FROM matches WHERE world_id = ?",
+        (world_id,)
+    ).fetchall()
+    match_ids = [row['id'] for row in match_rows]
+
+    if match_ids:
+        marks = ','.join('?' * len(match_ids))
+        innings_rows = db.execute(
+            f"SELECT id FROM innings WHERE match_id IN ({marks})",
+            match_ids
+        ).fetchall()
+        innings_ids = [row['id'] for row in innings_rows]
+        if innings_ids:
+            imarks = ','.join('?' * len(innings_ids))
+            db.execute(f"DELETE FROM deliveries WHERE innings_id IN ({imarks})", innings_ids)
+            db.execute(f"DELETE FROM fall_of_wickets WHERE innings_id IN ({imarks})", innings_ids)
+            db.execute(f"DELETE FROM partnerships WHERE innings_id IN ({imarks})", innings_ids)
+            db.execute(f"DELETE FROM batter_innings WHERE innings_id IN ({imarks})", innings_ids)
+            db.execute(f"DELETE FROM bowler_innings WHERE innings_id IN ({imarks})", innings_ids)
+            db.execute(f"DELETE FROM innings WHERE id IN ({imarks})", innings_ids)
+        db.execute(f"DELETE FROM match_journal WHERE match_id IN ({marks})", match_ids)
+        db.execute(f"DELETE FROM almanack_audit_log WHERE match_id IN ({marks})", match_ids)
+        db.execute(f"DELETE FROM ranking_history WHERE after_match_id IN ({marks})", match_ids)
+        db.execute(f"DELETE FROM matches WHERE id IN ({marks})", match_ids)
+
+    tournament_rows = db.execute(
+        "SELECT id FROM tournaments WHERE world_id = ?",
+        (world_id,)
+    ).fetchall()
+    tournament_ids = [row['id'] for row in tournament_rows]
+    if tournament_ids:
+        tmarks = ','.join('?' * len(tournament_ids))
+        db.execute(f"DELETE FROM tournament_teams WHERE tournament_id IN ({tmarks})", tournament_ids)
+        db.execute(f"DELETE FROM tournaments WHERE id IN ({tmarks})", tournament_ids)
+
+    db.execute("DELETE FROM fixtures WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM world_series WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM world_rankings WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM ranking_history WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM world_records WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM player_world_state WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM series WHERE world_id = ?", (world_id,))
+    db.execute("DELETE FROM worlds WHERE id = ?", (world_id,))
+    db.commit()
+    return True
+
+
 # ── World Rankings ────────────────────────────────────────────────────────────
 
 def get_world_rankings(db, world_id, format_filter=None):

@@ -2962,6 +2962,21 @@ def get_worlds():
         database.close_db(db)
 
 
+@app.route('/api/worlds/<int:id>', methods=['DELETE'])
+def delete_world_route(id):
+    data = request.get_json() or {}
+    if data.get('confirm') != 'DELETE':
+        return err('Deleting a world requires {"confirm":"DELETE"} in request body')
+    db = database.get_db()
+    try:
+        ok = database.delete_world(db, id)
+        if not ok:
+            return err('World not found', 404)
+        return jsonify({'deleted': True, 'world_id': id})
+    finally:
+        database.close_db(db)
+
+
 @app.route('/api/worlds/<int:id>', methods=['GET'])
 def get_world(id):
     db = database.get_db()
