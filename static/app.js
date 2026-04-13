@@ -3112,30 +3112,32 @@ async function _maybeShowBowlingPanel(state) {
 async function showInningsTransition(completedInnings, target) {
   const el   = document.getElementById('match-innings-transition');
   const live = document.getElementById('match-live');
+  const kickerEl = document.getElementById('innings-transition-kicker');
+  const textEl = document.getElementById('innings-transition-text');
+  const scorelineEl = document.getElementById('innings-transition-scoreline');
+  const targetEl = document.getElementById('innings-transition-target');
+  const stakesEl = document.getElementById('innings-transition-stakes');
   MatchUI._transitionActive = true;
   live.classList.add('hidden');
   el.classList.remove('hidden');
 
-  // Build enhanced innings break card content
-  // Card may have been renamed on a prior innings — select by either class
   const card = el.querySelector('.innings-transition-card, .innings-break-graphic');
-  if (card && completedInnings) {
+  if (card) card.className = 'innings-transition-card';
+  if (completedInnings) {
     const n   = completedInnings.innings_number;
-    const ord = ['1ST','2ND','3RD','4TH'][n - 1] || `${n}TH`;
+    const ord = ['1st','2nd','3rd','4th'][n - 1] || `${n}th`;
     const scoreStr = formatScore(completedInnings.total_runs, completedInnings.total_wickets);
     const ovsStr   = completedInnings.overs_completed != null
       ? `(${formatOvers(completedInnings.overs_completed)} ov)` : '';
-
-    // Top scorer and best bowling from current MatchUI state if available
     const inningsData = (MatchUI.lastState?.innings || []).find(i => i.innings_number === n);
-    let topScorerHtml = '', bestBowlingHtml = '';
+    let topScorer = '', bestBowling = '';
     if (inningsData?.batters?.length) {
       const top = [...inningsData.batters]
         .filter(b => b.status !== 'yet_to_bat')
         .sort((a, b) => (b.runs || 0) - (a.runs || 0))[0];
       if (top) {
         const notOut = top.not_out || top.status === 'batting' ? '*' : '';
-        topScorerHtml = `<div>Top scorer: <strong>${escHtml(top.player_name || '')} ${top.runs || 0}${notOut} (${top.balls_faced || 0}b)</strong></div>`;
+        topScorer = `${top.player_name || ''} ${top.runs || 0}${notOut} (${top.balls_faced || 0}b)`;
       }
     }
     if (inningsData?.bowlers?.length) {
@@ -3147,43 +3149,36 @@ async function showInningsTransition(completedInnings, target) {
           return (a.runs_conceded || 0) - (b.runs_conceded || 0);
         })[0];
       if (best) {
-        bestBowlingHtml = `<div>Best bowling: <strong>${escHtml(best.player_name || '')} ${best.wickets || 0}/${best.runs_conceded || 0}</strong></div>`;
+        bestBowling = `${best.player_name || ''} ${best.wickets || 0}/${best.runs_conceded || 0}`;
       }
     }
-
-    // Determine required rate if target set
-    let rrrHtml = '';
-    if (target) {
-      const freshMatch = MatchUI.lastState?.match || {};
-      const maxOvers   = { T20: 20, ODI: 50, Test: null }[freshMatch.format] ?? null;
-      if (maxOvers) {
-        const rrr = (target / maxOvers).toFixed(2);
-        rrrHtml = `<div class="ibg-rrr">Required RR: ${rrr} from ${maxOvers} overs</div>`;
-      }
+    const nextBatting = MatchUI.lastState?.current_innings?.batting_team_name || 'Next side';
+    const freshMatch = MatchUI.lastState?.match || {};
+    const maxOvers   = { T20: 20, ODI: 50, Test: null }[freshMatch.format] ?? null;
+    const chaseText = target
+      ? `${nextBatting} need ${target} to win`
+      : `${nextBatting} coming out to begin the ${n + 1}${n + 1 === 2 ? 'nd' : n + 1 === 3 ? 'rd' : 'th'} innings`;
+    const stakeLines = [];
+    if (topScorer) stakeLines.push(`<div class="stake-line"><span class="stake-label">Top scorer</span><span class="stake-value">${escHtml(topScorer)}</span></div>`);
+    if (bestBowling) stakeLines.push(`<div class="stake-line"><span class="stake-label">Best bowling</span><span class="stake-value">${escHtml(bestBowling)}</span></div>`);
+    if (target && maxOvers) {
+      stakeLines.push(`<div class="stake-line"><span class="stake-label">Required rate</span><span class="stake-value">${(target / maxOvers).toFixed(2)} from ${maxOvers} overs</span></div>`);
+    } else if (completedInnings.total_wickets >= 10) {
+      stakeLines.push(`<div class="stake-line"><span class="stake-label">Shape of innings</span><span class="stake-value">All out after ${formatOvers(completedInnings.overs_completed || 0)} overs</span></div>`);
+    } else {
+      stakeLines.push(`<div class="stake-line"><span class="stake-label">Shape of innings</span><span class="stake-value">${completedInnings.batting_team_name} closed on ${scoreStr}</span></div>`);
     }
-
-    card.className = 'innings-break-graphic';
-    card.innerHTML = `
-      <div class="ibg-title">INNINGS BREAK</div>
-      <div class="ibg-team">${escHtml(completedInnings.batting_team_name)}</div>
-      <div class="ibg-score">${scoreStr}</div>
-      <div class="ibg-overs">${ovsStr}</div>
-      ${target ? `<div class="ibg-target">${escHtml(completedInnings.batting_team_name === (MatchUI.lastState?.current_innings?.batting_team_name || '') ? '' : 'Target')}: ${target}</div>` : ''}
-      ${rrrHtml}
-      <div class="ibg-stats">${topScorerHtml}${bestBowlingHtml}</div>
-      ${AppState.broadcastMode ? '<div class="ibg-continue-hint">Click anywhere to continue</div>' : ''}`;
-  } else if (card) {
-    card.className = 'innings-transition-card';
-    let text = 'END OF INNINGS';
-    if (completedInnings) {
-      const n   = completedInnings.innings_number;
-      const ord = ['1ST','2ND','3RD','4TH'][n - 1] || `${n}TH`;
-      text = `END OF ${ord} INNINGS — ${completedInnings.batting_team_name}: ` +
-             formatScore(completedInnings.total_runs, completedInnings.total_wickets);
-    }
-    card.innerHTML = `
-      <div class="innings-transition-text">${escHtml(text)}</div>
-      <div class="innings-transition-target">${target ? `Target: ${target}` : ''}</div>`;
+    if (kickerEl) kickerEl.textContent = 'Innings Break';
+    if (textEl) textEl.textContent = `${completedInnings.batting_team_name} ${ord} innings closed`;
+    if (scorelineEl) scorelineEl.textContent = `${scoreStr} ${ovsStr}`.trim();
+    if (targetEl) targetEl.textContent = chaseText;
+    if (stakesEl) stakesEl.innerHTML = stakeLines.join('');
+  } else {
+    if (kickerEl) kickerEl.textContent = 'Innings Break';
+    if (textEl) textEl.textContent = 'End of innings';
+    if (scorelineEl) scorelineEl.textContent = '';
+    if (targetEl) targetEl.textContent = target ? `Target: ${target}` : '';
+    if (stakesEl) stakesEl.innerHTML = '';
   }
 
   // In broadcast mode the card stays until clicked; otherwise auto-advance
@@ -3280,9 +3275,21 @@ async function showResultScreen(matchId) {
   else if (rt === 'tie')     headline = 'MATCH TIED';
   else if (rt === 'draw')    headline = 'MATCH DRAWN';
 
+  const kickerEl = document.getElementById('result-kicker');
+  const verdictEl = document.getElementById('result-verdict');
   document.getElementById('result-headline').textContent = headline;
   document.getElementById('result-subline').textContent =
     `${match.format} · ${match.venue_name || ''}${match.venue_city ? ', ' + match.venue_city : ''} · ${match.match_date || ''}`;
+  if (kickerEl) kickerEl.textContent = 'Full Time';
+  if (verdictEl) {
+    verdictEl.textContent = match.result_string || (
+      rt === 'runs' ? `${match.winning_team_name} defended successfully`
+      : rt === 'wickets' ? `${match.winning_team_name} chased it down`
+      : rt === 'draw' ? 'Neither side could force a result'
+      : rt === 'tie' ? 'Nothing separated the sides'
+      : ''
+    );
+  }
 
   // Compact innings summary
   const summaryEl = document.getElementById('result-innings-summary');
@@ -3301,6 +3308,39 @@ async function showResultScreen(matchId) {
   } else {
     summaryEl.innerHTML = '';
   }
+
+  const noteCards = [];
+  if (sc?.innings?.length) {
+    const allBatters = sc.innings.flatMap(inn => inn.batters || []);
+    const allBowlers = sc.innings.flatMap(inn => inn.bowlers || []);
+    const topBat = [...allBatters]
+      .filter(b => b.status !== 'yet_to_bat')
+      .sort((a, b) => (b.runs || 0) - (a.runs || 0))[0];
+    const topBowl = [...allBowlers]
+      .filter(b => (b.overs || 0) > 0 || (b.balls || 0) > 0)
+      .sort((a, b) => {
+        if ((b.wickets || 0) !== (a.wickets || 0)) return (b.wickets || 0) - (a.wickets || 0);
+        return (a.runs_conceded || 0) - (b.runs_conceded || 0);
+      })[0];
+    const lastInn = sc.innings[sc.innings.length - 1];
+    if (topBat) {
+      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Top score</div><div class="result-note-value">${escHtml(topBat.player_name || '')} ${topBat.runs || 0}${topBat.not_out ? '*' : ''} (${topBat.balls_faced || 0}b)</div></div>`);
+    }
+    if (topBowl) {
+      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Best bowling</div><div class="result-note-value">${escHtml(topBowl.player_name || '')} ${topBowl.wickets || 0}/${topBowl.runs_conceded || 0}</div></div>`);
+    }
+    if (lastInn && match.target) {
+      const targetRuns = match.target - 1;
+      const finalMargin = rt === 'wickets'
+        ? `${match.winning_team_name} got there with ${match.margin_wickets} wicket${match.margin_wickets !== 1 ? 's' : ''} to spare`
+        : rt === 'runs'
+          ? `${match.winning_team_name} defended ${targetRuns}`
+          : (match.result_string || 'Final innings complete');
+      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Match swing</div><div class="result-note-value">${escHtml(finalMargin)}</div></div>`);
+    }
+  }
+  const notesEl = document.getElementById('result-match-notes');
+  if (notesEl) notesEl.innerHTML = noteCards.join('');
 
   // Records broken this match
   const recEl = document.getElementById('result-records');

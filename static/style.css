@@ -1184,54 +1184,138 @@ select option { background: var(--surface); color: var(--text); }
 
 /* Innings transition */
 .innings-transition-card {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
   text-align: center;
-  padding: 60px 40px;
+  padding: 42px 40px 36px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0)),
+    radial-gradient(circle at top, rgba(46,204,113,0.10), rgba(46,204,113,0) 45%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.innings-transition-kicker {
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  margin-bottom: 14px;
 }
 .innings-transition-text {
   font-family: var(--font-score);
-  font-size: var(--fs-2xl);
+  font-size: clamp(30px, 4vw, 46px);
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+  line-height: 1.1;
+}
+.innings-transition-scoreline {
+  font-family: var(--font-score);
+  font-size: var(--fs-xl);
+  color: var(--gold);
+  margin-bottom: 10px;
 }
 .innings-transition-target {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   color: var(--accent);
+  font-weight: 700;
+}
+.innings-transition-stakes {
+  margin: 18px auto 0;
+  max-width: 560px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.innings-transition-stakes .stake-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding-bottom: 6px;
+}
+.innings-transition-stakes .stake-line:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.innings-transition-stakes .stake-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+.innings-transition-stakes .stake-value {
+  text-align: right;
+  font-weight: 700;
 }
 
 /* Result screen */
 .result-card {
-  max-width: 600px;
+  max-width: 860px;
   width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 48px 40px;
+  padding: 38px 40px 34px;
   box-shadow: var(--shadow);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0)),
+    radial-gradient(circle at top, rgba(241,196,15,0.11), rgba(241,196,15,0) 38%),
+    var(--surface);
+}
+.result-kicker {
+  text-align: center;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  margin-bottom: 14px;
 }
 .result-headline {
   font-family: var(--font-score);
-  font-size: var(--fs-2xl);
+  font-size: clamp(30px, 4vw, 48px);
   font-weight: 700;
-  color: var(--accent);
+  color: var(--text);
   text-align: center;
   margin-bottom: 8px;
-  line-height: 1.2;
+  line-height: 1.08;
 }
 .result-subline {
   text-align: center;
   color: var(--text-muted);
-  font-size: var(--fs-base);
-  margin-bottom: 32px;
+  font-size: var(--fs-sm);
+  margin-bottom: 12px;
+}
+.result-verdict {
+  text-align: center;
+  font-size: var(--fs-lg);
+  color: var(--gold);
+  font-weight: 700;
+  margin-bottom: 26px;
 }
 .result-innings-summary {
-  margin-bottom: 24px;
+  margin-bottom: 22px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 18px;
 }
 .result-innings-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
   font-family: var(--font-score);
 }
@@ -1248,6 +1332,31 @@ select option { background: var(--surface); color: var(--text); }
 .result-innings-overs {
   font-size: var(--fs-xs);
   color: var(--text-muted);
+}
+.result-match-notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.result-note-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.result-note-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.result-note-value {
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 700;
+  line-height: 1.35;
 }
 .result-records {
   background: var(--surface2);
@@ -1326,6 +1435,16 @@ select option { background: var(--surface); color: var(--text); }
   flex-wrap: wrap;
 }
 .result-nav-btns.hidden { display: none; }
+
+@media (max-width: 720px) {
+  .innings-transition-card,
+  .result-card {
+    padding: 28px 20px 24px;
+  }
+  .result-match-notes {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* Live view layout */
 #match-live {
