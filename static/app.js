@@ -989,6 +989,7 @@ function showMatchToss() {
   const btn = document.getElementById('btn-flip-coin');
   btn.disabled = false;
   btn.onclick = flipCoin;
+  document.querySelectorAll('.toss-choices .btn').forEach(b => { b.disabled = false; });
 }
 
 function flipCoin() {
