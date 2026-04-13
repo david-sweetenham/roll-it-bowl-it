@@ -8272,21 +8272,29 @@ function setWorldDateFmt(fmt) {
   if (el && raw) el.textContent = _formatWorldDate(raw);
 }
 
-const _DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
 function _formatWorldDate(iso) {
-  if (!iso) return '?';
-  const fmt = _wdDateFmt();
-  const [y, m, d] = iso.split('-');
-  if (!y || !m || !d) return iso;
-  const dow = _DOW_SHORT[new Date(parseInt(y), parseInt(m) - 1, parseInt(d)).getDay()];
-  if (fmt === 'usa') return `${dow} ${m}/${d}/${y}`;
-  if (fmt === 'iso') return `${dow} ${iso}`;
-  return `${dow} ${d}/${m}/${y}`; // UK default
+  if (!iso) return '—';
+  try {
+    const parts = iso.split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (!y || !m || !d) return iso;
+    const dt  = new Date(y, m - 1, d);
+    const dow = dt.toLocaleDateString('en-GB', { weekday: 'short' });
+    const fmt = _wdDateFmt();
+    const dd  = String(d).padStart(2, '0');
+    const mm  = String(m).padStart(2, '0');
+    if (fmt === 'usa') return `${dow} ${mm}/${dd}/${y}`;
+    if (fmt === 'iso') return `${dow} ${iso}`;
+    return `${dow} ${dd}/${mm}/${y}`;
+  } catch (e) {
+    return iso;
+  }
 }
 
 // Short alias for use in template strings
-const _fmtDate = _formatWorldDate;
+function _fmtDate(iso) { return _formatWorldDate(iso); }
 
 // ── World Dashboard ───────────────────────────────────────────────────────────
 
@@ -8319,8 +8327,8 @@ async function loadWorldDetail(worldId) {
   ['uk', 'usa', 'iso'].forEach(f => {
     document.getElementById(`wd-fmt-${f}`)?.classList.toggle('active', f === _dateFmt);
   });
-  const dateDisplayEl = document.getElementById('wd-date-display');
-  if (dateDisplayEl) dateDisplayEl.textContent = _formatWorldDate(w.current_date || '');
+  const _wdDateEl = document.getElementById('wd-date-display');
+  if (_wdDateEl) _wdDateEl.textContent = _formatWorldDate(w.current_date || '');
   document.getElementById('wd-density-badge').textContent = w.calendar_density || 'moderate';
   document.getElementById('wd-scope-badge').textContent = _titleCaseWords(worldScope);
 

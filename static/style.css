@@ -3637,28 +3637,27 @@ body.broadcast-mode .btn-howzat {
 .world-header { display:flex; align-items:center; justify-content:space-between;
   flex-wrap:wrap; gap:8px; }
 
-/* World current-date header group */
-.wd-date-header-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+/* World current-date centred block */
+.wd-date-centre {
+  text-align: center;
+  padding: 14px 0 8px;
 }
 .wd-date-display {
-  font-size: 1.75rem;
+  font-size: 2.4rem;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   color: #e8f4fd;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.1;
+  margin-bottom: 8px;
 }
 .wd-date-fmt-group {
-  display: flex;
-  gap: 3px;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: center;
 }
 .wd-fmt-btn {
-  padding: 2px 7px;
-  font-size: 0.7rem;
+  padding: 2px 8px;
+  font-size: 0.68rem;
   font-family: 'Courier New', monospace;
   background: transparent;
   border: 1px solid rgba(127,179,211,0.3);
