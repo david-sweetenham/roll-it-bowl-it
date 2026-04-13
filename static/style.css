@@ -1258,6 +1258,20 @@ select option { background: var(--surface); color: var(--text); }
   text-align: right;
   font-weight: 700;
 }
+.innings-transition-actions {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.innings-transition-countdown {
+  min-height: 20px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+}
 
 /* Result screen */
 .result-card {

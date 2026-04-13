@@ -349,6 +349,10 @@
           <div id="innings-transition-scoreline" class="innings-transition-scoreline"></div>
           <div id="innings-transition-target" class="innings-transition-target"></div>
           <div id="innings-transition-stakes" class="innings-transition-stakes"></div>
+          <div class="innings-transition-actions">
+            <button id="btn-innings-continue" class="btn btn-primary" type="button">Continue</button>
+            <div id="innings-transition-countdown" class="innings-transition-countdown"></div>
+          </div>
         </div>
       </div>
 
@@ -1422,6 +1426,13 @@
               <select id="settings-default-scoring" class="select-input" onchange="setDefaultScoringMode(this.value)">
                 <option value="classic">Classic</option>
                 <option value="modern">Modern</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label>Default Roll Mode</label>
+              <select id="settings-default-roll-mode" class="select-input" onchange="setDefaultRollMode(this.value)">
+                <option value="auto">Auto</option>
+                <option value="manual">Manual</option>
               </select>
             </div>
             <p class="settings-help text-muted">Classic uses pure dice values. Modern keeps the same HOWZAT appeal chain but softens some big hits in longer formats.</p>

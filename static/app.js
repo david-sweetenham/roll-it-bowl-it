@@ -21,6 +21,7 @@ const AppState = {
   defaultFormat:     'T20',
   defaultVenueId:    null,
   defaultScoringMode:'modern',
+  defaultRollMode:   'auto',
   recordPopups:      false,   // false = collect records and show at end of match
   playerMode:        'ai_vs_ai',   // 'ai_vs_ai' | 'human_vs_ai' | 'human_vs_human'
   humanTeamId:       null,         // team id for human-controlled team in human_vs_ai
@@ -1195,13 +1196,8 @@ function initLiveView(state) {
 
   // Restore roll mode preference
   try {
-    const savedMode = localStorage.getItem('ribi_roll_mode');
-    if (savedMode === 'manual' || savedMode === 'auto') {
-      MatchUI.rollMode = savedMode;
-    } else {
-      MatchUI.rollMode = 'auto';
-    }
-  } catch (_) { MatchUI.rollMode = 'auto'; }
+    MatchUI.rollMode = getDefaultRollMode();
+  } catch (_) { MatchUI.rollMode = getDefaultRollMode(); }
 
   // Roll mode toggle visibility
   const toggleEl = document.getElementById('roll-mode-toggle');
@@ -1633,6 +1629,10 @@ function getCurrentMatchScoringMode() {
   return MatchUI.lastState?.match?.scoring_mode
     || AppState.activeMatch?.scoring_mode
     || getDefaultScoringMode();
+}
+
+function getDefaultRollMode() {
+  return AppState.defaultRollMode === 'manual' ? 'manual' : 'auto';
 }
 
 function _liveWagonCanvas() {
@@ -2404,7 +2404,6 @@ function setRollMode(mode, silent = false) {
 /** Apply mode change immediately. */
 function _applyRollMode(mode) {
   MatchUI.rollMode = mode;
-  try { localStorage.setItem('ribi_roll_mode', mode); } catch (_) {}
 
   const autoBtn   = document.getElementById('btn-mode-auto');
   const manualBtn = document.getElementById('btn-mode-manual');
@@ -3155,6 +3154,8 @@ async function showInningsTransition(completedInnings, target) {
   const scorelineEl = document.getElementById('innings-transition-scoreline');
   const targetEl = document.getElementById('innings-transition-target');
   const stakesEl = document.getElementById('innings-transition-stakes');
+  const continueBtn = document.getElementById('btn-innings-continue');
+  const countdownEl = document.getElementById('innings-transition-countdown');
   MatchUI._transitionActive = true;
   live.classList.add('hidden');
   el.classList.remove('hidden');
@@ -3219,25 +3220,46 @@ async function showInningsTransition(completedInnings, target) {
     if (stakesEl) stakesEl.innerHTML = '';
   }
 
-  // In broadcast mode the card stays until clicked; otherwise auto-advance
   const isBroadcast = AppState.broadcastMode;
-  const maxHold = animMs(isBroadcast ? 99999 : 8000, isBroadcast ? 800 : 2000, 0);
+  const maxHold = animMs(isBroadcast ? 10000 : 8000, isBroadcast ? 5000 : 2000, 0);
+  if (continueBtn) continueBtn.disabled = false;
 
   try {
     if (maxHold === 0) {
-      el.classList.add('hidden');
-      live.classList.remove('hidden');
-    } else if (isBroadcast) {
-      // Click or 8s timeout
-      await new Promise(resolve => {
-        const tid = setTimeout(resolve, 8000);
-        const onClick = () => { clearTimeout(tid); el.removeEventListener('click', onClick); resolve(); };
-        el.addEventListener('click', onClick);
-      });
+      if (countdownEl) countdownEl.textContent = '';
       el.classList.add('hidden');
       live.classList.remove('hidden');
     } else {
-      await sleep(maxHold);
+      await new Promise(resolve => {
+        const deadline = Date.now() + maxHold;
+        let intervalId = null;
+        let timeoutId = null;
+        const clearTimers = () => {
+          if (intervalId) clearInterval(intervalId);
+          if (timeoutId) clearTimeout(timeoutId);
+          if (continueBtn) continueBtn.onclick = null;
+        };
+        const finish = () => {
+          clearTimers();
+          resolve();
+        };
+        const updateCountdown = () => {
+          if (!countdownEl) return;
+          const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+          countdownEl.textContent = secs > 0
+            ? `Auto continuing in ${secs}s`
+            : 'Continuing...';
+        };
+        updateCountdown();
+        intervalId = setInterval(updateCountdown, 250);
+        timeoutId = setTimeout(finish, maxHold);
+        if (continueBtn) {
+          continueBtn.onclick = () => {
+            if (countdownEl) countdownEl.textContent = 'Continuing...';
+            finish();
+          };
+        }
+      });
       el.classList.add('hidden');
       live.classList.remove('hidden');
     }
@@ -4360,6 +4382,8 @@ async function loadSettingsScreen() {
   if (fmtSel && AppState.defaultFormat) fmtSel.value = AppState.defaultFormat;
   const scoringSel = document.getElementById('settings-default-scoring');
   if (scoringSel) scoringSel.value = getDefaultScoringMode();
+  const rollSel = document.getElementById('settings-default-roll-mode');
+  if (rollSel) rollSel.value = getDefaultRollMode();
 
   // Load venues for default venue dropdown
   const venSel = document.getElementById('settings-default-venue');
@@ -4406,6 +4430,14 @@ function setDefaultScoringMode(mode) {
   }
   syncWelcomeScoringMode();
   syncPlayScoringMode();
+}
+
+function setDefaultRollMode(mode) {
+  const nextMode = mode === 'manual' ? 'manual' : 'auto';
+  AppState.defaultRollMode = nextMode;
+  try { localStorage.setItem('ribi_default_roll_mode', nextMode); } catch (_) {}
+  const rollSel = document.getElementById('settings-default-roll-mode');
+  if (rollSel) rollSel.value = nextMode;
 }
 
 function setDefaultVenue(venueId) {
@@ -9213,6 +9245,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const scoringSaved = localStorage.getItem('ribi_default_scoring_mode');
     if (scoringSaved && ['classic', 'modern'].includes(scoringSaved)) {
       AppState.defaultScoringMode = scoringSaved;
+    }
+    const rollModeSaved = localStorage.getItem('ribi_default_roll_mode');
+    if (rollModeSaved && ['auto', 'manual'].includes(rollModeSaved)) {
+      AppState.defaultRollMode = rollModeSaved;
     }
     const venueSaved = localStorage.getItem('ribi_default_venue');
     if (venueSaved) {
