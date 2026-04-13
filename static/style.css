@@ -3649,7 +3649,7 @@ body.broadcast-mode .btn-howzat {
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--color-text);
+  color: var(--text, #e8f4fd);
   line-height: 1;
 }
 .wd-date-fmt-group {
@@ -3658,17 +3658,17 @@ body.broadcast-mode .btn-howzat {
 }
 .wd-fmt-btn {
   padding: 3px 8px;
-  font-size: var(--fs-xs);
-  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs, 0.72rem);
+  font-family: var(--font-score, monospace);
   background: transparent;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--border, rgba(127,179,211,0.15));
   border-radius: 4px;
-  color: var(--color-text-muted, #aaa);
+  color: var(--text-muted, #7fb3d3);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.wd-fmt-btn:hover { background: var(--color-surface2, #2a2a2a); color: var(--color-text); }
-.wd-fmt-btn.active { background: var(--color-primary, #3a7a4a); color: #fff; border-color: var(--color-primary, #3a7a4a); }
+.wd-fmt-btn:hover { background: var(--surface2, #1a3060); color: var(--text, #e8f4fd); }
+.wd-fmt-btn.active { background: var(--accent, #2ecc71); color: #000; border-color: var(--accent, #2ecc71); }
 
 /* ── Wizard ──────────────────────────────────────────────────────────────── */
 .world-wizard { margin-top:16px; }
