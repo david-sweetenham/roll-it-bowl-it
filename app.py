@@ -2585,6 +2585,308 @@ def _check_quick_sim_world_records(db, world_id, res, match_id, teams_map):
                              'runs_conceded': tb.get('runs') or 0}), fmt)
 
 
+def _parse_quick_scoreline(score_str):
+    text = str(score_str or '').strip()
+    if not text:
+        return 0, 0, 0.0
+    parts = text.split()
+    score_bits = parts[0]
+    overs_text = parts[1] if len(parts) > 1 else '0.0'
+    try:
+        runs_text, wkts_text = score_bits.split('/', 1)
+        runs = int(runs_text)
+        wkts = int(wkts_text)
+    except Exception:
+        runs, wkts = 0, 0
+    try:
+        overs = float(overs_text)
+    except Exception:
+        overs = 0.0
+    return runs, wkts, overs
+
+
+def _cricket_overs_to_balls(overs_value):
+    text = str(overs_value or '0')
+    if '.' in text:
+        ovs, balls = text.split('.', 1)
+        return max(0, int(ovs or 0) * 6 + int((balls or '0')[:1] or 0))
+    return max(0, int(float(text) * 6))
+
+
+def _balls_to_cricket_overs(ball_count):
+    overs = max(0, int(ball_count or 0)) // 6
+    balls = max(0, int(ball_count or 0)) % 6
+    return float(f"{overs}.{balls}")
+
+
+def _allocate_integer_total(weights, total, minimums=None):
+    if total <= 0 or not weights:
+        return [0 for _ in weights]
+    if minimums is None:
+        minimums = [0 for _ in weights]
+    minimums = list(minimums) + [0] * max(0, len(weights) - len(minimums))
+    allocations = minimums[:len(weights)]
+    remaining = max(0, total - sum(allocations))
+    if remaining == 0:
+        return allocations
+    shaped = [max(0.1, float(w)) * random.uniform(0.8, 1.2) for w in weights]
+    weight_sum = sum(shaped) or 1.0
+    raw = [(w / weight_sum) * remaining for w in shaped]
+    ints = [int(x) for x in raw]
+    fracs = sorted(
+        range(len(raw)),
+        key=lambda idx: (raw[idx] - ints[idx]),
+        reverse=True
+    )
+    for idx, val in enumerate(ints):
+        allocations[idx] += val
+    leftover = remaining - sum(ints)
+    for idx in fracs[:leftover]:
+        allocations[idx] += 1
+    return allocations
+
+
+def _boundary_breakdown(runs):
+    remaining = max(0, int(runs or 0))
+    sixes = 0
+    fours = 0
+    if remaining >= 12:
+        six_cap = min(remaining // 6, 4)
+        sixes = random.randint(0, six_cap)
+        remaining -= sixes * 6
+    if remaining >= 4:
+        four_cap = min(remaining // 4, 10)
+        fours = random.randint(0, four_cap)
+        remaining -= fours * 4
+    return fours, sixes
+
+
+def _persist_quick_sim_innings(db, match_id, innings_number, batting_team_id, bowling_team_id,
+                               total_runs, total_wickets, overs_completed, fmt,
+                               top_scorer=None, top_bowler=None):
+    innings_id = database.create_innings(db, match_id, innings_number, batting_team_id, bowling_team_id)
+
+    batting_players = sorted(
+        database.get_players_for_team(db, batting_team_id),
+        key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0)
+    )
+    bowling_players = [
+        p for p in database.get_players_for_team(db, bowling_team_id)
+        if p.get('bowling_type') != 'none'
+    ]
+    bowling_players = sorted(
+        bowling_players,
+        key=lambda p: (-(p.get('bowling_rating') or 0), p.get('id') or 0)
+    )
+
+    batter_row_ids = {}
+    for p in batting_players:
+        batter_row_ids[p['id']] = database.create_batter_innings(
+            db, innings_id, p['id'], p.get('batting_position')
+        )
+
+    bowler_row_ids = {}
+    for p in bowling_players:
+        bowler_row_ids[p['id']] = database.create_bowler_innings(db, innings_id, p['id'])
+
+    total_balls = max(12, _cricket_overs_to_balls(overs_completed))
+    extra_cap = min(max(4, total_runs // 12), 20)
+    extras_total = min(total_runs, random.randint(4, extra_cap)) if total_runs > 0 else 0
+    batting_total = max(0, total_runs - extras_total)
+    dismissed_count = max(0, min(int(total_wickets or 0), 10))
+
+    min_batted = dismissed_count + 1 if dismissed_count >= 10 else dismissed_count + 2
+    batters_used = min(len(batting_players), max(2, min_batted))
+    active_batters = batting_players[:batters_used]
+
+    run_weights = []
+    for idx, p in enumerate(active_batters):
+        base = max(1.0, 14 - idx + (p.get('batting_rating') or 3) * 1.8)
+        if top_scorer and p['id'] == top_scorer.get('player_id'):
+            base *= 2.4
+        run_weights.append(base)
+    run_alloc = _allocate_integer_total(run_weights, batting_total)
+    if top_scorer and top_scorer.get('player_id') in [p['id'] for p in active_batters]:
+        anchor_idx = next(i for i, p in enumerate(active_batters) if p['id'] == top_scorer.get('player_id'))
+        top_idx = max(range(len(run_alloc)), key=lambda i: run_alloc[i])
+        if top_idx != anchor_idx:
+            run_alloc[anchor_idx], run_alloc[top_idx] = run_alloc[top_idx], run_alloc[anchor_idx]
+
+    ball_weights = [
+        max(1.0, runs + (8 if idx < 2 else 3) + random.uniform(0, 6))
+        for idx, runs in enumerate(run_alloc)
+    ]
+    ball_minimums = [1 if runs > 0 else 0 for runs in run_alloc]
+    balls_alloc = _allocate_integer_total(ball_weights, total_balls, minimums=ball_minimums)
+
+    not_out_count = 1 if dismissed_count >= 10 else max(1, batters_used - dismissed_count)
+    dismissed_batters = active_batters[:dismissed_count]
+    not_out_batters = active_batters[dismissed_count:dismissed_count + not_out_count]
+
+    byes = random.randint(0, min(4, extras_total))
+    remaining_extras = extras_total - byes
+    leg_byes = random.randint(0, min(4, remaining_extras))
+    remaining_extras -= leg_byes
+    wides = random.randint(0, remaining_extras)
+    remaining_extras -= wides
+    no_balls = remaining_extras
+
+    database.update_innings(db, innings_id, {
+        'total_runs': total_runs,
+        'total_wickets': total_wickets,
+        'overs_completed': overs_completed,
+        'extras_byes': byes,
+        'extras_legbyes': leg_byes,
+        'extras_wides': wides,
+        'extras_noballs': no_balls,
+        'status': 'complete',
+    })
+
+    for idx, batter in enumerate(active_batters):
+        runs = run_alloc[idx]
+        balls = max(1 if runs > 0 else 0, balls_alloc[idx])
+        fours, sixes = _boundary_breakdown(runs)
+        update = {
+            'runs': runs,
+            'balls_faced': balls,
+            'fours': fours,
+            'sixes': sixes,
+        }
+        if batter in dismissed_batters:
+            update.update({
+                'dismissal_type': random.choice(['caught', 'bowled', 'lbw', 'run out']),
+                'not_out': 0,
+                'status': 'dismissed',
+            })
+        elif batter in not_out_batters:
+            update.update({
+                'not_out': 1,
+                'status': 'batting',
+            })
+        database.update_batter_innings(db, batter_row_ids[batter['id']], update)
+
+    running_score = 0
+    running_balls = 0
+    if len(active_batters) >= 2:
+        opening_pid_1 = active_batters[0]['id']
+        opening_pid_2 = active_batters[1]['id']
+        partnership_id = database.create_partnership(db, innings_id, 0, opening_pid_1, opening_pid_2)
+        if dismissed_count:
+            first_partnership_runs = max(0, int(total_runs * random.uniform(0.08, 0.18)))
+            first_partnership_balls = max(6, int(total_balls * random.uniform(0.08, 0.18)))
+        else:
+            first_partnership_runs = total_runs
+            first_partnership_balls = total_balls
+        database.update_partnership(db, partnership_id, {
+            'runs': min(total_runs, first_partnership_runs),
+            'balls': min(total_balls, first_partnership_balls),
+        })
+
+    for wicket_no, batter in enumerate(dismissed_batters, start=1):
+        remaining_wickets = max(1, dismissed_count - wicket_no + 1)
+        remaining_runs = max(0, total_runs - running_score)
+        remaining_balls = max(1, total_balls - running_balls)
+        increment_runs = remaining_runs if wicket_no == dismissed_count else max(
+            1, int(remaining_runs / remaining_wickets * random.uniform(0.75, 1.15))
+        )
+        increment_balls = remaining_balls if wicket_no == dismissed_count else max(
+            1, int(remaining_balls / remaining_wickets * random.uniform(0.75, 1.15))
+        )
+        running_score = min(total_runs, running_score + increment_runs)
+        running_balls = min(total_balls, running_balls + increment_balls)
+        database.insert_fall_of_wicket(
+            db, innings_id, wicket_no, running_score,
+            _balls_to_cricket_overs(running_balls), batter['id']
+        )
+        if wicket_no < batters_used - 1:
+            b1 = active_batters[min(wicket_no, batters_used - 2)]['id']
+            b2 = active_batters[min(wicket_no + 1, batters_used - 1)]['id']
+            pid = database.create_partnership(db, innings_id, wicket_no, b1, b2)
+            next_runs = max(0, total_runs - running_score) if wicket_no == dismissed_count else max(
+                0, int((total_runs - running_score) / max(1, remaining_wickets - 1))
+            )
+            next_balls = max(0, total_balls - running_balls) if wicket_no == dismissed_count else max(
+                0, int((total_balls - running_balls) / max(1, remaining_wickets - 1))
+            )
+            database.update_partnership(db, pid, {'runs': next_runs, 'balls': next_balls})
+
+    if dismissed_count == 0 and len(active_batters) >= 2:
+        # Keep opening partnership as full unbeaten stand
+        pass
+
+    bowlers_used = bowling_players[:min(len(bowling_players), 5 if fmt in ('T20', 'ODI') else 6)]
+    if top_bowler and top_bowler.get('player_id') and all(p['id'] != top_bowler['player_id'] for p in bowlers_used):
+        anchored = next((p for p in bowling_players if p['id'] == top_bowler.get('player_id')), None)
+        if anchored:
+            bowlers_used = ([anchored] + bowlers_used)[:max(1, len(bowlers_used))]
+
+    max_balls_per_bowler = {'T20': 24, 'ODI': 60}.get(fmt)
+    bowling_weights = []
+    for idx, bowler in enumerate(bowlers_used):
+        base = max(1.0, (bowler.get('bowling_rating') or 3) * 2.2 - idx * 0.4)
+        if top_bowler and bowler['id'] == top_bowler.get('player_id'):
+            base *= 1.8
+        bowling_weights.append(base)
+    balls_alloc = _allocate_integer_total(bowling_weights, total_balls)
+    if max_balls_per_bowler:
+        overflow = 0
+        for idx, balls in enumerate(balls_alloc):
+            if balls > max_balls_per_bowler:
+                overflow += balls - max_balls_per_bowler
+                balls_alloc[idx] = max_balls_per_bowler
+        idx = 0
+        while overflow > 0 and bowlers_used:
+            cap_left = max_balls_per_bowler - balls_alloc[idx % len(bowlers_used)]
+            if cap_left > 0:
+                add = min(cap_left, overflow)
+                balls_alloc[idx % len(bowlers_used)] += add
+                overflow -= add
+            idx += 1
+
+    wicket_weights = []
+    for idx, bowler in enumerate(bowlers_used):
+        base = max(1.0, (bowler.get('bowling_rating') or 3) + random.uniform(0, 2))
+        if top_bowler and bowler['id'] == top_bowler.get('player_id'):
+            base *= 2.2
+        wicket_weights.append(base)
+    wickets_alloc = _allocate_integer_total(wicket_weights, total_wickets)
+    if top_bowler and top_bowler.get('player_id') in [p['id'] for p in bowlers_used]:
+        anchor_idx = next(i for i, p in enumerate(bowlers_used) if p['id'] == top_bowler.get('player_id'))
+        top_idx = max(range(len(wickets_alloc)), key=lambda i: wickets_alloc[i])
+        if top_idx != anchor_idx:
+            wickets_alloc[anchor_idx], wickets_alloc[top_idx] = wickets_alloc[top_idx], wickets_alloc[anchor_idx]
+
+    run_weights = []
+    for idx, bowler in enumerate(bowlers_used):
+        base = max(1.0, balls_alloc[idx] + random.uniform(0, 8))
+        if top_bowler and bowler['id'] == top_bowler.get('player_id'):
+            base *= 0.8
+        run_weights.append(base)
+    runs_alloc = _allocate_integer_total(run_weights, total_runs)
+
+    for idx, bowler in enumerate(bowlers_used):
+        balls = balls_alloc[idx]
+        overs = balls // 6
+        rem_balls = balls % 6
+        conceded = runs_alloc[idx]
+        wickets = wickets_alloc[idx]
+        maiden_cap = overs if conceded <= overs * 3 else max(0, overs - 1)
+        maidens = random.randint(0, maiden_cap) if maiden_cap > 0 else 0
+        wides_conceded = min(wides, random.randint(0, wides)) if wides else 0
+        no_balls_conceded = min(no_balls, random.randint(0, no_balls)) if no_balls else 0
+        database.update_bowler_innings(db, bowler_row_ids[bowler['id']], {
+            'overs': overs,
+            'balls': rem_balls,
+            'maidens': maidens,
+            'runs_conceded': conceded,
+            'wickets': wickets,
+            'wides': wides_conceded,
+            'no_balls': no_balls_conceded,
+        })
+
+    return innings_id
+
+
 def _persist_world_sim(db, world_id, results, new_current_date, updated_player_states,
                        world_state=None):
     """Persist simulate_world_to() results into the database."""
@@ -2620,6 +2922,10 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
         team1_id   = res.get('team1_id')
         team2_id   = res.get('team2_id')
         winner_id  = res.get('winner_id')
+        top_scorer = res.get('top_scorer') or {}
+        top_bowler = res.get('top_bowler') or {}
+        team1_player_ids = {p['id'] for p in (world_state.get('teams', {}).get(team1_id) or {}).get('players', [])} if world_state else set()
+        team2_player_ids = {p['id'] for p in (world_state.get('teams', {}).get(team2_id) or {}).get('players', [])} if world_state else set()
 
         # Determine venue from fixture if possible
         venue_id = fallback_venue_id
@@ -2652,6 +2958,21 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
                 'top_bowler':  res.get('top_bowler'),
             }),
         })
+
+        t1_runs, t1_wkts, t1_overs = _parse_quick_scoreline(res.get('team1_score'))
+        t2_runs, t2_wkts, t2_overs = _parse_quick_scoreline(res.get('team2_score'))
+        _persist_quick_sim_innings(
+            db, match_id, 1, team1_id, team2_id,
+            t1_runs, t1_wkts, t1_overs, fmt,
+            top_scorer=top_scorer if top_scorer.get('player_id') in team1_player_ids else None,
+            top_bowler=top_bowler if top_bowler.get('player_id') in team2_player_ids else None,
+        )
+        _persist_quick_sim_innings(
+            db, match_id, 2, team2_id, team1_id,
+            t2_runs, t2_wkts, t2_overs, fmt,
+            top_scorer=top_scorer if top_scorer.get('player_id') in team2_player_ids else None,
+            top_bowler=top_bowler if top_bowler.get('player_id') in team1_player_ids else None,
+        )
 
         if fixture_id:
             database.update_fixture(db, fixture_id, {'match_id': match_id, 'status': 'complete'})

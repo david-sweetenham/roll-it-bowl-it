@@ -3432,14 +3432,14 @@ async function showHistoricalMatchView(matchId, state) {
     scorecardEl.innerHTML = _renderFullScorecardHtml(sc);
   }
 
+  const deliveriesRes = await api('GET', `/api/matches/${matchId}/deliveries`);
+  const deliveries = deliveriesRes?.deliveries || [];
   const postWrap = document.getElementById('canvas-post-match');
   if (postWrap) {
-    postWrap.classList.toggle('hidden', !(sc.innings && sc.innings.length));
+    postWrap.classList.toggle('hidden', !deliveries.length);
   }
 
-  if (sc.innings && sc.innings.length) {
-    const deliveriesRes = await api('GET', `/api/matches/${matchId}/deliveries`);
-    const deliveries = deliveriesRes?.deliveries || [];
+  if (deliveries.length) {
     const inn1Del = deliveries.filter(d => d.innings_number === 1);
     const inn2Del = deliveries.filter(d => d.innings_number === 2);
     drawManhattan('canvas-manhattan', inn1Del, inn2Del);
