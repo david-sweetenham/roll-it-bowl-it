@@ -4808,13 +4808,34 @@ def simulate_world(id):
                 world_state=world_state,
             )
 
-        # Enrich each result with team names from world_state
+        # Enrich each result with team names.
+        # teams_map only contains teams in settings.team_ids; combined worlds also
+        # contain domestic teams that weren't in that list, so fall back to DB.
         teams_map = world_state.get('teams', {})
+        name_cache = {tid: info.get('name', '?') for tid, info in teams_map.items()}
+        missing_tids = set()
         for r in results:
-            t1 = teams_map.get(r.get('team1_id')) or {}
-            t2 = teams_map.get(r.get('team2_id')) or {}
-            r['team1_name'] = t1.get('name', '?')
-            r['team2_name'] = t2.get('name', '?')
+            if r.get('team1_id') and r['team1_id'] not in name_cache:
+                missing_tids.add(r['team1_id'])
+            if r.get('team2_id') and r['team2_id'] not in name_cache:
+                missing_tids.add(r['team2_id'])
+        for tid in missing_tids:
+            team_row = database.get_team(db, tid)
+            if team_row:
+                name_cache[tid] = team_row['name']
+        for r in results:
+            r['team1_name'] = name_cache.get(r.get('team1_id'), '?')
+            r['team2_name'] = name_cache.get(r.get('team2_id'), '?')
+            # Rebuild summary now that we have real names
+            w_name = r['team1_name'] if r.get('winner_id') == r.get('team1_id') else r['team2_name']
+            if r.get('result_type') == 'runs' and r.get('margin_runs'):
+                r['summary'] = f"{w_name} won by {r['margin_runs']} run{'s' if r['margin_runs'] != 1 else ''}"
+            elif r.get('result_type') == 'wickets' and r.get('margin_wickets'):
+                r['summary'] = f"{w_name} won by {r['margin_wickets']} wicket{'s' if r['margin_wickets'] != 1 else ''}"
+            elif r.get('result_type') == 'tie':
+                r['summary'] = "Match tied"
+            elif r.get('result_type') == 'draw':
+                r['summary'] = "Match drawn"
 
         # Build notable events string list (kept for backward compat)
         dates   = [r['scheduled_date'] for r in results if r.get('scheduled_date')]

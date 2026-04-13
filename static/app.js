@@ -8961,8 +8961,12 @@ async function simulateWorld(target) {
 
   // Stash paused fixture onto the report so _renderSimReport can use it
   if (res.sim_report) res.sim_report._pausedFixture = res.paused_at_fixture || null;
-  _renderSimReport(res.sim_report);
-  showScreen('world-sim-report');
+
+  // Show vidiprinter, then transition to full report when done
+  _vidiprinterShow(res.sim_report, () => {
+    _renderSimReport(res.sim_report);
+    showScreen('world-sim-report');
+  });
 }
 
 async function extendWorldCalendar() {
@@ -8976,6 +8980,179 @@ async function extendWorldCalendar() {
   if (!res?.success) return;
   _showToast(`Generated ${res.new_fixture_count || 0} more fixtures`, 2200);
   await loadWorldDetail(id);
+}
+
+// ── Sim Vidiprinter ───────────────────────────────────────────────────────────
+
+const _VDP = {
+  _timer:    null,
+  _results:  [],
+  _idx:      0,
+  _onDone:   null,
+  _speed:    320,   // ms between results
+  _paused:   false,
+};
+
+const _VDP_FORMAT_BADGE = { Test: 'T', ODI: 'O', T20: '20' };
+
+function _vidiprinterShow(report, onDone) {
+  if (!report) { onDone?.(); return; }
+
+  const results = report.results || [];
+  if (!results.length) { onDone?.(); return; }
+
+  _VDP._results = results;
+  _VDP._idx     = 0;
+  _VDP._onDone  = onDone;
+  _VDP._paused  = false;
+
+  const overlay = _vdpGetOverlay();
+  overlay.classList.remove('hidden');
+
+  const from = report.date_from || '';
+  const to   = report.date_to   || '';
+  const n    = results.length;
+
+  overlay.innerHTML = `
+    <div class="vdp-header">
+      <div class="vdp-title">WORLD SIMULATION</div>
+      <div class="vdp-daterange">${escHtml(from)}${to && to !== from ? ' → ' + escHtml(to) : ''} &nbsp;·&nbsp; ${n} match${n !== 1 ? 'es' : ''}</div>
+      <div class="vdp-header-controls">
+        <button class="vdp-btn" id="vdp-btn-pause" onclick="_vdpTogglePause()">⏸</button>
+        <select class="vdp-speed-sel" id="vdp-speed-sel" onchange="_vdpSetSpeed(this.value)">
+          <option value="600">Slow</option>
+          <option value="320" selected>Normal</option>
+          <option value="120">Fast</option>
+          <option value="0">Instant</option>
+        </select>
+        <button class="vdp-btn vdp-btn-skip" onclick="_vdpSkipAll()">Skip All →</button>
+      </div>
+    </div>
+    <div class="vdp-feed" id="vdp-feed"></div>
+    <div class="vdp-footer">
+      <div class="vdp-progress-text" id="vdp-progress-text">0 / ${n}</div>
+      <div class="vdp-progress-bar"><div class="vdp-progress-fill" id="vdp-progress-fill" style="width:0%"></div></div>
+    </div>`;
+
+  _vdpTick();
+}
+
+function _vdpGetOverlay() {
+  let el = document.getElementById('sim-vidiprinter');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sim-vidiprinter';
+    el.className = 'sim-vidiprinter hidden';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function _vdpTick() {
+  clearTimeout(_VDP._timer);
+  if (_VDP._paused) return;
+
+  const results = _VDP._results;
+  if (_VDP._idx >= results.length) {
+    _vdpFinish();
+    return;
+  }
+
+  _vdpRenderResult(results[_VDP._idx]);
+  _VDP._idx++;
+
+  const pct = Math.round(_VDP._idx / results.length * 100);
+  const fill = document.getElementById('vdp-progress-fill');
+  const text = document.getElementById('vdp-progress-text');
+  if (fill) fill.style.width = pct + '%';
+  if (text) text.textContent = `${_VDP._idx} / ${results.length}`;
+
+  if (_VDP._idx < results.length) {
+    const delay = _VDP._speed;
+    if (delay <= 0) {
+      // instant: batch remaining synchronously to avoid stack overflow on large sets
+      while (_VDP._idx < results.length) {
+        _vdpRenderResult(results[_VDP._idx]);
+        _VDP._idx++;
+      }
+      const f2 = document.getElementById('vdp-progress-fill');
+      const t2 = document.getElementById('vdp-progress-text');
+      if (f2) f2.style.width = '100%';
+      if (t2) t2.textContent = `${results.length} / ${results.length}`;
+      _vdpFinish();
+    } else {
+      _VDP._timer = setTimeout(_vdpTick, delay);
+    }
+  } else {
+    _VDP._timer = setTimeout(_vdpFinish, Math.max(600, _VDP._speed * 2));
+  }
+}
+
+function _vdpRenderResult(r) {
+  const feed = document.getElementById('vdp-feed');
+  if (!feed) return;
+
+  const fmt   = _VDP_FORMAT_BADGE[r.format] || r.format || '';
+  const t1    = escHtml(r.team1_name || '?');
+  const t2    = escHtml(r.team2_name || '?');
+  const s1    = escHtml(r.team1_score || '');
+  const s2    = escHtml(r.team2_score || '');
+  const isT1Win = r.winner_id && r.winner_id === r.team1_id;
+  const isT2Win = r.winner_id && r.winner_id === r.team2_id;
+  const isDraw  = r.result_type === 'draw';
+  const isTie   = r.result_type === 'tie';
+
+  const row = document.createElement('div');
+  row.className = 'vdp-row vdp-row-in';
+  row.innerHTML = `
+    <span class="vdp-fmt">${escHtml(fmt)}</span>
+    <span class="vdp-team ${isT1Win ? 'vdp-winner' : isDraw || isTie ? 'vdp-draw' : 'vdp-loser'}">${t1}</span>
+    <span class="vdp-score ${isT1Win ? 'vdp-winner' : ''}">${s1}</span>
+    <span class="vdp-sep">v</span>
+    <span class="vdp-score ${isT2Win ? 'vdp-winner' : ''}">${s2}</span>
+    <span class="vdp-team ${isT2Win ? 'vdp-winner' : isDraw || isTie ? 'vdp-draw' : 'vdp-loser'} vdp-team-r">${t2}</span>
+    <span class="vdp-margin">${escHtml(r.summary || '')}</span>`;
+
+  feed.appendChild(row);
+
+  // Keep feed scrolled to bottom; limit DOM nodes for large sims
+  const rows = feed.querySelectorAll('.vdp-row');
+  if (rows.length > 60) rows[0].remove();
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function _vdpTogglePause() {
+  _VDP._paused = !_VDP._paused;
+  const btn = document.getElementById('vdp-btn-pause');
+  if (btn) btn.textContent = _VDP._paused ? '▶' : '⏸';
+  if (!_VDP._paused) _vdpTick();
+}
+
+function _vdpSetSpeed(val) {
+  _VDP._speed = parseInt(val, 10) || 320;
+}
+
+function _vdpSkipAll() {
+  clearTimeout(_VDP._timer);
+  const feed = document.getElementById('vdp-feed');
+  // Render all remaining at once
+  while (_VDP._idx < _VDP._results.length) {
+    _vdpRenderResult(_VDP._results[_VDP._idx]);
+    _VDP._idx++;
+  }
+  if (feed) feed.scrollTop = feed.scrollHeight;
+  const f = document.getElementById('vdp-progress-fill');
+  const t = document.getElementById('vdp-progress-text');
+  if (f) f.style.width = '100%';
+  if (t) t.textContent = `${_VDP._results.length} / ${_VDP._results.length}`;
+  _vdpFinish();
+}
+
+function _vdpFinish() {
+  clearTimeout(_VDP._timer);
+  const overlay = document.getElementById('sim-vidiprinter');
+  if (overlay) overlay.classList.add('hidden');
+  _VDP._onDone?.();
 }
 
 function _renderSimReport(report) {
