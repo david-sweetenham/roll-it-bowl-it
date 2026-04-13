@@ -2112,8 +2112,9 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
 }
 .umpire-signal {
   position: absolute;
-  right: 12px;
-  top: 12px;
+  left: 50%;
+  top: 168px;
+  margin-left: 110px;
   width: 118px;
   padding: 8px 8px 6px;
   border-radius: 16px;
@@ -2124,7 +2125,7 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
   transform: translateY(-10px) scale(0.94);
   transition: opacity 0.18s ease, transform 0.18s ease;
   pointer-events: none;
-  z-index: 3;
+  z-index: 5;
 }
 .umpire-signal.visible {
   opacity: 1;
@@ -2194,6 +2195,12 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
 }
 .umpire-badge {
   fill: #43c274;
+}
+@media (max-width: 1200px) {
+  .umpire-signal {
+    top: 178px;
+    margin-left: 40px;
+  }
 }
 .howzat-legend {
   display: flex;

@@ -301,27 +301,17 @@
                   <!-- Ball body -->
                   <circle cx="28" cy="28" r="26" fill="#cc1a00"/>
                   <circle cx="28" cy="28" r="26" fill="none" stroke="#881100" stroke-width="1.5"/>
-                  <!-- Equatorial seam: S-curve running left-to-right through the centre -->
-                  <path d="M 2 28 C 12 22, 22 22, 28 28 C 34 34, 44 34, 54 28"
-                        fill="none" stroke="white" stroke-width="2.1" stroke-linecap="round"/>
-                  <!-- Left half — seam curves upward. Stitching perpendicular to seam. -->
-                  <!-- above seam -->
-                  <line x1="10" y1="21" x2="10" y2="24" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="17" y1="19" x2="17" y2="22" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="23" y1="20" x2="23" y2="23" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <!-- below seam -->
-                  <line x1="10" y1="27" x2="10" y2="30" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="17" y1="25" x2="17" y2="28" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="23" y1="25" x2="23" y2="28" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <!-- Right half — seam curves downward. -->
-                  <!-- above seam -->
-                  <line x1="33" y1="28" x2="33" y2="31" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="39" y1="29" x2="39" y2="32" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="46" y1="27" x2="46" y2="30" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <!-- below seam -->
-                  <line x1="33" y1="33" x2="33" y2="36" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="39" y1="34" x2="39" y2="37" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
-                  <line x1="46" y1="32" x2="46" y2="35" stroke="white" stroke-width="1.4" stroke-linecap="round"/>
+                  <!-- Straight equatorial seam -->
+                  <line x1="6" y1="26" x2="50" y2="26" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+                  <line x1="6" y1="30" x2="50" y2="30" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+                  <!-- Seam stitching -->
+                  <line x1="11" y1="24" x2="11" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+                  <line x1="17" y1="24" x2="17" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+                  <line x1="23" y1="24" x2="23" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+                  <line x1="29" y1="24" x2="29" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+                  <line x1="35" y1="24" x2="35" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+                  <line x1="41" y1="24" x2="41" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+                  <line x1="47" y1="24" x2="47" y2="32" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
                 </svg>
                 <span class="coin-label">BALL</span>
               </div>
@@ -461,6 +451,7 @@
             </div>
           </div>
         </div>
+        <div id="umpire-signal" class="umpire-signal hidden" aria-live="polite"></div>
 
         <!-- Main play area: batters/bowler | dice | commentary -->
         <div class="match-play-area">
@@ -492,10 +483,9 @@
               </div>
               <div class="mini-wheel-wrap">
                 <canvas id="canvas-live-wagon" width="180" height="180" aria-label="Live wagon wheel"></canvas>
-                <div class="mini-wheel-label">Live Wagon</div>
+              <div class="mini-wheel-label">Live Wagon</div>
               </div>
             </div>
-            <div id="umpire-signal" class="umpire-signal hidden" aria-live="polite"></div>
             <div id="die-stage-label" class="die-stage-label"></div>
             <div class="howzat-legend" aria-label="Dice guide">
               <div class="howzat-legend-head">
