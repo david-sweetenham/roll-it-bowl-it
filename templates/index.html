@@ -1213,6 +1213,9 @@
           <span id="wd-left">0 remaining</span>
         </div>
 
+        <!-- World Rules strip -->
+        <div id="wd-world-rules" class="world-rules-strip"></div>
+
         <!-- Sim controls -->
         <div class="world-sim-controls">
           <span class="sim-btn-label">Simulate to:</span>
@@ -1284,18 +1287,7 @@
       <div class="screen-inner">
         <button class="btn-back" id="wsim-back-btn" onclick="showScreen('world-detail')">← Back to World</button>
         <h2>Simulation Report</h2>
-        <div id="wsim-header" class="wsim-header"></div>
-        <div id="wsim-notable" class="wsim-notable"></div>
-        <div class="tab-bar">
-          <button class="tab-btn active" onclick="switchSimTab('results',this)">Results</button>
-          <button class="tab-btn" onclick="switchSimTab('rankings',this)">Rankings</button>
-        </div>
-        <div id="wsim-tab-results">
-          <div id="wsim-results-list"></div>
-        </div>
-        <div id="wsim-tab-rankings" class="hidden">
-          <div id="wsim-rankings-content"></div>
-        </div>
+        <div id="wsim-recap"></div>
       </div>
     </div>
 

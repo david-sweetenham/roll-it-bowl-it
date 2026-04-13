@@ -3438,6 +3438,14 @@ def simulate_world(id):
                 'sim_report':        None,
             })
 
+        # Snapshot rankings BEFORE persistence so we can diff them
+        rankings_before_list = database.get_world_rankings(db, id)
+        rankings_before = {}   # {format: {team_id: {position, points}}}
+        for rb in rankings_before_list:
+            rankings_before.setdefault(rb['format'], {})[rb['team_id']] = {
+                'position': rb.get('position'), 'points': rb.get('points'),
+            }
+
         if results:
             _persist_world_sim(
                 db, id, results,
@@ -3446,14 +3454,20 @@ def simulate_world(id):
                 world_state=world_state,
             )
 
-        # Build sim report summary
-        dates = [r['scheduled_date'] for r in results if r.get('scheduled_date')]
+        # Enrich each result with team names from world_state
+        teams_map = world_state.get('teams', {})
+        for r in results:
+            t1 = teams_map.get(r.get('team1_id')) or {}
+            t2 = teams_map.get(r.get('team2_id')) or {}
+            r['team1_name'] = t1.get('name', '?')
+            r['team2_name'] = t2.get('name', '?')
+
+        # Build notable events string list (kept for backward compat)
+        dates   = [r['scheduled_date'] for r in results if r.get('scheduled_date')]
         notable = []
         for r in results:
             if r.get('result_type') == 'runs' and (r.get('margin_runs') or 0) >= 60:
-                t1_name = (world_state['teams'].get(r['team1_id']) or {}).get('name', '?')
-                t2_name = (world_state['teams'].get(r['team2_id']) or {}).get('name', '?')
-                w_name  = t1_name if r.get('winner_id') == r['team1_id'] else t2_name
+                w_name = r['team1_name'] if r.get('winner_id') == r.get('team1_id') else r['team2_name']
                 notable.append(f"{w_name} crushed opponent by {r['margin_runs']} runs")
             ts = r.get('top_scorer')
             if ts and ts.get('runs', 0) >= 80:
@@ -3462,20 +3476,75 @@ def simulate_world(id):
             if tb and tb.get('wickets', 0) >= 5:
                 notable.append(f"{tb['name']} took {tb['wickets']} wickets")
 
-        # Reload updated rankings to show changes
+        # Reload updated rankings and compute position changes
         updated_rankings = database.get_world_rankings(db, id)
         by_fmt = {}
+        ranking_changes = {}   # {format: [{team_name, old_pos, new_pos, pos_change}]}
         for r in updated_rankings:
             by_fmt.setdefault(r['format'], []).append(r)
+            fmt    = r['format']
+            before = rankings_before.get(fmt, {}).get(r['team_id'])
+            if before and before.get('position') and r.get('position'):
+                delta = (before['position'] or 99) - (r['position'] or 99)
+                if delta != 0:
+                    ranking_changes.setdefault(fmt, []).append({
+                        'team_name':    r.get('team_name', '?'),
+                        'old_position': before['position'],
+                        'new_position': r['position'],
+                        'pos_change':   delta,   # positive = moved up the table
+                        'points':       round(r.get('points') or 0),
+                    })
+        # Sort movers: biggest moves first
+        for fmt_moves in ranking_changes.values():
+            fmt_moves.sort(key=lambda x: -abs(x['pos_change']))
+
+        # Biggest result (most decisive win by runs; fallback to wickets)
+        run_wins  = [r for r in results if r.get('result_type') == 'runs'    and r.get('margin_runs')]
+        wkt_wins  = [r for r in results if r.get('result_type') == 'wickets' and r.get('margin_wickets')]
+        biggest_by_runs    = max(run_wins,  key=lambda r: r['margin_runs'],    default=None)
+        biggest_by_wickets = max(wkt_wins,  key=lambda r: r['margin_wickets'], default=None)
+
+        # Top batting & bowling performances across all simulated matches
+        def _perf_entry(match_result, kind):
+            p = match_result.get(kind)
+            if not p:
+                return None
+            return {
+                'name':    p.get('name', '?'),
+                'runs':    p.get('runs'),
+                'wickets': p.get('wickets'),
+                'format':  match_result.get('format', ''),
+                'date':    match_result.get('scheduled_date', ''),
+                'match':   f"{match_result['team1_name']} v {match_result['team2_name']}",
+            }
+
+        batting_perfs = sorted(
+            [e for r in results if (e := _perf_entry(r, 'top_scorer'))],
+            key=lambda x: -(x['runs'] or 0)
+        )[:3]
+        bowling_perfs = sorted(
+            [e for r in results if (e := _perf_entry(r, 'top_bowler'))],
+            key=lambda x: -(x['wickets'] or 0)
+        )[:3]
+
+        # Next scheduled fixtures after the sim (for "What's Next")
+        next_scheduled = database.get_fixtures(db, world_id=id, status='scheduled')
+        next_fixtures_preview = [dict(f) for f in next_scheduled[:4]]
 
         sim_report = {
-            'matches_simulated': sim_result['matches_simulated'],
-            'date_from':         dates[0] if dates else None,
-            'date_to':           dates[-1] if dates else None,
-            'results':           results,
-            'notable_events':    notable[:10],
-            'updated_rankings':  by_fmt,
-            'truncated':         sim_result['truncated'],
+            'matches_simulated':       sim_result['matches_simulated'],
+            'date_from':               dates[0] if dates else None,
+            'date_to':                 dates[-1] if dates else None,
+            'results':                 results,
+            'notable_events':          notable[:10],
+            'updated_rankings':        by_fmt,
+            'ranking_changes':         ranking_changes,
+            'biggest_by_runs':         biggest_by_runs,
+            'biggest_by_wickets':      biggest_by_wickets,
+            'top_batting_perfs':       batting_perfs,
+            'top_bowling_perfs':       bowling_perfs,
+            'next_fixtures_preview':   next_fixtures_preview,
+            'truncated':               sim_result['truncated'],
         }
 
         return jsonify({

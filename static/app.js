@@ -7353,11 +7353,72 @@ async function loadWorldDetail(worldId) {
   _renderWorldOverview(data);
 }
 
+const _LEAGUE_DISPLAY = {
+  county_championship: 'County Championship',
+  t20_blast:           'T20 Blast',
+  royal_london_cup:    'Royal London Cup',
+  sheffield_shield:    'Sheffield Shield',
+  marsh_cup:           'Marsh Cup',
+  bbl:                 'Big Bash League',
+  ipl:                 'IPL',
+  cpl:                 'CPL',
+  psl:                 'PSL',
+};
+
+function _renderWorldRules(data, settings) {
+  const el = document.getElementById('wd-world-rules');
+  if (!el) return;
+
+  const worldScope      = ['international', 'domestic', 'combined'].includes(settings.world_scope)
+    ? settings.world_scope : 'international';
+  const calStyle        = data.world?.calendar_style === 'realistic' ? 'Realistic FTP' : 'Random Calendar';
+  const domesticMode    = settings.domestic_team_mode === 'full_league' ? 'Full League' : 'Selected Clubs';
+  const leagues         = Array.isArray(settings.domestic_leagues) ? settings.domestic_leagues : [];
+  const myTeamId        = settings.my_team_id || null;
+
+  // Resolve team name from any available fixture data
+  let myTeamName = null;
+  if (myTeamId) {
+    const allFixtures = [...(data.next_fixtures || []), ...(data.upcoming_fixtures || [])];
+    for (const f of allFixtures) {
+      if (f.team1_id === myTeamId) { myTeamName = f.team1_name; break; }
+      if (f.team2_id === myTeamId) { myTeamName = f.team2_name; break; }
+    }
+  }
+
+  const scopeIcon  = { international: '🌐', domestic: '🏟', combined: '🔀' }[worldScope] || '🌐';
+  const scopeLabel = { international: 'International', domestic: 'Domestic', combined: 'Combined' }[worldScope] || worldScope;
+
+  const pills = [];
+  pills.push(`<span class="wrs-pill wrs-pill-scope">${scopeIcon} ${escHtml(scopeLabel)}</span>`);
+  pills.push(`<span class="wrs-pill wrs-pill-calendar">📅 ${escHtml(calStyle)}</span>`);
+
+  if (worldScope !== 'international') {
+    pills.push(`<span class="wrs-pill wrs-pill-coverage">🗂 ${escHtml(domesticMode)}</span>`);
+    if (leagues.length) {
+      leagues.forEach(key => {
+        const name = _LEAGUE_DISPLAY[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        pills.push(`<span class="wrs-pill wrs-pill-league">${escHtml(name)}</span>`);
+      });
+    }
+  }
+
+  if (myTeamId) {
+    const label = myTeamName ? escHtml(myTeamName) : 'User Controlled';
+    pills.push(`<span class="wrs-pill wrs-pill-team-set">👤 ${label}</span>`);
+  } else {
+    pills.push(`<span class="wrs-pill wrs-pill-team-ai">🤖 AI Only</span>`);
+  }
+
+  el.innerHTML = `<span class="wrs-label">World Rules</span>${pills.join('')}`;
+}
+
 function _renderWorldOverview(data) {
   const settings = (() => {
     try { return JSON.parse(data.world?.settings_json || '{}'); }
     catch (_) { return {}; }
   })();
+  _renderWorldRules(data, settings);
   const style = data.world?.calendar_style === 'realistic' ? 'Realistic FTP' : 'Random Calendar';
   const worldScope = ['international', 'domestic', 'combined'].includes(settings.world_scope)
     ? settings.world_scope
@@ -7815,59 +7876,183 @@ async function simulateWorld(target) {
     return;
   }
 
-  // Render sim report
+  // Stash paused fixture onto the report so _renderSimReport can use it
+  if (res.sim_report) res.sim_report._pausedFixture = res.paused_at_fixture || null;
   _renderSimReport(res.sim_report);
   showScreen('world-sim-report');
 }
 
 function _renderSimReport(report) {
-  if (!report) return;
+  const recap = document.getElementById('wsim-recap');
+  if (!recap || !report) return;
 
-  const hdr = document.getElementById('wsim-header');
-  if (hdr) {
-    const from = report.date_from || '';
-    const to   = report.date_to   || '';
-    const trunc = report.truncated ? ' (truncated at 500)' : '';
-    hdr.innerHTML = `
-      <div class="wsim-summary">
-        Simulated <strong>${report.matches_simulated}</strong> match${report.matches_simulated !== 1 ? 'es' : ''}
-        ${from ? `from <strong>${from}</strong> to <strong>${to}</strong>` : ''}${trunc}
+  const n        = report.matches_simulated || 0;
+  const from     = report.date_from || '';
+  const to       = report.date_to   || '';
+  const trunc    = report.truncated;
+  const matchWord = n === 1 ? 'match' : 'matches';
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  const metaParts = [];
+  if (from) metaParts.push(`${from}${to && to !== from ? ` → ${to}` : ''}`);
+  if (trunc) metaParts.push('truncated at 500');
+
+  // ── Biggest Result ────────────────────────────────────────────────────────
+  function _biggestResultHtml() {
+    const br = report.biggest_by_runs;
+    const bw = report.biggest_by_wickets;
+    if (!br && !bw) return '<p class="wsim-rank-empty">No decisive results this round.</p>';
+
+    function _resultCard(r) {
+      if (!r) return '';
+      const fmtBadge = `<span class="badge badge-${(r.format||'').toLowerCase()}">${r.format||''}</span>`;
+      const ts = r.top_scorer;
+      const tb = r.top_bowler;
+      const performer = [
+        ts ? `🏏 ${escHtml(ts.name)} — ${ts.runs} runs` : '',
+        tb ? `🎳 ${escHtml(tb.name)} — ${tb.wickets} wkts` : '',
+      ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+      return `
+        <div class="wsim-big-result">
+          <div class="wsim-big-result-summary">${escHtml(r.summary || '')}</div>
+          <div class="wsim-big-result-detail">
+            ${fmtBadge}
+            <span>${escHtml(r.team1_name||'')} v ${escHtml(r.team2_name||'')}</span>
+            <span>${escHtml(r.scheduled_date||'')}</span>
+          </div>
+          <div class="wsim-big-result-scores">${escHtml(r.team1_score||'')} &nbsp;/&nbsp; ${escHtml(r.team2_score||'')}</div>
+          ${performer ? `<div class="wsim-big-result-performer">${performer}</div>` : ''}
+        </div>`;
+    }
+
+    // Show the single most decisive result (prefer run wins as they feel bigger)
+    const best = br || bw;
+    return _resultCard(best);
+  }
+
+  // ── Notable Performances ──────────────────────────────────────────────────
+  function _performancesHtml() {
+    const batters = report.top_batting_perfs || [];
+    const bowlers = report.top_bowling_perfs || [];
+    if (!batters.length && !bowlers.length) {
+      return '<p class="wsim-rank-empty">No individual performances recorded.</p>';
+    }
+
+    function _perfRows(perfs, statKey) {
+      if (!perfs.length) return '<p class="wsim-rank-empty" style="font-size:var(--fs-xs)">—</p>';
+      return perfs.map(p => `
+        <div class="wsim-perf-row">
+          <div class="wsim-perf-stat">${p[statKey] ?? '–'}</div>
+          <div>
+            <div class="wsim-perf-name">${escHtml(p.name)}</div>
+            <div class="wsim-perf-ctx">${escHtml(p.match)} · ${escHtml(p.format)} · ${escHtml(p.date)}</div>
+          </div>
+        </div>`).join('');
+    }
+
+    return `
+      <div class="wsim-perf-grid">
+        <div>
+          <div class="wsim-perf-col-title">🏏 Batting</div>
+          ${_perfRows(batters, 'runs')}
+        </div>
+        <div>
+          <div class="wsim-perf-col-title">🎳 Bowling</div>
+          ${_perfRows(bowlers, 'wickets')}
+        </div>
       </div>`;
   }
 
-  const notable = document.getElementById('wsim-notable');
-  if (notable) {
-    const events = report.notable_events || [];
-    notable.innerHTML = events.length
-      ? `<div class="wsim-notable-list">${events.map(e =>
-          `<div class="wsim-event">⭐ ${e}</div>`).join('')}</div>`
-      : '';
+  // ── Ranking Impact ────────────────────────────────────────────────────────
+  function _rankingImpactHtml() {
+    const changes = report.ranking_changes || {};
+    const allMoves = [];
+    for (const [fmt, movers] of Object.entries(changes)) {
+      movers.forEach(m => allMoves.push({ ...m, format: fmt }));
+    }
+    allMoves.sort((a, b) => Math.abs(b.pos_change) - Math.abs(a.pos_change));
+
+    if (!allMoves.length) {
+      return '<p class="wsim-rank-empty">No position changes — rankings updated but order held.</p>';
+    }
+
+    return `<div class="wsim-rank-grid">${allMoves.map(m => {
+      const up    = m.pos_change > 0;
+      const arrow = up ? '▲' : '▼';
+      const delta = Math.abs(m.pos_change);
+      const fmtBadge = `<span class="badge badge-${m.format.toLowerCase()}">${m.format}</span>`;
+      return `
+        <div class="wsim-rank-mover">
+          <span class="wsim-rank-arrow ${up ? 'up' : 'down'}">${arrow}</span>
+          <span class="wsim-rank-name">${escHtml(m.team_name)}</span>
+          <span class="wsim-rank-change">${m.old_position} → ${m.new_position} &nbsp;(${up ? '+' : ''}${up ? delta : -delta} place${delta !== 1 ? 's' : ''})</span>
+          <span class="wsim-rank-fmt">${fmtBadge}</span>
+        </div>`;
+    }).join('')}</div>`;
   }
 
-  const resList = document.getElementById('wsim-results-list');
-  if (resList) {
-    resList.innerHTML = (report.results || []).map(r => {
+  // ── What's Next ───────────────────────────────────────────────────────────
+  function _whatsNextHtml(pausedFixture) {
+    const fixtures = report.next_fixtures_preview || [];
+    const rows = [];
+
+    // Paused fixture (user match) always goes first if present
+    if (pausedFixture) {
+      const t1 = escHtml(pausedFixture.team1_name || '?');
+      const t2 = escHtml(pausedFixture.team2_name || '?');
+      const fmtBadge = `<span class="badge badge-${(pausedFixture.format||'').toLowerCase()}">${pausedFixture.format||''}</span>`;
+      rows.push(`
+        <div class="wsim-next-row">
+          <span class="wsim-next-date">${escHtml(pausedFixture.scheduled_date||'')}</span>
+          ${fmtBadge}
+          <span class="wsim-next-teams">${t1} v ${t2}</span>
+          <span class="wsim-next-user">▶ Your match</span>
+        </div>`);
+    }
+
+    for (const f of fixtures) {
+      // Skip the paused fixture if it appears in the list too
+      if (pausedFixture && f.id === pausedFixture.id) continue;
+      if (rows.length >= 4) break;
+      const t1 = escHtml(f.team1_name || '?');
+      const t2 = escHtml(f.team2_name || '?');
+      const fmtBadge = `<span class="badge badge-${(f.format||'').toLowerCase()}">${f.format||''}</span>`;
+      rows.push(`
+        <div class="wsim-next-row">
+          <span class="wsim-next-date">${escHtml(f.scheduled_date||'')}</span>
+          ${fmtBadge}
+          <span class="wsim-next-teams">${t1} v ${t2}</span>
+        </div>`);
+    }
+
+    if (!rows.length) return '<p class="wsim-rank-empty">No further fixtures scheduled.</p>';
+    return `<div class="wsim-next-list">${rows.join('')}</div>`;
+  }
+
+  // ── All Results (disclosure) ──────────────────────────────────────────────
+  function _allResultsHtml() {
+    return (report.results || []).map(r => {
       const fmtBadge = `<span class="badge badge-${(r.format||'').toLowerCase()}">${r.format || ''}</span>`;
       const ts = r.top_scorer;
       const tb = r.top_bowler;
       return `
         <div class="wsim-result-row">
           <div class="wsim-result-header">
-            <span class="wf-date">${r.scheduled_date || ''}</span>
+            <span class="wf-date">${escHtml(r.scheduled_date||'')}</span>
             ${fmtBadge}
           </div>
-          <div class="wsim-result-summary">${r.summary || ''}</div>
-          <div class="wsim-scores">${r.team1_score || ''} &nbsp;/&nbsp; ${r.team2_score || ''}</div>
-          ${ts ? `<div class="wsim-performer">🏏 ${ts.name} — ${ts.runs} runs</div>` : ''}
-          ${tb ? `<div class="wsim-performer">🎳 ${tb.name} — ${tb.wickets} wickets</div>` : ''}
+          <div class="wsim-result-summary">${escHtml(r.summary||'')}</div>
+          <div class="wsim-scores">${escHtml(r.team1_score||'')} &nbsp;/&nbsp; ${escHtml(r.team2_score||'')}</div>
+          ${ts ? `<div class="wsim-performer">🏏 ${escHtml(ts.name)} — ${ts.runs} runs</div>` : ''}
+          ${tb ? `<div class="wsim-performer">🎳 ${escHtml(tb.name)} — ${tb.wickets} wickets</div>` : ''}
         </div>`;
     }).join('');
   }
 
-  const rankEl = document.getElementById('wsim-rankings-content');
-  if (rankEl) {
+  // ── Rankings table (disclosure) ───────────────────────────────────────────
+  function _rankingsTableHtml() {
     const by_fmt = report.updated_rankings || {};
-    rankEl.innerHTML = ['Test','ODI','T20'].map(fmt => {
+    return `<div class="wsim-rankings-wrap">${['Test','ODI','T20'].map(fmt => {
       const rows = (by_fmt[fmt] || []).sort((a,b) => (a.position||99)-(b.position||99));
       if (!rows.length) return '';
       return `<div class="standings-group">
@@ -7875,21 +8060,58 @@ function _renderSimReport(report) {
         <table class="standings-table">
           <thead><tr><th>#</th><th>Team</th><th>Pts</th><th>M</th></tr></thead>
           <tbody>${rows.map(r => `
-            <tr><td>${r.position||'-'}</td><td>${r.team_name}</td>
+            <tr><td>${r.position||'–'}</td><td>${escHtml(r.team_name)}</td>
                 <td>${Math.round(r.points||0)}</td><td>${r.matches_counted||0}</td>
             </tr>`).join('')}
-          </tbody></table></div>`;
-    }).join('');
+          </tbody>
+        </table>
+      </div>`;
+    }).join('')}</div>`;
   }
+
+  function _section(icon, title, body) {
+    return `
+      <div class="wsim-section">
+        <div class="wsim-section-title">${icon} ${title}</div>
+        ${body}
+      </div>`;
+  }
+
+  function _disclosure(label, body) {
+    return `
+      <div class="wsim-disclosure wsim-section">
+        <button class="wsim-disclosure-btn" onclick="
+          const b=this.nextElementSibling;
+          const open=b.style.display!=='none';
+          b.style.display=open?'none':'';
+          this.querySelector('.wsim-disc-arrow').textContent=open?'▸':'▾';
+        ">
+          ${escHtml(label)} <span class="wsim-disc-arrow">▸</span>
+        </button>
+        <div class="wsim-disclosure-body" style="display:none">${body}</div>
+      </div>`;
+  }
+
+  // Store paused fixture for use in _whatsNextHtml — it's on the response,
+  // not on report itself, so we stash it on the report object when we call this.
+  const pausedFixture = report._pausedFixture || null;
+
+  recap.innerHTML = `
+    <div class="wsim-recap-header">
+      <span class="wsim-recap-headline">${n} ${matchWord} simulated</span>
+      ${metaParts.length ? `<span class="wsim-recap-meta">${escHtml(metaParts.join(' · '))}</span>` : ''}
+    </div>
+    ${_section('🏆', 'Biggest Result',          _biggestResultHtml())}
+    ${_section('⭐', 'Notable Performances',    _performancesHtml())}
+    ${_section('📊', 'Ranking Impact',          _rankingImpactHtml())}
+    ${_section('📅', "What's Next",             _whatsNextHtml(pausedFixture))}
+    ${_disclosure(`All ${n} results`,           _allResultsHtml())}
+    ${_disclosure('Full rankings table',        _rankingsTableHtml())}
+  `;
 }
 
-function switchSimTab(tab, btn) {
-  ['results','rankings'].forEach(t => {
-    document.getElementById(`wsim-tab-${t}`).classList.toggle('hidden', t !== tab);
-  });
-  document.querySelectorAll('#screen-world-sim-report .tab-btn').forEach(b =>
-    b.classList.toggle('active', b === btn));
-}
+// switchSimTab kept as no-op for any lingering calls
+function switchSimTab() {}
 
 // ── Welcome screen toggle ─────────────────────────────────────────────────────
 
