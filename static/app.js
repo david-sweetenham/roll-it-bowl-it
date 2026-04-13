@@ -3891,11 +3891,11 @@ async function loadMatchScreen() {
     }
   }
 
-  if (!state.current_innings && !(state.innings || []).length) {
-    showMatchToss();
-  } else if (state.match?.status === 'complete') {
+  if (state.match?.status === 'complete') {
     initLiveView(state);
     await showResultScreen(matchId);
+  } else if (!state.current_innings && !(state.innings || []).length) {
+    showMatchToss();
   } else {
     document.getElementById('match-toss-screen').classList.add('hidden');
     initLiveView(state);
@@ -7037,6 +7037,7 @@ const WorldUI = {
   wizardDomesticTeamMode: 'selected',
   wizardDomesticLeagueOptions: [],
   wizardScope:     'international',
+  wizardCalendarYears: 2,
   calendarFilter:  'all',
   _worldData:      null,
   _seriesData:     [],
@@ -7100,7 +7101,10 @@ async function showWorldWizard() {
   WorldUI.wizardDomesticLeagues = new Set();
   WorldUI.wizardDomesticTeamMode = 'selected';
   WorldUI.wizardScope         = 'international';
+  WorldUI.wizardCalendarYears = 2;
   _wizardShowPage(1);
+  const yearsEl = document.getElementById('wc-years');
+  if (yearsEl) yearsEl.value = '2';
 
   // Load teams for team-selection step
   const teams = await api('GET', '/api/teams');
@@ -7338,6 +7342,7 @@ function _wizardBuildSummary() {
   const start     = document.getElementById('wc-start').value;
   const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
   const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const calYears  = Math.max(1, Math.min(10, parseInt(document.getElementById('wc-years')?.value, 10) || 2));
   const worldScope = getWorldScope();
   const domesticTeamMode = getWorldDomesticTeamMode();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
@@ -7356,6 +7361,7 @@ function _wizardBuildSummary() {
     <div class="summary-row"><span>Start Date</span><strong>${start}</strong></div>
     <div class="summary-row"><span>Density</span><strong>${density}</strong></div>
     <div class="summary-row"><span>Calendar Style</span><strong>${styleLabel}</strong></div>
+    <div class="summary-row"><span>Fixture Horizon</span><strong>${calYears} year${calYears !== 1 ? 's' : ''}</strong></div>
     ${worldScope === 'domestic' && calStyle === 'realistic' ? `<div class="summary-row"><span>Domestic Coverage</span><strong>${domesticTeamMode === 'full_league' ? 'Full League' : 'Selected Clubs'}</strong></div>` : ''}
     <div class="summary-row"><span>Your Team</span><strong>${myTeam ? myTeam.name : 'None (AI only)'}</strong></div>
     <div class="summary-row"><span>Teams (${teamList.length})</span>
@@ -7371,6 +7377,7 @@ async function submitWorldWizard() {
   const start     = document.getElementById('wc-start').value;
   const density   = document.querySelector('input[name="wc-density"]:checked')?.value || 'moderate';
   const calStyle  = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
+  const calYears  = Math.max(1, Math.min(10, parseInt(document.getElementById('wc-years')?.value, 10) || 2));
   const worldScope = getWorldScope();
   const domesticTeamMode = getWorldDomesticTeamMode();
   const myTeamId  = parseInt(document.getElementById('wc-my-team').value) || null;
@@ -7387,6 +7394,7 @@ async function submitWorldWizard() {
     name, start_date: start, calendar_density: density,
     calendar_style: calStyle, team_ids, my_team_id: myTeamId,
     domestic_leagues, world_scope: worldScope, domestic_team_mode: domesticTeamMode,
+    calendar_years: calYears,
   });
 
   if (btn) { btn.disabled = false; btn.textContent = 'Create World'; }
@@ -7526,6 +7534,8 @@ function _renderWorldRules(data, settings) {
   const domesticMode    = settings.domestic_team_mode === 'full_league' ? 'Full League' : 'Selected Clubs';
   const leagues         = Array.isArray(settings.domestic_leagues) ? settings.domestic_leagues : [];
   const myTeamId        = settings.my_team_id || null;
+  const calendarYears   = Math.max(1, Math.min(10, parseInt(settings.calendar_years, 10) || 2));
+  const generatedThrough = data.generated_through || '';
 
   // Resolve team name from any available fixture data
   let myTeamName = null;
@@ -7543,6 +7553,8 @@ function _renderWorldRules(data, settings) {
   const pills = [];
   pills.push(`<span class="wrs-pill wrs-pill-scope">${scopeIcon} ${escHtml(scopeLabel)}</span>`);
   pills.push(`<span class="wrs-pill wrs-pill-calendar">📅 ${escHtml(calStyle)}</span>`);
+  pills.push(`<span class="wrs-pill wrs-pill-horizon">⏳ ${calendarYears}-year block</span>`);
+  if (generatedThrough) pills.push(`<span class="wrs-pill wrs-pill-generated">→ ${escHtml(generatedThrough)}</span>`);
 
   if (worldScope !== 'international') {
     pills.push(`<span class="wrs-pill wrs-pill-coverage">🗂 ${escHtml(domesticMode)}</span>`);
@@ -7575,10 +7587,12 @@ function _renderWorldOverview(data) {
     ? settings.world_scope
     : 'international';
   const domesticTeamMode = settings.domestic_team_mode === 'full_league' ? 'full_league' : 'selected';
+  const calendarYears = Math.max(1, Math.min(10, parseInt(settings.calendar_years, 10) || 2));
   const upcoming = data.upcoming_fixtures || [];
   const myNext = (data.next_fixtures || []).find(f => f.is_user_match) || null;
   const hasTrackedTeam = !!settings.my_team_id;
   const nextFix = (data.next_fixtures || [])[0] || null;
+  const generatedThrough = data.generated_through || '';
   const iccUpcoming = upcoming.filter(f => f.is_icc_event).length;
   const activeSeries = (WorldUI._seriesData || [])
     .filter(s => (s.matches_remaining || 0) > 0)
@@ -7603,12 +7617,14 @@ function _renderWorldOverview(data) {
           ? `${iccUpcoming} ICC fixture${iccUpcoming !== 1 ? 's' : ''} in the next 2 weeks`
           : nextFix
             ? `Quiet short horizon. Next fixture is ${escHtml(nextFix.scheduled_date || '')}`
-            : 'No upcoming fixtures generated yet'}</div>
+            : generatedThrough
+              ? `Current block runs through ${escHtml(generatedThrough)}`
+              : 'No upcoming fixtures generated yet'}</div>
       </div>
       <div class="world-desk-card">
         <div class="world-desk-label">Active Series</div>
         <div class="world-desk-value">${activeSeries.length}</div>
-        <div class="world-desk-sub">${upcoming.length} fixture${upcoming.length !== 1 ? 's' : ''} on the short horizon</div>
+        <div class="world-desk-sub">${upcoming.length} fixture${upcoming.length !== 1 ? 's' : ''} on the short horizon · ${calendarYears}-year generation block</div>
       </div>
       <div class="world-desk-card">
         <div class="world-desk-label">Your Team</div>
@@ -7623,6 +7639,14 @@ function _renderWorldOverview(data) {
     nextMyMatchBtn.title = hasTrackedTeam
       ? 'Simulate until your next user-controlled fixture'
       : 'Set a user-controlled team in this world to use My Next Match';
+  }
+  const extendYearsEl = document.getElementById('wd-extend-years');
+  if (extendYearsEl) extendYearsEl.value = String(calendarYears);
+  const extendNoteEl = document.getElementById('wd-extend-note');
+  if (extendNoteEl) {
+    extendNoteEl.textContent = generatedThrough
+      ? `Currently generated through ${generatedThrough}`
+      : 'Use this when you reach the end of the current schedule block.';
   }
 
   // Next fixture card
@@ -7644,7 +7668,10 @@ function _renderWorldOverview(data) {
           ${nextFix.is_user_match ? `<button class="btn btn-accent btn-sm" onclick="playWorldFixture(${nextFix.id})">🏏 Play Now</button>` : ''}
         </div>`;
     } else {
-      nfEl.innerHTML = '<p class="text-muted">No upcoming fixtures.</p>';
+      nfEl.innerHTML = `<p class="text-muted">No upcoming fixtures.${generatedThrough ? ` Current block runs through ${escHtml(generatedThrough)}.` : ''}</p>
+        <div class="nf-actions" style="margin-top:10px">
+          <button class="btn btn-secondary btn-sm" onclick="extendWorldCalendar()">+ Generate More Fixtures</button>
+        </div>`;
     }
   }
 
@@ -7669,7 +7696,14 @@ function _renderWorldOverview(data) {
               <h3 class="empty-state-heading">No fixtures in the next 2 weeks</h3>
               <p class="empty-state-sub">This realistic calendar is between blocks right now. The next scheduled fixture is <strong>${escHtml(nextFix.scheduled_date || '')}</strong>: ${escHtml(nextFix.team1_name || '?')} vs ${escHtml(nextFix.team2_name || '?')}.</p>
             </div>`
-          : '<p class="text-muted">No fixtures in the next 2 weeks.</p>');
+          : `<div class="empty-state-card">
+              <div class="empty-state-icon">🗓️</div>
+              <h3 class="empty-state-heading">No fixtures left in the current block</h3>
+              <p class="empty-state-sub">${generatedThrough
+                ? `This world is currently generated through ${escHtml(generatedThrough)}. Extend the calendar to keep the save moving.`
+                : 'Extend the calendar to generate the next block of fixtures.'}</p>
+              <button class="btn btn-secondary btn-sm" onclick="extendWorldCalendar()">+ Generate More Fixtures</button>
+            </div>`);
   }
 
   // Mini rankings — top 3 per format
@@ -8111,7 +8145,7 @@ async function simulateWorld(target) {
   if (!res) return;
 
   if (res.matches_simulated === 0) {
-    alert(res.message || 'Nothing to simulate.');
+    alert(res.message || 'Nothing to simulate. You may need to generate more fixtures.');
     return;
   }
 
@@ -8119,6 +8153,19 @@ async function simulateWorld(target) {
   if (res.sim_report) res.sim_report._pausedFixture = res.paused_at_fixture || null;
   _renderSimReport(res.sim_report);
   showScreen('world-sim-report');
+}
+
+async function extendWorldCalendar() {
+  const id = WorldUI.activeWorldId;
+  if (!id) return;
+  const years = Math.max(1, Math.min(10, parseInt(document.getElementById('wd-extend-years')?.value, 10) || 2));
+  const btn = document.getElementById('btn-world-extend');
+  if (btn) { btn.disabled = true; btn.textContent = 'Extending…'; }
+  const res = await api('POST', `/api/worlds/${id}/extend-calendar`, { years });
+  if (btn) { btn.disabled = false; btn.textContent = '+ Extend Calendar'; }
+  if (!res?.success) return;
+  _showToast(`Generated ${res.new_fixture_count || 0} more fixtures`, 2200);
+  await loadWorldDetail(id);
 }
 
 function _renderSimReport(report) {

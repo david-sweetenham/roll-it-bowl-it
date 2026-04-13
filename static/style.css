@@ -2928,6 +2928,17 @@ body.broadcast-mode .btn-howzat {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 16px; margin-bottom: 16px;
 }
+.world-extend-controls {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: -6px 0 16px;
+  padding: 0 4px;
+}
+.world-extend-select {
+  min-width: 104px;
+}
+.world-extend-note {
+  font-size: var(--fs-xs);
+}
 .sim-date-input {
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); padding: 5px 8px; font-size: var(--fs-xs);

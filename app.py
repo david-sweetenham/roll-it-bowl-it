@@ -2705,6 +2705,7 @@ def create_world():
     density           = body.get('calendar_density', 'moderate')
     cal_style         = body.get('calendar_style', 'random')  # 'realistic' | 'random'
     cal_years         = int(body.get('calendar_years', 2))
+    cal_years         = max(1, min(10, cal_years))
     domestic_leagues  = body.get('domestic_leagues', [])   # e.g. ['ipl', 'bbl', 'county_championship']
     domestic_team_mode = body.get('domestic_team_mode', 'selected')
     world_scope       = body.get('world_scope', 'international')
@@ -2724,6 +2725,7 @@ def create_world():
     try:
         settings = {'team_ids': team_ids, 'my_team_id': my_team_id,
                     'calendar_style': cal_style,
+                    'calendar_years': cal_years,
                     'domestic_leagues': domestic_leagues,
                     'domestic_team_mode': domestic_team_mode,
                     'world_scope': world_scope}
@@ -2811,7 +2813,7 @@ def create_world():
             )
         else:
             raw_fixtures = game_engine.generate_fixture_calendar(
-                team_ids, start_date, density)
+                team_ids, start_date, density, months=cal_years * 12)
 
         # ── Convert to DB-ready rows ──────────────────────────────────────────
         fixtures_to_insert = []
@@ -3009,6 +3011,11 @@ def get_world(id):
         cur = date.fromisoformat(world.get('current_date') or date.today().isoformat())
         two_weeks_later = (cur + timedelta(days=14)).isoformat()
         next_two_weeks = [f for f in fixtures if f.get('scheduled_date', '') <= two_weeks_later]
+        generated_through_row = db.execute(
+            "SELECT MAX(scheduled_date) AS max_date FROM fixtures WHERE world_id=?",
+            (id,)
+        ).fetchone()
+        generated_through = generated_through_row['max_date'] if generated_through_row else None
 
         return jsonify({
             'world':            world,
@@ -3019,6 +3026,7 @@ def get_world(id):
             'world_records':    world_records,
             'completed_count':  len(completed),
             'upcoming_count':   len(fixtures),
+            'generated_through': generated_through,
         })
     finally:
         database.close_db(db)
@@ -3183,6 +3191,7 @@ def world_regenerate_calendar(id):
     style     = body.get('style', 'random')
     density   = body.get('density', 'moderate')
     years     = int(body.get('years', 2))
+    years     = max(1, min(10, years))
 
     if not from_date:
         return err('from_date required')
@@ -3220,6 +3229,7 @@ def world_regenerate_calendar(id):
             world_scope = 'international'
         if domestic_team_mode not in ('selected', 'full_league'):
             domestic_team_mode = 'selected'
+        settings['calendar_years'] = years
 
         if not team_ids:
             return err('No teams found in world settings')
@@ -3281,7 +3291,7 @@ def world_regenerate_calendar(id):
             )
         else:
             raw_fixtures = game_engine.generate_fixture_calendar(
-                team_ids, from_date, density)
+                team_ids, from_date, density, months=years * 12)
 
         series_dates = {}
         fixtures_to_insert = []
@@ -3337,6 +3347,7 @@ def world_regenerate_calendar(id):
 
         try:
             db.execute("UPDATE worlds SET calendar_style=? WHERE id=?", (style, id))
+            db.execute("UPDATE worlds SET settings_json=? WHERE id=?", (json.dumps(settings), id))
             db.commit()
         except Exception:
             pass
@@ -3353,6 +3364,198 @@ def skip_fixture(id, fid):
     try:
         database.update_fixture(db, fid, {'status': 'skipped'})
         return jsonify({'success': True})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/extend-calendar', methods=['POST'])
+def world_extend_calendar(id):
+    """
+    Append a further block of fixtures after the current generated horizon.
+    Body: {years}
+    """
+    import json
+    from datetime import date, timedelta
+
+    body = request.get_json() or {}
+    years = int(body.get('years', 0) or 0)
+
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+
+        settings = {}
+        if world.get('settings_json'):
+            try:
+                settings = json.loads(world['settings_json'])
+            except Exception:
+                settings = {}
+
+        years = max(1, min(10, years or int(settings.get('calendar_years', 2) or 2)))
+        style = world.get('calendar_style') or settings.get('calendar_style') or 'random'
+        density = world.get('calendar_density') or 'moderate'
+        team_ids = settings.get('team_ids', [])
+        my_team_id = settings.get('my_team_id')
+        domestic_leagues = settings.get('domestic_leagues', [])
+        domestic_team_mode = settings.get('domestic_team_mode', 'selected')
+        world_scope = settings.get('world_scope', 'international')
+        if world_scope not in ('international', 'domestic', 'combined'):
+            world_scope = 'international'
+        if domestic_team_mode not in ('selected', 'full_league'):
+            domestic_team_mode = 'selected'
+
+        if not team_ids:
+            return err('No teams found in world settings')
+
+        max_row = db.execute(
+            "SELECT MAX(scheduled_date) AS max_date FROM fixtures WHERE world_id=?",
+            (id,)
+        ).fetchone()
+        base_date = max_row['max_date'] if max_row and max_row['max_date'] else (world.get('current_date') or date.today().isoformat())
+        from_date = (date.fromisoformat(base_date) + timedelta(days=1)).isoformat()
+
+        team_name_map = {}
+        venue_name_map = {}
+        team_venues = {}
+        for tid in team_ids:
+            t = database.get_team(db, tid)
+            if t:
+                tname = t.get('name', f'Team{tid}')
+                team_name_map[tid] = tname
+                vid = t.get('home_venue_id')
+                if vid:
+                    team_venues[tid] = vid
+                    venue_name_map[tname] = [vid]
+
+        venues = database.get_venues(db)
+        fallback_venue = venues[0]['id'] if venues else None
+
+        selected_team_ids = set(team_ids)
+        domestic_team_list = []
+        if domestic_leagues and style == 'realistic':
+            all_leagues_needed = set()
+            for comp_key in domestic_leagues:
+                comp = cricket_calendar.DOMESTIC_COMPETITIONS.get(comp_key)
+                if comp:
+                    all_leagues_needed.add(comp['league'])
+            if all_leagues_needed:
+                dom_rows = db.execute(
+                    "SELECT t.id as team_id, t.name, t.league, t.home_venue_id "
+                    "FROM teams t WHERE t.league IN ({})".format(
+                        ','.join('?' * len(all_leagues_needed))
+                    ),
+                    list(all_leagues_needed)
+                ).fetchall()
+                domestic_team_list = [dict(r) for r in dom_rows]
+                if world_scope == 'domestic' and domestic_team_mode != 'full_league':
+                    domestic_team_list = [
+                        dt for dt in domestic_team_list
+                        if dt.get('team_id') in selected_team_ids
+                    ]
+                for dt in domestic_team_list:
+                    if dt.get('home_venue_id'):
+                        team_venues.setdefault(dt['team_id'], dt['home_venue_id'])
+
+        effective_team_ids = list(team_ids)
+        if world_scope == 'domestic' and style == 'realistic' and domestic_team_mode == 'full_league':
+            effective_team_ids = sorted({dt['team_id'] for dt in domestic_team_list if dt.get('team_id')})
+            settings['team_ids'] = effective_team_ids
+
+        calendar_team_ids = effective_team_ids if world_scope != 'domestic' else []
+
+        if style == 'realistic':
+            raw_fixtures = cricket_calendar.generate_realistic_calendar(
+                team_ids=calendar_team_ids,
+                team_names=team_name_map,
+                venue_ids=venue_name_map,
+                start_date_str=from_date,
+                density=density,
+                years=years,
+                domestic_leagues=domestic_leagues or None,
+                domestic_teams=domestic_team_list or None,
+            )
+        else:
+            raw_fixtures = game_engine.generate_fixture_calendar(
+                effective_team_ids, from_date, density, months=years * 12)
+
+        series_dates = {}
+        fixtures_to_insert = []
+        for fx in raw_fixtures:
+            t1 = fx['team1_id']
+            t2 = fx['team2_id']
+            vid = (fx.get('venue_id') or team_venues.get(t1)
+                   or team_venues.get(t2) or fallback_venue)
+            is_user = 1 if my_team_id and (t1 == my_team_id or t2 == my_team_id) else 0
+            sdate = fx.get('scheduled_date', from_date)
+            sk = fx.get('series_key')
+            if sk:
+                if sk not in series_dates:
+                    series_dates[sk] = {
+                        'min': sdate, 'max': sdate, 't1': t1, 't2': t2,
+                        'fmt': fx.get('format'), 'name': fx.get('series_name', ''),
+                        'is_icc': bool(fx.get('is_icc_event')),
+                        'icc_name': fx.get('icc_event_name'), 'count': 0,
+                    }
+                entry = series_dates[sk]
+                if sdate < entry['min']:
+                    entry['min'] = sdate
+                if sdate > entry['max']:
+                    entry['max'] = sdate
+                entry['count'] += 1
+
+            fixtures_to_insert.append({
+                'world_id': id, 'tournament_id': None, 'series_id': None,
+                'scheduled_date': sdate, 'venue_id': vid,
+                'team1_id': t1, 'team2_id': t2, 'fixture_type': 'world',
+                'format': fx.get('format'), 'is_user_match': is_user,
+                'series_name': fx.get('series_name'),
+                'match_number_in_series': fx.get('match_number_in_series', 1),
+                'series_length': fx.get('series_length', 1),
+                'is_icc_event': fx.get('is_icc_event', False),
+                'icc_event_name': fx.get('icc_event_name'),
+                'is_home_for_team1': fx.get('is_home_for_team1', True),
+                'tour_template': fx.get('tour_template'),
+                'season_year': int(sdate[:4]) if sdate else None,
+            })
+
+        if fixtures_to_insert:
+            database.bulk_create_fixtures(db, fixtures_to_insert)
+
+        for sk, sd in series_dates.items():
+            try:
+                database.create_world_series(db, {
+                    'world_id': id,
+                    'series_name': sd['name'],
+                    'format': sd['fmt'],
+                    'team1_id': sd['t1'],
+                    'team2_id': sd['t2'],
+                    'host_team_id': sd['t1'],
+                    'start_date': sd['min'],
+                    'end_date': sd['max'],
+                    'total_matches': sd['count'],
+                    'is_icc_event': sd['is_icc'],
+                    'icc_event_name': sd['icc_name'],
+                })
+            except Exception:
+                pass
+
+        settings['calendar_years'] = years
+        settings['calendar_style'] = style
+        db.execute("UPDATE worlds SET settings_json=? WHERE id=?", (json.dumps(settings), id))
+        db.commit()
+
+        generated_through_row = db.execute(
+            "SELECT MAX(scheduled_date) AS max_date FROM fixtures WHERE world_id=?",
+            (id,)
+        ).fetchone()
+        return jsonify({
+            'success': True,
+            'new_fixture_count': len(fixtures_to_insert),
+            'from_date': from_date,
+            'generated_through': generated_through_row['max_date'] if generated_through_row else None,
+        })
     finally:
         database.close_db(db)
 

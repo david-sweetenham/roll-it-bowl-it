@@ -1145,6 +1145,20 @@
                 </span>
               </label>
             </div>
+            <label class="form-label" style="margin-top:14px">Initial Fixture Horizon</label>
+            <select id="wc-years" class="form-input">
+              <option value="1">1 year</option>
+              <option value="2" selected>2 years</option>
+              <option value="3">3 years</option>
+              <option value="4">4 years</option>
+              <option value="5">5 years</option>
+              <option value="6">6 years</option>
+              <option value="7">7 years</option>
+              <option value="8">8 years</option>
+              <option value="9">9 years</option>
+              <option value="10">10 years</option>
+            </select>
+            <p class="form-help">Choose how far ahead to generate fixtures now. When you reach the end of that block, you can generate more fixtures and keep the world going.</p>
             <div id="wc-domestic-section" class="hidden" style="margin-top:14px">
               <label class="form-label">Domestic &amp; Franchise Leagues <span class="text-muted">(Realistic only)</span></label>
               <p class="form-help" style="margin-bottom:8px">Add these competitions to the world calendar alongside international cricket. Each league generates a full season of fixtures using its real teams.</p>
@@ -1232,6 +1246,23 @@
           <button id="btn-world-next-my-match" class="btn btn-sim" onclick="simulateWorld('next_my_match')">My Next Match</button>
           <input type="date" id="wd-sim-date" class="sim-date-input" />
           <button class="btn btn-sim" onclick="simulateWorld('date')">Sim to Date</button>
+        </div>
+        <div class="world-extend-controls">
+          <span class="sim-btn-label">Generate more fixtures:</span>
+          <select id="wd-extend-years" class="sim-date-input world-extend-select">
+            <option value="1">1 year</option>
+            <option value="2">2 years</option>
+            <option value="3">3 years</option>
+            <option value="4">4 years</option>
+            <option value="5">5 years</option>
+            <option value="6">6 years</option>
+            <option value="7">7 years</option>
+            <option value="8">8 years</option>
+            <option value="9">9 years</option>
+            <option value="10">10 years</option>
+          </select>
+          <button id="btn-world-extend" class="btn btn-secondary btn-sm" onclick="extendWorldCalendar()">+ Extend Calendar</button>
+          <span id="wd-extend-note" class="text-muted world-extend-note"></span>
         </div>
 
         <!-- Tabs -->
