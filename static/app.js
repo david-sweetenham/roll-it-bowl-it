@@ -1835,41 +1835,52 @@ function _stage1Meaning(delivery) {
   return 'Delivery';
 }
 
+function _deliveryBallLabel(delivery) {
+  if (!delivery) return '';
+  const over = delivery.over_number;
+  const ball = delivery.ball_number;
+  if (over == null || ball == null) return '';
+  return `${over}.${ball}`;
+}
+
+function _prefixedBallText(delivery, text) {
+  const ballLabel = _deliveryBallLabel(delivery);
+  return ballLabel ? `${ballLabel} • ${text}` : text;
+}
+
 function _autoOutcomePresentation(delivery) {
   const ot = delivery.outcome_type || '';
   const stage1Text = delivery.stage1_roll != null
-    ? `S1 ${delivery.stage1_roll}: ${_stage1Meaning(delivery)}`
+    ? _prefixedBallText(delivery, _stage1Meaning(delivery))
     : '';
   if (ot === 'wicket') {
     return {
       text: stage1Text
-        ? `${stage1Text} - OUT! ${_titleCaseWords(delivery.dismissal_type || 'wicket')}`
+        ? `${stage1Text} • OUT! ${_titleCaseWords(delivery.dismissal_type || 'wicket')}`
         : `OUT! ${_titleCaseWords(delivery.dismissal_type || 'wicket')}`,
       tone: 'wicket'
     };
   }
-  if (ot === 'six')  return { text: `${stage1Text} - SIX! MAXIMUM`, tone: 'hype' };
-  if (ot === 'four') return { text: `${stage1Text} - FOUR! TO THE ROPE`, tone: 'good' };
-  if (ot === 'three') return { text: `${stage1Text} - THREE RUNS`, tone: 'good' };
-  if (ot === 'two')   return { text: `${stage1Text} - TWO RUNS`, tone: 'good' };
-  if (ot === 'single') return { text: `${stage1Text} - SINGLE TAKEN`, tone: 'neutral' };
-  if (ot === 'wide')  return { text: `${stage1Text || 'Stage 3'} - WIDE BALL`, tone: 'alert' };
-  if (ot === 'no_ball') return { text: `${stage1Text || 'Stage 3'} - NO BALL - FREE HIT`, tone: 'alert' };
-  if (ot === 'bye') return { text: `${stage1Text || 'Stage 3'} - BYE`, tone: 'neutral' };
-  if (ot === 'leg_bye') return { text: `${stage1Text || 'Stage 3'} - LEG BYE`, tone: 'neutral' };
+  if (ot === 'six')  return { text: `${stage1Text} • SIX! MAXIMUM`, tone: 'hype' };
+  if (ot === 'four') return { text: `${stage1Text} • FOUR! TO THE ROPE`, tone: 'good' };
+  if (ot === 'three') return { text: `${stage1Text} • THREE RUNS`, tone: 'good' };
+  if (ot === 'two')   return { text: `${stage1Text} • TWO RUNS`, tone: 'good' };
+  if (ot === 'single') return { text: `${stage1Text} • SINGLE TAKEN`, tone: 'neutral' };
+  if (ot === 'wide')  return { text: `${stage1Text || _prefixedBallText(delivery, 'Delivery')} • WIDE BALL`, tone: 'alert' };
+  if (ot === 'no_ball') return { text: `${stage1Text || _prefixedBallText(delivery, 'Delivery')} • NO BALL • FREE HIT`, tone: 'alert' };
+  if (ot === 'bye') return { text: `${stage1Text || _prefixedBallText(delivery, 'Delivery')} • BYE`, tone: 'neutral' };
+  if (ot === 'leg_bye') return { text: `${stage1Text || _prefixedBallText(delivery, 'Delivery')} • LEG BYE`, tone: 'neutral' };
   if (delivery.is_free_hit && ot !== 'wicket') {
-    return { text: `${stage1Text} - FREE HIT SURVIVED`, tone: 'good' };
+    return { text: `${stage1Text} • FREE HIT SURVIVED`, tone: 'good' };
   }
-  return { text: `${stage1Text || 'Stage 3'} - DOT BALL`, tone: 'neutral' };
+  return { text: `${stage1Text || _prefixedBallText(delivery, 'Delivery')} • DOT BALL`, tone: 'neutral' };
 }
 
 function _autoStageFrames(delivery) {
   const frames = [
     {
       roll: delivery.stage1_roll,
-      label: delivery.is_free_hit
-        ? `STAGE 1 - ${delivery.stage1_roll}: ${_stage1Meaning(delivery)}`
-        : `STAGE 1 - ${delivery.stage1_roll}: ${_stage1Meaning(delivery)}`,
+      label: _prefixedBallText(delivery, _stage1Meaning(delivery)),
       tone: delivery.is_free_hit ? 'alert' : 'neutral',
       hold: delivery.stage2_roll != null ? null : 0
     }

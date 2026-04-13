@@ -2064,13 +2064,15 @@ body.broadcast-mode .pip { width: 20px; height: 20px; }
   font-size: var(--fs-sm);
   color: var(--almanack-text);
   font-family: var(--font-score);
-  min-height: 28px;
+  min-height: 42px;
+  width: 100%;
   text-align: center;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 700;
-  max-width: 280px;
+  max-width: none;
   line-height: 1.35;
+  padding: 0 8px;
 }
 .die-stage-label.tone-neutral {
   color: var(--almanack-text);
