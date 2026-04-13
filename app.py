@@ -2462,13 +2462,244 @@ def _build_world_state(db, world_id):
 
 
 _REGEN_FIRST_NAMES = [
-    'Alex', 'Sam', 'Noah', 'Arjun', 'Liam', 'Mason', 'Ben', 'Isaac', 'Jay', 'Owen',
-    'Riley', 'Ethan', 'Kai', 'Zane', 'Rehan', 'Aadi', 'Cameron', 'Lewis', 'Jacob', 'Tom'
+    'Aadi', 'Aarav', 'Aaron', 'Aayan', 'Abel', 'Adam', 'Adil', 'Aditya', 'Aiden', 'Ainsley',
+    'Ajeet', 'Akhil', 'Alan', 'Albert', 'Alec', 'Alfie', 'Ali', 'Amir', 'Anderson', 'Andre',
+    'Angus', 'Anik', 'Archer', 'Arin', 'Arjun', 'Arlo', 'Aryan', 'Asher', 'Ayaan', 'Bailey',
+    'Ben', 'Benjamin', 'Bilal', 'Blake', 'Bodhi', 'Brandon', 'Caden', 'Cai', 'Caleb', 'Callum',
+    'Cameron', 'Carl', 'Casey', 'Charles', 'Charlie', 'Chris', 'Christopher', 'Cooper', 'Curtis', 'Cyrus',
+    'Daniel', 'Danny', 'Darshan', 'David', 'Declan', 'Dev', 'Dylan', 'Eddie', 'Edward', 'Ehsan',
+    'Eli', 'Elijah', 'Elliot', 'Ethan', 'Euan', 'Evan', 'Farhan', 'Felix', 'Finn', 'Fletcher',
+    'Fraser', 'Gabriel', 'George', 'Gideon', 'Hamish', 'Haris', 'Harry', 'Harvey', 'Hasan', 'Hugo',
+    'Ibrahim', 'Imran', 'Ishaan', 'Isaac', 'Isaiah', 'Ivan', 'Jack', 'Jackson', 'Jacob', 'Jai',
+    'Jake', 'James', 'Jamie', 'Jared', 'Jason', 'Jay', 'Joel', 'John', 'Jonah', 'Joseph',
+    'Josh', 'Joshua', 'Jude', 'Julian', 'Kacper', 'Kai', 'Karan', 'Kasim', 'Keegan', 'Kian',
+    'Kieran', 'Kit', 'Kris', 'Kunal', 'Lachlan', 'Lennon', 'Leo', 'Lewis', 'Liam', 'Logan',
+    'Louis', 'Luca', 'Lucas', 'Luke', 'Mackenzie', 'Marcus', 'Mason', 'Mateo', 'Matteo', 'Max',
+    'Maxwell', 'Micah', 'Michael', 'Mikael', 'Miles', 'Milan', 'Mohammad', 'Mohammed', 'Monty', 'Muhammad',
+    'Nate', 'Nathan', 'Nayan', 'Neil', 'Noah', 'Nolan', 'Oliver', 'Ollie', 'Omar', 'Oscar',
+    'Owen', 'Parth', 'Patrick', 'Paul', 'Rafi', 'Raheem', 'Ralph', 'Ravi', 'Rayhan', 'Reece',
+    'Rehan', 'Riley', 'Rishi', 'Rohan', 'Ronan', 'Rory', 'Ryan', 'Saad', 'Sam', 'Sami',
+    'Samuel', 'Scott', 'Sean', 'Seb', 'Sebastian', 'Shane', 'Shaan', 'Siddharth', 'Simon', 'Sohail',
+    'Sonny', 'Spencer', 'Stanley', 'Stefan', 'Sufyan', 'Taha', 'Taran', 'Tariq', 'Taylor', 'Theo',
+    'Thomas', 'Toby', 'Tom', 'Tristan', 'Tyler', 'Usman', 'Vihaan', 'Victor', 'Will', 'William',
+    'Xavier', 'Yash', 'Yousef', 'Yusuf', 'Zac', 'Zach', 'Zain', 'Zaid', 'Zak', 'Zayan'
 ]
 _REGEN_LAST_NAMES = [
-    'Shaw', 'Patel', 'Khan', 'Ali', 'Mills', 'Turner', 'Singh', 'Rahman', 'Hughes', 'Das',
-    'Simmons', 'Morgan', 'Iqbal', 'Taylor', 'Campbell', 'Reid', 'Butt', 'Nair', 'Brown', 'Joseph'
+    'Ahmed', 'Akhtar', 'Ali', 'Allen', 'Anderson', 'Ashraf', 'Atkinson', 'Aziz', 'Barker', 'Barnes',
+    'Barrett', 'Bashir', 'Bell', 'Bennett', 'Bhatti', 'Bishop', 'Blair', 'Bond', 'Booth', 'Bowen',
+    'Boyd', 'Bradley', 'Brown', 'Butcher', 'Butler', 'Butt', 'Caldwell', 'Campbell', 'Carey', 'Carpenter',
+    'Carr', 'Carroll', 'Chand', 'Chapman', 'Chaudhry', 'Clarke', 'Coleman', 'Collins', 'Cook', 'Cooper',
+    'Crawford', 'Cross', 'Cunningham', 'Curtis', 'Dale', 'Das', 'Davidson', 'Davies', 'Davis', 'Dean',
+    'Dixon', 'Douglas', 'Doyle', 'Drummond', 'Dunbar', 'Edwards', 'Ellis', 'Evans', 'Farooq', 'Ferguson',
+    'Fernandes', 'Fielding', 'Fisher', 'Fitzpatrick', 'Fleming', 'Foster', 'Fraser', 'Fuller', 'Gardner', 'George',
+    'Ghani', 'Gibson', 'Gill', 'Gordon', 'Graham', 'Grant', 'Gray', 'Green', 'Griffith', 'Habib',
+    'Hale', 'Hall', 'Hamilton', 'Hammond', 'Haque', 'Harding', 'Harper', 'Harris', 'Hart', 'Hasan',
+    'Hassan', 'Hayes', 'Henderson', 'Hicks', 'Hogan', 'Holland', 'Hood', 'Hooper', 'Hughes', 'Hussain',
+    'Iqbal', 'Irving', 'Islam', 'Iyer', 'Jackson', 'Jadeja', 'Jahangir', 'James', 'Javed', 'Jenkins',
+    'Johnson', 'Jones', 'Joseph', 'Kamal', 'Kaur', 'Kerr', 'Khalid', 'Khan', 'Khatri', 'Knight',
+    'Kumar', 'Lamb', 'Lawrence', 'Leach', 'Lee', 'Lennox', 'Lewis', 'Lloyd', 'Long', 'Lowe',
+    'Mahmood', 'Majid', 'Malik', 'Mann', 'Marshall', 'Martin', 'Mason', 'Mathews', 'McAllister', 'McBride',
+    'McCormick', 'McDonald', 'McGregor', 'McKenzie', 'Mehta', 'Miller', 'Mills', 'Mitchell', 'Mohamed', 'Moore',
+    'Morgan', 'Morris', 'Mukherjee', 'Murphy', 'Murray', 'Nadeem', 'Nair', 'Naseem', 'Nicholls', 'Norris',
+    'O Brien', 'O Connell', 'O Dowd', 'Parker', 'Parmar', 'Patel', 'Pearson', 'Perera', 'Peters', 'Phillips',
+    'Potter', 'Powell', 'Qadri', 'Qureshi', 'Rafiq', 'Rahman', 'Rashid', 'Reed', 'Reid', 'Reynolds',
+    'Richards', 'Roberts', 'Robertson', 'Robinson', 'Ross', 'Saeed', 'Sahota', 'Saleem', 'Saunders', 'Scott',
+    'Shah', 'Shaikh', 'Sharma', 'Sheikh', 'Short', 'Siddiqui', 'Silva', 'Singh', 'Sinha', 'Sloan',
+    'Smith', 'Smyth', 'Spencer', 'Steele', 'Stephens', 'Stewart', 'Sullivan', 'Sweeney', 'Tariq', 'Taylor',
+    'Thomas', 'Thompson', 'Turner', 'Usman', 'Vaughan', 'Verma', 'Walker', 'Walsh', 'Ward', 'Watson',
+    'White', 'Wilkins', 'Williams', 'Wilson', 'Wood', 'Wright', 'Young', 'Zaidi', 'Zaman', 'Zia',
+    'Bennett-Smith', 'Brown-Reid', 'Campbell-Thomas', 'Clarke-Jones', 'Davies-Evans', 'Edwards-Hughes', 'Foster-Lee', 'Grant-Wilson', 'Halliday-Brown', 'Khan-Patel',
+    'Lewis-Clarke', 'Martin-Young', 'Morgan-Shaw', 'Patel-Singh', 'Rahman-Ali', 'Reid-Campbell', 'Roberts-Gray', 'Shah-Hussain', 'Taylor-Mills', 'Walker-James'
 ]
+
+_REGEN_NAME_POOLS = {
+    'england': {
+        'first': ['Oliver', 'George', 'Harry', 'Jack', 'Charlie', 'Thomas', 'Alfie', 'Theo', 'Oscar', 'William',
+                  'Jacob', 'Leo', 'Archie', 'Henry', 'Freddie', 'Arthur', 'James', 'Lucas', 'Joshua', 'Edward',
+                  'Samuel', 'Max', 'Luke', 'Joseph', 'Ben', 'Tom', 'Callum', 'Cameron', 'Liam', 'Rory'],
+        'last': ['Smith', 'Jones', 'Taylor', 'Brown', 'Wilson', 'Johnson', 'Davies', 'Robinson', 'Wright', 'Walker',
+                 'Thompson', 'White', 'Hughes', 'Edwards', 'Clarke', 'Turner', 'Hill', 'Baker', 'Carter', 'Phillips',
+                 'Cooper', 'Ward', 'Butler', 'Collins', 'Brooks', 'Gray', 'Foster', 'Parker', 'Taylor-Jones', 'Clarke-Smith']
+    },
+    'australia': {
+        'first': ['Jack', 'Noah', 'Oliver', 'William', 'Thomas', 'Lucas', 'Henry', 'Leo', 'Charlie', 'James',
+                  'Harry', 'Max', 'Archie', 'Hudson', 'Lachlan', 'Xavier', 'Cooper', 'Bailey', 'Riley', 'Mitchell',
+                  'Cameron', 'Marcus', 'Harvey', 'Mason', 'Oscar', 'Finn', 'Ethan', 'Angus', 'Hamish', 'Tyler'],
+        'last': ['Smith', 'Jones', 'Williams', 'Brown', 'Wilson', 'Taylor', 'Anderson', 'Thomas', 'White', 'Martin',
+                 'Thompson', 'Moore', 'Walker', 'Hall', 'Young', 'Allen', 'King', 'Wright', 'Scott', 'Green',
+                 'Campbell', 'Murray', 'Evans', 'Murphy', 'Fraser', 'Harris', 'Cooper', 'Griffiths', 'Miller-White', 'Taylor-Brown']
+    },
+    'india': {
+        'first': ['Aarav', 'Vivaan', 'Aditya', 'Vihaan', 'Arjun', 'Krishna', 'Ishaan', 'Ayaan', 'Rohan', 'Karan',
+                  'Sai', 'Dhruv', 'Aadi', 'Yash', 'Rahul', 'Rishi', 'Aryan', 'Dev', 'Parth', 'Siddharth',
+                  'Varun', 'Aniket', 'Rajat', 'Aman', 'Akash', 'Nikhil', 'Harsh', 'Kabir', 'Pranav', 'Rudra'],
+        'last': ['Sharma', 'Patel', 'Singh', 'Kumar', 'Gupta', 'Verma', 'Yadav', 'Joshi', 'Iyer', 'Nair',
+                 'Jadeja', 'Pandya', 'Reddy', 'Kulkarni', 'Chopra', 'Saxena', 'Gill', 'Saini', 'Choudhary', 'Mehta',
+                 'Bose', 'Malhotra', 'Kapoor', 'Bhat', 'Mishra', 'Tripathi', 'Kohli', 'Rana', 'Patel-Shah', 'Singh-Rana']
+    },
+    'pakistan': {
+        'first': ['Muhammad', 'Ahmed', 'Ali', 'Hassan', 'Hussain', 'Hamza', 'Abdullah', 'Usman', 'Bilal', 'Ayaan',
+                  'Saad', 'Rayyan', 'Taha', 'Zayan', 'Daniyal', 'Raza', 'Sufyan', 'Talha', 'Rehan', 'Ammar',
+                  'Farhan', 'Ahsan', 'Kashif', 'Imran', 'Babar', 'Shan', 'Shahzaib', 'Muneeb', 'Haris', 'Zubair'],
+        'last': ['Khan', 'Ahmed', 'Ali', 'Hussain', 'Malik', 'Butt', 'Shah', 'Qureshi', 'Chaudhry', 'Iqbal',
+                 'Raza', 'Mahmood', 'Akhtar', 'Saeed', 'Nawaz', 'Sheikh', 'Javed', 'Farooq', 'Rashid', 'Azam',
+                 'Haider', 'Mirza', 'Aslam', 'Siddiqui', 'Bhatti', 'Shafiq', 'Saleem', 'Shahid', 'Khan-Ali', 'Shah-Hussain']
+    },
+    'new_zealand': {
+        'first': ['Noah', 'Oliver', 'Jack', 'Leo', 'Theodore', 'George', 'Luca', 'Arthur', 'William', 'Charlie',
+                  'Mason', 'Hunter', 'Lachlan', 'Isaac', 'Finn', 'Cooper', 'James', 'Max', 'Sam', 'Ben',
+                  'Harley', 'Tom', 'Hamish', 'Riley', 'Micah', 'Arlo', 'Tyler', 'Carter', 'Logan', 'Niko'],
+        'last': ['Smith', 'Wilson', 'Taylor', 'Brown', 'Williams', 'Thompson', 'Walker', 'Cooper', 'Martin', 'Anderson',
+                 'King', 'Bell', 'Campbell', 'Harris', 'Fraser', 'Reid', 'Murray', 'Bennett', 'Mason', 'Scott',
+                 'Young', 'Nicholls', 'McKenzie', 'Robertson', 'Ellis', 'Sullivan', 'Parker', 'Reid-Walker', 'Campbell-Young', 'Scott-Brown']
+    },
+    'south_africa': {
+        'first': ['Liam', 'Noah', 'Ethan', 'Luke', 'Daniel', 'Joshua', 'Nathan', 'Aiden', 'Jason', 'Caleb',
+                  'Aaron', 'Ruan', 'Jean', 'Francois', 'Wiaan', 'Keegan', 'Mihlali', 'Lutho', 'Siyabonga', 'Thabo',
+                  'Aphiwe', 'Kagiso', 'Temba', 'Aiden', 'Ziyaad', 'Jody', 'Cameron', 'Ryan', 'Dylan', 'Morne'],
+        'last': ['Smith', 'Naidoo', 'van der Merwe', 'Botha', 'Pillay', 'Ndlovu', 'Mokoena', 'Jacobs', 'Adams', 'Visser',
+                 'Steyn', 'Petersen', 'Muller', 'van Wyk', 'Mahlangu', 'Mokoena', 'Dlamini', 'Hendricks', 'Meyer', 'Coetzee',
+                 'Pretorius', 'Williams', 'Daniels', 'Khumalo', 'du Plessis', 'Bosch', 'van Rooyen', 'Petersen-Jacobs', 'Naidoo-Pillay', 'Smith-Coetzee']
+    },
+    'west_indies': {
+        'first': ['Jayden', 'Kemar', 'Shai', 'Roston', 'Kraigg', 'Akeem', 'Andre', 'Alzarri', 'Marlon', 'Keacy',
+                  'Alick', 'Jomel', 'Kavem', 'Rovman', 'Shimron', 'Tagenarine', 'Joshua', 'Brandon', 'Tyrone', 'Devon',
+                  'Kirk', 'Jason', 'Oshane', 'Jaden', 'Jermaine', 'Kevlon', 'Che', 'Kadeem', 'Nicholas', 'Rahkeem'],
+        'last': ['Joseph', 'Holder', 'Charles', 'Hope', 'Chase', 'Brathwaite', 'Phillip', 'Seales', 'Roach', 'Pooran',
+                 'Mayers', 'Lewis', 'Carty', 'Sinclair', 'Hosein', 'McCaskie', 'Greaves', 'Paul', 'Cornwall', 'King',
+                 'Motie', 'Athanaze', 'Forde', 'Johnson', 'Bishop', 'Campbell', 'Richards', 'Thomas-Joseph', 'King-Hope', 'Charles-Bishop']
+    },
+    'sri_lanka': {
+        'first': ['Nethmin', 'Sahan', 'Dulaj', 'Kavindu', 'Pasindu', 'Dineth', 'Avishka', 'Charith', 'Kusal', 'Pathum',
+                  'Kamindu', 'Dhananjaya', 'Asitha', 'Kasun', 'Wanindu', 'Maheesh', 'Lahiru', 'Dasun', 'Bhanuka', 'Chamindu',
+                  'Janith', 'Vishwa', 'Ashen', 'Minod', 'Oshada', 'Ramesh', 'Shevon', 'Niroshan', 'Matheesha', 'Pramod'],
+        'last': ['Perera', 'Fernando', 'Silva', 'Kumara', 'Mendis', 'Nissanka', 'Hasaranga', 'Karunaratne', 'Madushanka', 'Asalanka',
+                 'Gunathilaka', 'Rajapaksa', 'Rathnayake', 'Samarawickrama', 'Vandersay', 'Pathirana', 'Lakshan', 'Bandara', 'Wijesinghe', 'Peiris',
+                 'Dhananjaya', 'Jayasuriya', 'Abeyratne', 'Kulasekara', 'Herath', 'Dananjaya', 'Perera-Silva', 'Fernando-Kumara', 'Mendis-Perera', 'Silva-Bandara']
+    },
+    'bangladesh': {
+        'first': ['Rahim', 'Tamim', 'Litton', 'Towhid', 'Najmul', 'Mahmudul', 'Shanto', 'Taskin', 'Mustafizur', 'Shakib',
+                  'Mehidy', 'Nasum', 'Soumya', 'Anamul', 'Mushfiqur', 'Hasan', 'Rakib', 'Naim', 'Tanzid', 'Mahedi',
+                  'Ebadot', 'Rishad', 'Tawhid', 'Aminul', 'Akbar', 'Shadman', 'Yasir', 'Mrittunjoy', 'Zaker', 'Parvez'],
+        'last': ['Hasan', 'Hossain', 'Rahman', 'Islam', 'Ahmed', 'Ali', 'Das', 'Miah', 'Sarkar', 'Mia',
+                 'Haque', 'Naim', 'Shanto', 'Saifuddin', 'Mahmud', 'Zaman', 'Akter', 'Bashar', 'Kabir', 'Roy',
+                 'Nayeem', 'Shamim', 'Rakib', 'Rana', 'Rafi', 'Anik', 'Rahman-Das', 'Hossain-Ali', 'Islam-Sarkar', 'Ahmed-Roy']
+    },
+    'afghanistan': {
+        'first': ['Ahmad', 'Rahmanullah', 'Ibrahim', 'Hashmatullah', 'Najibullah', 'Rashid', 'Mohammad', 'Mujeeb', 'Naveen', 'Fazalhaq',
+                  'Noor', 'Abdul', 'Azmatullah', 'Ikram', 'Sediqullah', 'Darwish', 'Zia', 'Afsar', 'Bilal', 'Farid',
+                  'Hamid', 'Javed', 'Khalid', 'Latif', 'Noman', 'Qais', 'Rahim', 'Samiullah', 'Tariq', 'Wafadar'],
+        'last': ['Shah', 'Zadran', 'Ahmadzai', 'Nabi', 'Gurbaz', 'Omarzai', 'Farooqi', 'Khan', 'Noorzai', 'Stanikzai',
+                 'Safi', 'Shinwari', 'Mohammadi', 'Jadran', 'Azizi', 'Rahmani', 'Wali', 'Sulaiman', 'Yousafzai', 'Wardak',
+                 'Nasiri', 'Hamza', 'Sediqi', 'Popalzai', 'Hakimi', 'Rahimzai', 'Khan-Zadran', 'Shah-Ahmadzai', 'Safi-Wardak', 'Azizi-Nabi']
+    },
+    'ireland': {
+        'first': ['Jack', 'James', 'Noah', 'Conor', 'Cian', 'Oisin', 'Fionn', 'Darragh', 'Tadhg', 'Rian',
+                  'Cillian', 'Patrick', 'Rory', 'Shane', 'Sean', 'Daniel', 'Ben', 'Tom', 'Luke', 'Eoin',
+                  'Niall', 'Ryan', 'Adam', 'Harry', 'Cathal', 'Michael', 'Finn', 'Kian', 'Jamie', 'Dylan'],
+        'last': ['Murphy', 'Kelly', 'Walsh', 'Byrne', 'Ryan', 'O Brien', 'O Sullivan', 'Doyle', 'McCarthy', 'Gallagher',
+                 'Dunne', 'Lynch', 'Kennedy', 'Quinn', 'McCann', 'Byrne', 'Kavanagh', 'Fitzgerald', 'Reilly', 'Brennan',
+                 'Delany', 'Barry', 'Murray', 'Nolan', 'Connolly', 'Healy', 'O Brien-Kelly', 'Murphy-Byrne', 'Doyle-Quinn', 'Ryan-Walsh']
+    },
+    'scotland': {
+        'first': ['Jack', 'Callum', 'Lewis', 'Finlay', 'Rory', 'Fraser', 'Hamish', 'Euan', 'Alasdair', 'Blair',
+                  'Cameron', 'Ben', 'Tom', 'Jamie', 'Lachlan', 'Logan', 'Max', 'Dylan', 'Archie', 'Aidan',
+                  'Craig', 'Gregor', 'Iain', 'Matthew', 'Ross', 'Stuart', 'Zander', 'Kieran', 'Ryan', 'Sean'],
+        'last': ['Smith', 'Stewart', 'MacLeod', 'Fraser', 'Campbell', 'Munro', 'Forbes', 'McIntosh', 'Kerr', 'Allan',
+                 'Davidson', 'Greer', 'Wallace', 'Leslie', 'Buchanan', 'Mackenzie', 'Graham', 'Robertson', 'Baird', 'Ritchie',
+                 'Henderson', 'Morrison', 'Scott', 'Watson', 'Watt', 'Douglas', 'Fraser-Stewart', 'MacLeod-Scott', 'Kerr-Wallace', 'Graham-Forbes']
+    },
+    'netherlands': {
+        'first': ['Daan', 'Sem', 'Levi', 'Milan', 'Finn', 'Luuk', 'Lars', 'Noah', 'Mees', 'Bram',
+                  'Jesse', 'Thijs', 'Niels', 'Joris', 'Stijn', 'Koen', 'Ruben', 'Cas', 'Timo', 'Sven',
+                  'Jelle', 'Wesley', 'Roelof', 'Bas', 'Pieter', 'Johan', 'Aryan', 'Shariz', 'Vikram', 'Ryan'],
+        'last': ['de Vries', 'van der Merwe', 'van Beek', 'Edwards', 'Ackermann', 'Croes', 'Klaassen', 'de Leede', 'Snater', 'Pringle',
+                 'Kingma', 'van Meekeren', 'Zulfiqar', 'Singh', 'Nidamanuru', 'O Dowd', 'Dutt', 'Doram', 'Klein', 'Vos',
+                 'Jansen', 'Bakker', 'de Boer', 'van Rijn', 'Pieters', 'Smit', 'van der Berg', 'de Vries-Jansen', 'van Beek-de Boer', 'Klein-Dutt']
+    },
+    'zimbabwe': {
+        'first': ['Tadiwanashe', 'Wesley', 'Takudzwa', 'Clive', 'Joylord', 'Brandon', 'Craig', 'Sean', 'Tafadzwa', 'Blessing',
+                  'Richard', 'Ryan', 'Milton', 'Faraz', 'Tanaka', 'Prince', 'Victor', 'Luke', 'Ernest', 'Dion',
+                  'Brian', 'Carl', 'Kevin', 'Nicholas', 'Tinashe', 'Trevor', 'Donald', 'Ashley', 'Shingirai', 'Kudzai'],
+        'last': ['Muzarabani', 'Raza', 'Bennett', 'Ervine', 'Williams', 'Burl', 'Madhevere', 'Ngarava', 'Masakadza', 'Kaia',
+                 'Marumani', 'Munyonga', 'Shumba', 'Campbell', 'Mavuta', 'Chivanga', 'Mpofu', 'Jongwe', 'Matigimu', 'Munyati',
+                 'Chisoro', 'Mtetwa', 'Nyauchi', 'Muzondo', 'Mlambo', 'Mawoyo', 'Bennett-Williams', 'Raza-Kaia', 'Masakadza-Burl', 'Campbell-Ervine']
+    },
+    'nepal': {
+        'first': ['Aarav', 'Aayush', 'Ritvik', 'Rohit', 'Kushal', 'Aasif', 'Dipendra', 'Gulsan', 'Karan', 'Lalit',
+                  'Sandeep', 'Sompal', 'Bhim', 'Anil', 'Aakash', 'Nandan', 'Pawan', 'Bibek', 'Roshan', 'Sagar',
+                  'Aman', 'Nabin', 'Pratis', 'Rijan', 'Sushil', 'Yuvraj', 'Bikram', 'Binod', 'Hemant', 'Sujan'],
+        'last': ['Paudel', 'Malla', 'Airee', 'Kumar', 'Jha', 'Bohara', 'Kami', 'Singh', 'Chand', 'Khadka',
+                 'Aalam', 'Maharjan', 'Bhatta', 'Gurung', 'Shahi', 'Thapa', 'Shrestha', 'Rawal', 'Joshi', 'Yadav',
+                 'Koirala', 'Bista', 'Karki', 'Lama', 'Malla-Shahi', 'Paudel-Thapa', 'Joshi-Gurung', 'Rawal-Bohara', 'Chand-Khadka', 'Shrestha-Yadav']
+    },
+    'uae': {
+        'first': ['Muhammad', 'Waseem', 'Aryan', 'Dhruv', 'Basil', 'Vriitya', 'Aayan', 'Ali', 'Zahoor', 'Akeel',
+                  'Junaid', 'Kashif', 'Khalid', 'Lovepreet', 'Rahul', 'Sanchit', 'Nilansh', 'Karthik', 'Usman', 'Ammar',
+                  'Aarush', 'Ansh', 'Harit', 'Jay', 'Mihir', 'Parth', 'Rayan', 'Tanish', 'Yash', 'Zayed'],
+        'last': ['Khan', 'Ahmed', 'Shah', 'Ali', 'Siddique', 'Panoly', 'Suri', 'Aravind', 'Bharadwaj', 'Maqsood',
+                 'Naseer', 'Rizwan', 'Farooq', 'Thakur', 'Patel', 'Singh', 'Bhandari', 'Lal', 'Bhupinder', 'Kumar',
+                 'Zahid', 'Asif', 'Merchant', 'Chopra', 'Shah-Khan', 'Patel-Singh', 'Ahmed-Ali', 'Kumar-Patel', 'Suri-Aravind', 'Bharadwaj-Thakur']
+    },
+    'oman': {
+        'first': ['Aqib', 'Jatinder', 'Kashyap', 'Shoaib', 'Bilal', 'Zeeshan', 'Ayaan', 'Faisal', 'Karan', 'Naseem',
+                  'Shakeel', 'Pratik', 'Aamir', 'Arjun', 'Nikhil', 'Rakesh', 'Sandeep', 'Usama', 'Yatin', 'Zubair',
+                  'Aman', 'Chetan', 'Danish', 'Haroon', 'Imran', 'Jayesh', 'Noman', 'Rohit', 'Sufyan', 'Tanveer'],
+        'last': ['Khan', 'Singh', 'Shah', 'Kumar', 'Patel', 'Ahmed', 'Ali', 'Ilyas', 'Maqsood', 'Butt',
+                 'Rafiq', 'Naseem', 'Bharat', 'Mehta', 'Sharma', 'Rana', 'Qadri', 'Aslam', 'Naqvi', 'Joshi',
+                 'Sood', 'Verma', 'Tariq', 'Chopra', 'Khan-Singh', 'Patel-Kumar', 'Ali-Shah', 'Ahmed-Rafiq', 'Mehta-Joshi', 'Sharma-Verma']
+    },
+    'united_states': {
+        'first': ['Liam', 'Noah', 'Oliver', 'Elijah', 'James', 'William', 'Benjamin', 'Lucas', 'Henry', 'Alexander',
+                  'Aaron', 'Cameron', 'Corey', 'Monank', 'Saurabh', 'Harmeet', 'Jasdeep', 'Ali', 'Nisarg', 'Rajan',
+                  'Steven', 'Tyler', 'Ryan', 'Jason', 'Ethan', 'Milan', 'Shayan', 'Vatsal', 'Yuvraj', 'Zeeshan'],
+        'last': ['Jones', 'Smith', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson', 'Anderson', 'Taylor', 'Moore',
+                 'Patel', 'Kumar', 'Singh', 'Khan', 'Ali', 'Shah', 'Netravalkar', 'Taylor', 'Jones', 'Brown',
+                 'Ahmed', 'Desai', 'Rana', 'Sharma', 'White', 'Clark', 'Patel-Singh', 'Brown-Taylor', 'Khan-Ali', 'Jones-Williams']
+    },
+    'canada': {
+        'first': ['Noah', 'Liam', 'William', 'Benjamin', 'Lucas', 'Ethan', 'Ayaan', 'Aaron', 'Cale', 'Dilpreet',
+                  'Harsh', 'Navneet', 'Nikhil', 'Pargat', 'Ravinder', 'Saad', 'Shreyas', 'Uday', 'Yuvraj', 'Zaid',
+                  'Cameron', 'Declan', 'Finn', 'Gurpal', 'Junaid', 'Kabir', 'Parth', 'Ryan', 'Sajid', 'Tyler'],
+        'last': ['Singh', 'Kumar', 'Patel', 'Shah', 'Khan', 'Ali', 'Johnson', 'Smith', 'Brown', 'Thomas',
+                 'Gill', 'Joshi', 'Sandhu', 'Ahmed', 'Sana', 'Mann', 'Dhaliwal', 'Bajwa', 'Brar', 'Grewal',
+                 'Sodhi', 'Kapoor', 'Riaz', 'Rehman', 'Taylor', 'Wilson', 'Singh-Brar', 'Patel-Shah', 'Khan-Ali', 'Dhaliwal-Sandhu']
+    },
+}
+
+_REGEN_TEAM_POOL_OVERRIDES = {
+    'England': 'england',
+    'Australia': 'australia',
+    'India': 'india',
+    'Pakistan': 'pakistan',
+    'New Zealand': 'new_zealand',
+    'South Africa': 'south_africa',
+    'West Indies': 'west_indies',
+    'Sri Lanka': 'sri_lanka',
+    'Bangladesh': 'bangladesh',
+    'Afghanistan': 'afghanistan',
+    'Ireland': 'ireland',
+    'Scotland': 'scotland',
+    'Netherlands': 'netherlands',
+    'Zimbabwe': 'zimbabwe',
+    'Nepal': 'nepal',
+    'UAE': 'uae',
+    'Oman': 'oman',
+    'United States': 'united_states',
+    'Canada': 'canada',
+}
+
+_REGEN_LEAGUE_POOL_OVERRIDES = {
+    'county_championship': 'england',
+    't20_blast': 'england',
+    'royal_london_cup': 'england',
+    'sheffield_shield': 'australia',
+    'marsh_cup': 'australia',
+    'bbl': 'australia',
+    'ipl': 'india',
+    'cpl': 'west_indies',
+    'psl': 'pakistan',
+}
 
 
 def _world_player_lifecycle_mode(world_state):
@@ -2596,8 +2827,28 @@ def _should_retire_player(player, state):
     return None
 
 
-def _generate_regen_name(team_name):
-    return f"{random.choice(_REGEN_FIRST_NAMES)} {random.choice(_REGEN_LAST_NAMES)}"
+def _regen_name_pool_for_team(db, team):
+    if not team:
+        return None
+    if team.get('name') in _REGEN_TEAM_POOL_OVERRIDES:
+        return _REGEN_NAME_POOLS.get(_REGEN_TEAM_POOL_OVERRIDES[team['name']])
+    league = team.get('league')
+    if league and league in _REGEN_LEAGUE_POOL_OVERRIDES:
+        return _REGEN_NAME_POOLS.get(_REGEN_LEAGUE_POOL_OVERRIDES[league])
+    venue_id = team.get('home_venue_id')
+    if venue_id:
+        venue = database.get_venue(db, venue_id)
+        country = (venue or {}).get('country')
+        if country and country in _REGEN_TEAM_POOL_OVERRIDES:
+            return _REGEN_NAME_POOLS.get(_REGEN_TEAM_POOL_OVERRIDES[country])
+    return None
+
+
+def _generate_regen_name(db, team):
+    pool = _regen_name_pool_for_team(db, team) or {}
+    first_names = pool.get('first') or _REGEN_FIRST_NAMES
+    last_names = pool.get('last') or _REGEN_LAST_NAMES
+    return f"{random.choice(first_names)} {random.choice(last_names)}"
 
 
 def _create_world_regen_player(db, world_id, team_id, template_player, year):
@@ -2609,7 +2860,7 @@ def _create_world_regen_player(db, world_id, team_id, template_player, year):
     team = database.get_team(db, team_id) or {}
     player_data = {
         'team_id': team_id,
-        'name': _generate_regen_name(team.get('name', 'Regen XI')),
+        'name': _generate_regen_name(db, team),
         'batting_position': batting_position,
         'batting_rating': bat_rating,
         'batting_hand': random.choice(['right', 'left']),
