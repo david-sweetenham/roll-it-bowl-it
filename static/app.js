@@ -3189,7 +3189,7 @@ function _broadcastShowInterstitial(type, data) {
         <div class="bcast-meta">
           <span class="badge badge-${(f.format || '').toLowerCase()}">${escHtml(f.format || '')}</span>
           ${venue ? `<span class="bcast-meta-item">${escHtml(venue)}</span>` : ''}
-          <span class="bcast-meta-item">${escHtml(f.scheduled_date || '')}</span>
+          <span class="bcast-meta-item">${escHtml(_fmtDate(f.scheduled_date))}</span>
         </div>
         <div class="bcast-progress-bar"><div class="bcast-progress-fill" id="bcast-progress-fill"></div></div>
         <div class="bcast-controls">
@@ -8242,7 +8242,7 @@ async function _showCalendarPreview(worldId) {
           const series = f.series_name
             ? `<span class="cal-preview-series">${f.series_name}</span>` : '';
           return `<li>
-            <span class="cal-preview-date">${d}</span>
+            <span class="cal-preview-date">${_fmtDate(d)}</span>
             <span><span class="badge badge-${(f.format||'').toLowerCase()}">${f.format||''}</span></span>
             <span>${t1} v ${t2}</span>
             ${series}${iccBadge}
@@ -8272,15 +8272,21 @@ function setWorldDateFmt(fmt) {
   if (el && raw) el.textContent = _formatWorldDate(raw);
 }
 
+const _DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
 function _formatWorldDate(iso) {
   if (!iso) return '?';
   const fmt = _wdDateFmt();
   const [y, m, d] = iso.split('-');
   if (!y || !m || !d) return iso;
-  if (fmt === 'usa') return `${m}/${d}/${y}`;
-  if (fmt === 'iso') return iso;
-  return `${d}/${m}/${y}`; // UK default
+  const dow = _DOW_SHORT[new Date(parseInt(y), parseInt(m) - 1, parseInt(d)).getDay()];
+  if (fmt === 'usa') return `${dow} ${m}/${d}/${y}`;
+  if (fmt === 'iso') return `${dow} ${iso}`;
+  return `${dow} ${d}/${m}/${y}`; // UK default
 }
+
+// Short alias for use in template strings
+const _fmtDate = _formatWorldDate;
 
 // ── World Dashboard ───────────────────────────────────────────────────────────
 
@@ -8451,7 +8457,7 @@ function _renderWorldOverview(data) {
         <div class="world-desk-sub">${upcoming.length
           ? `${iccUpcoming} ICC fixture${iccUpcoming !== 1 ? 's' : ''} in the next 2 weeks`
           : nextFix
-            ? `Quiet short horizon. Next fixture is ${escHtml(nextFix.scheduled_date || '')}`
+            ? `Quiet short horizon. Next fixture is ${escHtml(_fmtDate(nextFix.scheduled_date))}`
             : generatedThrough
               ? `Current block runs through ${escHtml(generatedThrough)}`
               : 'No upcoming fixtures generated yet'}</div>
@@ -8471,7 +8477,7 @@ function _renderWorldOverview(data) {
       <div class="world-desk-card">
         <div class="world-desk-label">Your Team</div>
         <div class="world-desk-value">${myNext ? 'User Controlled' : (hasTrackedTeam ? 'Tracking Enabled' : 'AI Only')}</div>
-        <div class="world-desk-sub">${myNext ? `Next playable fixture: ${escHtml(myNext.scheduled_date || '')}` : (hasTrackedTeam ? 'No flagged fixture on the short horizon' : 'No user-controlled side selected')}</div>
+        <div class="world-desk-sub">${myNext ? `Next playable fixture: ${escHtml(_fmtDate(myNext.scheduled_date))}` : (hasTrackedTeam ? 'No flagged fixture on the short horizon' : 'No user-controlled side selected')}</div>
       </div>`;
   }
 
@@ -8502,7 +8508,7 @@ function _renderWorldOverview(data) {
       nfEl.innerHTML = `
         <div class="nf-label">Next Fixture</div>
         <div class="nf-teams">${nextFix.team1_name || '?'} <span class="nf-vs">vs</span> ${nextFix.team2_name || '?'}</div>
-        <div class="nf-meta">${fmtBadge} <span class="text-muted">${nextFix.scheduled_date || ''}</span>
+        <div class="nf-meta">${fmtBadge} <span class="text-muted">${_fmtDate(nextFix.scheduled_date)}</span>
           <span class="text-muted">${nextFix.venue_name ? '@ ' + nextFix.venue_name : ''}</span> ${storyLine}
         </div>
         <div class="nf-actions">
@@ -8537,7 +8543,7 @@ function _renderWorldOverview(data) {
           ? `<div class="empty-state-card">
               <div class="empty-state-icon">📅</div>
               <h3 class="empty-state-heading">No fixtures in the next 2 weeks</h3>
-              <p class="empty-state-sub">This realistic calendar is between blocks right now. The next scheduled fixture is <strong>${escHtml(nextFix.scheduled_date || '')}</strong>: ${escHtml(nextFix.team1_name || '?')} vs ${escHtml(nextFix.team2_name || '?')}.</p>
+              <p class="empty-state-sub">This realistic calendar is between blocks right now. The next scheduled fixture is <strong>${escHtml(_fmtDate(nextFix.scheduled_date))}</strong>: ${escHtml(nextFix.team1_name || '?')} vs ${escHtml(nextFix.team2_name || '?')}.</p>
             </div>`
           : `<div class="empty-state-card">
               <div class="empty-state-icon">🗓️</div>
@@ -8656,7 +8662,7 @@ async function loadWorldStoryDesk(data) {
     nextFixtures.slice(0, 2).forEach(f => {
       milestoneWatch.push({
         title: `${f.team1_name} vs ${f.team2_name}`,
-        sub: `${f.scheduled_date || ''}${f.series_name ? ' · ' + f.series_name : ''}`
+        sub: `${_fmtDate(f.scheduled_date)}${f.series_name ? ' · ' + f.series_name : ''}`
       });
     });
   }
@@ -8689,7 +8695,7 @@ function _fixtureRowHtml(f) {
     ? `<span class="badge badge-upcoming">${escHtml(f.icc_event_name || 'ICC')}</span>`
     : (f.series_name ? `<span class="wf-series">${escHtml(f.series_name)}</span>` : '');
   return `<div class="world-fixture-row ${f.is_user_match ? 'wf-play' : ''}">
-    <span class="wf-date">${f.scheduled_date || ''}</span>
+    <span class="wf-date">${_fmtDate(f.scheduled_date)}</span>
     ${fmtBadge}
     <span class="wf-teams">${f.team1_name || '?'} vs ${f.team2_name || '?'}</span>
     ${storyMark}
@@ -8907,7 +8913,7 @@ function _calFixtureRowHtml(f) {
   const openFn = completed && f.match_id ? ` onclick="openPlayedMatch(${f.match_id})" title="View scorecard"` : '';
 
   return `<div class="cal-fixture-row${skipped ? ' cal-skipped' : ''}${completed ? ' cal-complete cal-clickable' : ''}" id="calfx-${f.id}"${openFn}>
-    <span class="cal-date">${(f.scheduled_date||'').slice(5)}</span>
+    <span class="cal-date">${_fmtDate(f.scheduled_date)}</span>
     ${fmtBadge}
     <span class="cal-teams">${f.team1_name||'?'} vs ${f.team2_name||'?'}</span>
     ${statusBadge}
@@ -9224,7 +9230,7 @@ function _renderSimReport(report) {
           <div class="wsim-big-result-detail">
             ${fmtBadge}
             <span>${escHtml(r.team1_name||'')} v ${escHtml(r.team2_name||'')}</span>
-            <span>${escHtml(r.scheduled_date||'')}</span>
+            <span>${escHtml(_fmtDate(r.scheduled_date))}</span>
           </div>
           <div class="wsim-big-result-scores">${escHtml(r.team1_score||'')} &nbsp;/&nbsp; ${escHtml(r.team2_score||'')}</div>
           ${performer ? `<div class="wsim-big-result-performer">${performer}</div>` : ''}
@@ -9309,7 +9315,7 @@ function _renderSimReport(report) {
       const fmtBadge = `<span class="badge badge-${(pausedFixture.format||'').toLowerCase()}">${pausedFixture.format||''}</span>`;
       rows.push(`
         <div class="wsim-next-row">
-          <span class="wsim-next-date">${escHtml(pausedFixture.scheduled_date||'')}</span>
+          <span class="wsim-next-date">${escHtml(_fmtDate(pausedFixture.scheduled_date))}</span>
           ${fmtBadge}
           <span class="wsim-next-teams">${t1} v ${t2}</span>
           <span class="wsim-next-user">▶ Your match</span>
@@ -9325,7 +9331,7 @@ function _renderSimReport(report) {
       const fmtBadge = `<span class="badge badge-${(f.format||'').toLowerCase()}">${f.format||''}</span>`;
       rows.push(`
         <div class="wsim-next-row">
-          <span class="wsim-next-date">${escHtml(f.scheduled_date||'')}</span>
+          <span class="wsim-next-date">${escHtml(_fmtDate(f.scheduled_date))}</span>
           ${fmtBadge}
           <span class="wsim-next-teams">${t1} v ${t2}</span>
         </div>`);
@@ -9344,7 +9350,7 @@ function _renderSimReport(report) {
       return `
         <div class="wsim-result-row">
           <div class="wsim-result-header">
-            <span class="wf-date">${escHtml(r.scheduled_date||'')}</span>
+            <span class="wf-date">${escHtml(_fmtDate(r.scheduled_date))}</span>
             ${fmtBadge}
           </div>
           <div class="wsim-result-summary">${escHtml(r.summary||'')}</div>
