@@ -5875,6 +5875,7 @@ async function loadAlmanackScreen() {
   document.getElementById('alm-table-area')?.classList.remove('hidden');
   document.getElementById('alm-manage-area')?.classList.add('hidden');
 
+  loadAlmanackStoryDesk();
   await loadAlmTab('batting');
 }
 
@@ -6080,6 +6081,92 @@ function _renderAlmTable(cols, rows, offset) {
        <thead><tr>${thead}</tr></thead>
        <tbody>${tbody}</tbody>
      </table></div>`;
+}
+
+function _nextMilestone(value, steps) {
+  for (const step of steps) {
+    if (value < step) return step;
+  }
+  return null;
+}
+
+async function loadAlmanackStoryDesk() {
+  const el = document.getElementById('alm-story-desk');
+  if (!el) return;
+  el.innerHTML = '';
+
+  const [batting, bowling, honours] = await Promise.all([
+    api('GET', '/api/almanack/batting?limit=8&offset=0&sort=runs&dir=DESC'),
+    api('GET', '/api/almanack/bowling?limit=8&offset=0&sort=wickets&dir=DESC'),
+    api('GET', '/api/almanack/honours/with-world-records'),
+  ]);
+  if (!batting || !bowling || !honours) {
+    el.innerHTML = '<div class="story-desk-card"><div class="story-desk-empty">Story desk unavailable right now.</div></div>';
+    return;
+  }
+
+  const battingRows = batting.rows || [];
+  const bowlingRows = bowling.rows || [];
+  const honoursRows = honours
+    ? [
+        ...(honours.batting || []),
+        ...(honours.bowling || []),
+        ...(honours.teams || []),
+      ]
+    : [];
+
+  const threatRows = (Array.isArray(honoursRows) ? honoursRows : [])
+    .filter(r => r?.pct_of_world_record != null && r.pct_of_world_record < 100)
+    .sort((a, b) => (b.pct_of_world_record || 0) - (a.pct_of_world_record || 0))
+    .slice(0, 3);
+
+  const formBatters = battingRows.slice(0, 2);
+  const formBowlers = bowlingRows.slice(0, 2);
+
+  const milestoneItems = [];
+  battingRows.slice(0, 4).forEach(r => {
+    const target = _nextMilestone(r.runs || 0, [100, 250, 500, 1000, 1500, 2000, 3000, 5000]);
+    if (target && target - (r.runs || 0) <= Math.max(50, target * 0.08)) {
+      milestoneItems.push({
+        title: `${r.name} closing on ${target} runs`,
+        sub: `${target - (r.runs || 0)} away for ${r.team_name}`
+      });
+    }
+  });
+  bowlingRows.slice(0, 4).forEach(r => {
+    const target = _nextMilestone(r.wickets || 0, [25, 50, 100, 150, 200, 300, 400]);
+    if (target && target - (r.wickets || 0) <= 5) {
+      milestoneItems.push({
+        title: `${r.name} nearing ${target} wickets`,
+        sub: `${target - (r.wickets || 0)} away for ${r.team_name}`
+      });
+    }
+  });
+
+  el.innerHTML = `
+    <div class="story-desk-card">
+      <div class="story-desk-kicker">Records Under Threat</div>
+      ${threatRows.length ? `<div class="story-desk-list">
+        ${threatRows.map(r => `
+          <div class="story-desk-item">
+            <div class="story-desk-title">${escHtml(getHonoursLabel(r.key || r.record_key || 'Record'))}</div>
+            <div class="story-desk-sub"><span class="story-desk-stat">${(r.pct_of_world_record || 0).toFixed(1)}%</span>${escHtml(r.in_game?.player_name || r.in_game?.team_name || 'In-game record')} has closed to the real-world mark.</div>
+          </div>`).join('')}
+      </div>` : '<div class="story-desk-empty">No record chases flagged yet.</div>'}
+    </div>
+    <div class="story-desk-card">
+      <div class="story-desk-kicker">Players In Form</div>
+      <div class="story-desk-list">
+        ${formBatters.map(r => `<div class="story-desk-item"><div class="story-desk-title">${escHtml(r.name)} <span class="story-desk-stat">${r.runs}</span></div><div class="story-desk-sub">${escHtml(r.team_name)} · Avg ${Number(r.average || 0).toFixed(2)} · SR ${Number(r.strike_rate || 0).toFixed(1)}</div></div>`).join('')}
+        ${formBowlers.map(r => `<div class="story-desk-item"><div class="story-desk-title">${escHtml(r.name)} <span class="story-desk-stat">${r.wickets} wkts</span></div><div class="story-desk-sub">${escHtml(r.team_name)} · Avg ${Number(r.average || 0).toFixed(2)} · Econ ${Number(r.economy || 0).toFixed(2)}</div></div>`).join('')}
+      </div>
+    </div>
+    <div class="story-desk-card">
+      <div class="story-desk-kicker">Milestone Watch</div>
+      ${milestoneItems.length ? `<div class="story-desk-list">
+        ${milestoneItems.slice(0, 4).map(item => `<div class="story-desk-item"><div class="story-desk-title">${escHtml(item.title)}</div><div class="story-desk-sub">${escHtml(item.sub)}</div></div>`).join('')}
+      </div>` : '<div class="story-desk-empty">No major round-number milestones are close right now.</div>'}
+    </div>`;
 }
 
 // ── Honours helpers ───────────────────────────────────────────────────────────
@@ -7537,6 +7624,8 @@ function _renderWorldOverview(data) {
     }
   }
 
+  loadWorldStoryDesk(data);
+
   const seriesEl = document.getElementById('wd-series-list');
   if (seriesEl) {
     seriesEl.innerHTML = activeSeries.length
@@ -7606,6 +7695,90 @@ function _renderWorldOverview(data) {
 
   // World records
   _renderRecordsSection('wd-records-overview', data.world_records || []);
+}
+
+async function loadWorldStoryDesk(data) {
+  const el = document.getElementById('wd-story-desk');
+  if (!el) return;
+  el.innerHTML = '';
+
+  const [batting, bowling] = await Promise.all([
+    api('GET', '/api/almanack/batting?limit=6&offset=0&sort=runs&dir=DESC'),
+    api('GET', '/api/almanack/bowling?limit=6&offset=0&sort=wickets&dir=DESC'),
+  ]);
+  const battingRows = batting?.rows || [];
+  const bowlingRows = bowling?.rows || [];
+  const worldRecords = data.world_records || [];
+  const nextFixtures = data.next_fixtures || [];
+
+  const recordThreats = worldRecords
+    .filter(r => r && r.value != null)
+    .slice(0, 3)
+    .map(r => ({
+      title: r.record_name || r.label || r.category || 'World record',
+      sub: r.holder_name
+        ? `${r.holder_name} leads with ${r.display_value || r.value}`
+        : `${r.display_value || r.value} is the current world mark`
+    }));
+
+  const inForm = [
+    ...battingRows.slice(0, 2).map(r => ({
+      title: `${r.name} ${r.runs} runs`,
+      sub: `${r.team_name} · Avg ${Number(r.average || 0).toFixed(2)} · SR ${Number(r.strike_rate || 0).toFixed(1)}`
+    })),
+    ...bowlingRows.slice(0, 2).map(r => ({
+      title: `${r.name} ${r.wickets} wickets`,
+      sub: `${r.team_name} · Avg ${Number(r.average || 0).toFixed(2)} · Econ ${Number(r.economy || 0).toFixed(2)}`
+    })),
+  ].slice(0, 4);
+
+  const milestoneWatch = [];
+  battingRows.slice(0, 4).forEach(r => {
+    const target = _nextMilestone(r.runs || 0, [100, 250, 500, 1000, 1500, 2000, 3000, 5000]);
+    if (target && target - (r.runs || 0) <= Math.max(50, target * 0.08)) {
+      milestoneWatch.push({
+        title: `${r.name} tracking ${target} runs`,
+        sub: `${target - (r.runs || 0)} away before the next landmark`
+      });
+    }
+  });
+  bowlingRows.slice(0, 4).forEach(r => {
+    const target = _nextMilestone(r.wickets || 0, [25, 50, 100, 150, 200, 300, 400]);
+    if (target && target - (r.wickets || 0) <= 5) {
+      milestoneWatch.push({
+        title: `${r.name} tracking ${target} wickets`,
+        sub: `${target - (r.wickets || 0)} away from the next landmark`
+      });
+    }
+  });
+  if (!milestoneWatch.length && nextFixtures.length) {
+    nextFixtures.slice(0, 2).forEach(f => {
+      milestoneWatch.push({
+        title: `${f.team1_name} vs ${f.team2_name}`,
+        sub: `${f.scheduled_date || ''}${f.series_name ? ' · ' + f.series_name : ''}`
+      });
+    });
+  }
+
+  el.innerHTML = `
+    <div class="story-desk-card">
+      <div class="story-desk-kicker">World Records</div>
+      ${recordThreats.length ? `<div class="story-desk-list">
+        ${recordThreats.map(item => `<div class="story-desk-item"><div class="story-desk-title">${escHtml(item.title)}</div><div class="story-desk-sub">${escHtml(item.sub)}</div></div>`).join('')}
+      </div>` : '<div class="story-desk-empty">World records will appear here once the world develops more history.</div>'}
+    </div>
+    <div class="story-desk-card">
+      <div class="story-desk-kicker">Players In Form</div>
+      ${inForm.length ? `<div class="story-desk-list">
+        ${inForm.map(item => `<div class="story-desk-item"><div class="story-desk-title">${escHtml(item.title)}</div><div class="story-desk-sub">${escHtml(item.sub)}</div></div>`).join('')}
+      </div>` : '<div class="story-desk-empty">Not enough played cricket yet to call out form players.</div>'}
+    </div>
+    <div class="story-desk-card">
+      <div class="story-desk-kicker">Milestone Chances</div>
+      ${milestoneWatch.length ? `<div class="story-desk-list">
+        ${milestoneWatch.slice(0, 4).map(item => `<div class="story-desk-item"><div class="story-desk-title">${escHtml(item.title)}</div><div class="story-desk-sub">${escHtml(item.sub)}</div></div>`).join('')}
+      </div>` : '<div class="story-desk-empty">No milestone pushes stand out yet.</div>'}
+    </div>`;
 }
 
 function _fixtureRowHtml(f) {
