@@ -422,7 +422,8 @@ async function loadHomeScreen() {
         ? `${r.winning_team_name} won by ${r.margin_runs} run${r.margin_runs !== 1 ? 's' : ''}`
         : `${r.winning_team_name} won by ${r.margin_wickets} wkt${r.margin_wickets !== 1 ? 's' : ''}`;
     }
-    return `<div class="home-result-card">
+    return `<div class="home-result-card home-result-card-clickable"
+      onclick="openPlayedMatch(${r.id || r.match_id})" title="View scorecard">
       <span class="badge badge-${(r.format||'').toLowerCase()}">${r.format}</span>
       ${_modeBadgeHtml(r.player_mode)}
       ${_canonBadgeHtml(r.canon_status)}
@@ -4487,8 +4488,14 @@ function _escapeHtml(str) {
 }
 
 function goToMatch(matchId) {
-  // Navigate to the match screen for a completed match (scorecard view)
-  AppState.activeMatch = matchId;
+  openPlayedMatch(matchId);
+}
+
+function openPlayedMatch(matchId) {
+  if (!matchId) return;
+  // Match screen expects an object-like active match, not a raw id.
+  AppState.activeMatch = { id: matchId, match_id: matchId };
+  AppState.activeMatchId = matchId;
   showScreen('match');
 }
 
@@ -5553,8 +5560,7 @@ function _buildShortResult(match) {
 }
 
 async function loadMatchDetail(matchId) {
-  AppState.activeMatchId = matchId;
-  showScreen('match');
+  openPlayedMatch(matchId);
 }
 
 async function startSeriesFixture(fixtureId) {
@@ -7701,7 +7707,7 @@ function _renderWorldOverview(data) {
           else if (rt === 'wickets') desc = `${m.winning_team_name} won by ${m.margin_wickets} wkts`;
           else if (rt === 'draw') desc = 'Match drawn';
           else if (rt === 'tie')  desc = 'Match tied';
-          return `<div class="result-row">
+          return `<div class="result-row result-row-clickable" onclick="openPlayedMatch(${m.id || m.match_id})" title="View scorecard">
             <span class="result-format text-muted">${m.format}</span>
             <span>${m.team1_name} vs ${m.team2_name}</span>
             <span class="text-muted">${desc}</span>
@@ -8021,7 +8027,9 @@ function _calFixtureRowHtml(f) {
     <button class="btn-cal-action btn-cal-skip"
             onclick="skipCalFixture(${f.id},this)" title="Skip">✕</button>` : '';
 
-  return `<div class="cal-fixture-row${skipped ? ' cal-skipped' : ''}${completed ? ' cal-complete' : ''}" id="calfx-${f.id}">
+  const openFn = completed && f.match_id ? ` onclick="openPlayedMatch(${f.match_id})" title="View scorecard"` : '';
+
+  return `<div class="cal-fixture-row${skipped ? ' cal-skipped' : ''}${completed ? ' cal-complete cal-clickable' : ''}" id="calfx-${f.id}"${openFn}>
     <span class="cal-date">${(f.scheduled_date||'').slice(5)}</span>
     ${fmtBadge}
     <span class="cal-teams">${f.team1_name||'?'} vs ${f.team2_name||'?'}</span>

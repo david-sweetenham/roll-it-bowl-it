@@ -3348,6 +3348,7 @@ body.broadcast-mode .btn-howzat {
   display: flex; gap: 8px; align-items: center; padding: 8px 0;
   border-bottom: 1px solid rgba(255,255,255,0.04); font-size: var(--fs-sm); flex-wrap: wrap;
 }
+.result-row-clickable { cursor: pointer; }
 .result-badge {
   width: 22px; height: 22px; border-radius: 50%; display: flex;
   align-items: center; justify-content: center; font-size: 11px; font-weight: 800;
@@ -3696,6 +3697,11 @@ body.broadcast-mode .btn-howzat {
 .cal-fixture-row { display:flex; align-items:center; gap:8px; padding:8px 16px;
   border-top:1px solid rgba(255,255,255,.04); font-size:var(--fs-sm); flex-wrap:wrap; }
 .cal-fixture-row:hover { background:rgba(255,255,255,.025); }
+.cal-fixture-row.cal-clickable:hover,
+.cal-fixture-row.cal-clickable:focus-visible {
+  background: rgba(46, 217, 123, 0.08);
+  cursor: pointer;
+}
 .cal-skipped .cal-teams { text-decoration:line-through; opacity:.5; }
 .cal-complete { opacity:.75; }
 .cal-date { font-size:var(--fs-xs); color:var(--text-muted); min-width:40px; }
@@ -3863,6 +3869,7 @@ body.broadcast-mode .btn-howzat {
 .home-result-card { background:var(--surface); border:1px solid var(--border); border-radius:8px;
   padding:8px 16px; margin-bottom:8px; display:flex; align-items:center; gap:8px;
   flex-wrap:wrap; font-size:var(--fs-sm); }
+.home-result-card-clickable { cursor: pointer; }
 .home-result-teams { flex:1; font-weight:600; min-width:120px; }
 .home-result-result { color:var(--text-muted); font-size:var(--fs-xs); }
 .home-result-date { color:var(--text-muted); font-size:var(--fs-xs); white-space:nowrap; }
