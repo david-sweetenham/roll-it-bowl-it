@@ -7003,7 +7003,8 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
   inset: auto;
   z-index: auto;
   width: 100%;
-  height: 100%;
+  height: 340px;
+  max-height: 340px;
   flex: 1;
   border: 1px solid rgba(26, 92, 26, 0.9);
   border-radius: 12px;
@@ -7113,6 +7114,13 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
   line-height: 1.5;
   color: #6ca06c;
   max-width: 36ch;
+}
+.vdp-progress-msg {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #a8e6a8;
+  min-height: 1.2em;
 }
 .vdp-pulse {
   display: inline-flex;
@@ -7227,6 +7235,11 @@ body.broadcast-mode .ibg-team { font-size: var(--fs-2xl); }
   }
   .wd-date-pane-vidi {
     min-height: 220px;
+    height: auto;
+  }
+  .sim-vidiprinter-inline {
+    height: 280px;
+    max-height: 280px;
   }
 }
 .vdp-progress-bar {

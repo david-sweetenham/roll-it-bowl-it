@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, render_template, Response
+from flask import Flask, jsonify, request, render_template, Response, stream_with_context
 from flask_cors import CORS
 import json
 import os
@@ -5711,7 +5711,7 @@ def broadcast_complete_match(id):
 
 @app.route('/api/worlds/<int:id>/simulate', methods=['POST'])
 def simulate_world(id):
-    import json
+    import json as _json
     body        = request.get_json() or {}
     target      = body.get('target', 'next_match')
     target_date = body.get('target_date')
@@ -5722,181 +5722,214 @@ def simulate_world(id):
     if target == 'date' and not target_date:
         return err('target_date required for date target')
 
-    db = database.get_db()
-    try:
-        world = database.get_world(db, id)
-        if not world:
-            return err('World not found', 404)
-        settings = {}
-        if world.get('settings_json'):
-            try:
-                settings = json.loads(world['settings_json'])
-            except Exception:
-                settings = {}
-        if target == 'next_my_match' and not _user_team_ids(settings):
-            return err('No user-controlled team selected for this world')
+    def _sse(obj):
+        return f"data: {_json.dumps(obj)}\n\n"
 
-        world_state = _build_world_state(db, id)
-        if not world_state:
-            return err('Could not build world state')
-        if target_date:
-            world_state['target_date'] = target_date
+    def generate():
+        db = database.get_db()
+        try:
+            yield _sse({'type': 'progress', 'step': 'loading', 'message': 'Loading world data…'})
 
-        fixtures = database.get_fixtures(db, world_id=id, status='scheduled')
-        _apply_world_player_lifecycle(db, id, world_state, fixtures, target, target_date)
+            world = database.get_world(db, id)
+            if not world:
+                yield _sse({'type': 'error', 'message': 'World not found'})
+                return
+            settings = {}
+            if world.get('settings_json'):
+                try:
+                    settings = _json.loads(world['settings_json'])
+                except Exception:
+                    settings = {}
+            if target == 'next_my_match' and not _user_team_ids(settings):
+                yield _sse({'type': 'error', 'message': 'No user-controlled team selected for this world'})
+                return
 
-        sim_result = game_engine.simulate_world_to(target, fixtures, world_state)
+            world_state = _build_world_state(db, id)
+            if not world_state:
+                yield _sse({'type': 'error', 'message': 'Could not build world state'})
+                return
+            if target_date:
+                world_state['target_date'] = target_date
 
-        results = sim_result['results']
-        if not results and not sim_result.get('paused_at_fixture'):
-            return jsonify({
-                'matches_simulated': 0,
-                'message':           'No scheduled fixtures to simulate',
-                'paused_at_fixture': None,
-                'truncated':         False,
-                'sim_report':        None,
-            })
+            fixtures = database.get_fixtures(db, world_id=id, status='scheduled')
+            n_sched  = sum(1 for f in fixtures if f.get('status', 'scheduled') == 'scheduled')
+            noun     = 'fixture' if n_sched == 1 else 'fixtures'
+            yield _sse({'type': 'progress', 'step': 'fixtures',
+                        'message': f'Found {n_sched:,} {noun} to simulate',
+                        'fixture_count': n_sched})
 
-        # Snapshot rankings BEFORE persistence so we can diff them
-        rankings_before_list = database.get_world_rankings(db, id)
-        rankings_before = {}   # {format: {team_id: {position, points}}}
-        for rb in rankings_before_list:
-            rankings_before.setdefault(rb['format'], {})[rb['team_id']] = {
-                'position': rb.get('position'), 'points': rb.get('points'),
-            }
+            _apply_world_player_lifecycle(db, id, world_state, fixtures, target, target_date)
 
-        if results:
-            _persist_world_sim(
-                db, id, results,
-                sim_result['new_current_date'],
-                sim_result['updated_player_states'],
-                world_state=world_state,
-            )
+            yield _sse({'type': 'progress', 'step': 'simulating',
+                        'message': f'Simulating {n_sched:,} {noun}…'})
 
-        # Enrich each result with team names.
-        # teams_map only contains teams in settings.team_ids; combined worlds also
-        # contain domestic teams that weren't in that list, so fall back to DB.
-        teams_map = world_state.get('teams', {})
-        name_cache = {tid: info.get('name', '?') for tid, info in teams_map.items()}
-        missing_tids = set()
-        for r in results:
-            if r.get('team1_id') and r['team1_id'] not in name_cache:
-                missing_tids.add(r['team1_id'])
-            if r.get('team2_id') and r['team2_id'] not in name_cache:
-                missing_tids.add(r['team2_id'])
-        for tid in missing_tids:
-            team_row = database.get_team(db, tid)
-            if team_row:
-                name_cache[tid] = team_row['name']
-        for r in results:
-            r['team1_name'] = name_cache.get(r.get('team1_id'), '?')
-            r['team2_name'] = name_cache.get(r.get('team2_id'), '?')
-            # Rebuild summary now that we have real names
-            w_name = r['team1_name'] if r.get('winner_id') == r.get('team1_id') else r['team2_name']
-            if r.get('result_type') == 'runs' and r.get('margin_runs'):
-                r['summary'] = f"{w_name} won by {r['margin_runs']} run{'s' if r['margin_runs'] != 1 else ''}"
-            elif r.get('result_type') == 'wickets' and r.get('margin_wickets'):
-                r['summary'] = f"{w_name} won by {r['margin_wickets']} wicket{'s' if r['margin_wickets'] != 1 else ''}"
-            elif r.get('result_type') == 'tie':
-                r['summary'] = "Match tied"
-            elif r.get('result_type') == 'draw':
-                r['summary'] = "Match drawn"
+            sim_result = game_engine.simulate_world_to(target, fixtures, world_state)
 
-        # Build notable events string list (kept for backward compat)
-        dates   = [r['scheduled_date'] for r in results if r.get('scheduled_date')]
-        notable = []
-        for r in results:
-            if r.get('result_type') == 'runs' and (r.get('margin_runs') or 0) >= 60:
+            results   = sim_result['results']
+            n_results = len(results)
+
+            if not results and not sim_result.get('paused_at_fixture'):
+                yield _sse({'type': 'done', 'data': {
+                    'matches_simulated': 0,
+                    'message':           'No scheduled fixtures to simulate',
+                    'paused_at_fixture': None,
+                    'truncated':         False,
+                    'sim_report':        None,
+                }})
+                return
+
+            yield _sse({'type': 'progress', 'step': 'saving',
+                        'message': f'Saving {n_results:,} result{"s" if n_results != 1 else ""}…'})
+
+            # Snapshot rankings BEFORE persistence so we can diff them
+            rankings_before_list = database.get_world_rankings(db, id)
+            rankings_before = {}   # {format: {team_id: {position, points}}}
+            for rb in rankings_before_list:
+                rankings_before.setdefault(rb['format'], {})[rb['team_id']] = {
+                    'position': rb.get('position'), 'points': rb.get('points'),
+                }
+
+            if results:
+                _persist_world_sim(
+                    db, id, results,
+                    sim_result['new_current_date'],
+                    sim_result['updated_player_states'],
+                    world_state=world_state,
+                )
+
+            # Enrich each result with team names.
+            # teams_map only contains teams in settings.team_ids; combined worlds also
+            # contain domestic teams that weren't in that list, so fall back to DB.
+            teams_map  = world_state.get('teams', {})
+            name_cache = {tid: info.get('name', '?') for tid, info in teams_map.items()}
+            missing_tids = set()
+            for r in results:
+                if r.get('team1_id') and r['team1_id'] not in name_cache:
+                    missing_tids.add(r['team1_id'])
+                if r.get('team2_id') and r['team2_id'] not in name_cache:
+                    missing_tids.add(r['team2_id'])
+            for tid in missing_tids:
+                team_row = database.get_team(db, tid)
+                if team_row:
+                    name_cache[tid] = team_row['name']
+            for r in results:
+                r['team1_name'] = name_cache.get(r.get('team1_id'), '?')
+                r['team2_name'] = name_cache.get(r.get('team2_id'), '?')
+                # Rebuild summary now that we have real names
                 w_name = r['team1_name'] if r.get('winner_id') == r.get('team1_id') else r['team2_name']
-                notable.append(f"{w_name} crushed opponent by {r['margin_runs']} runs")
-            ts = r.get('top_scorer')
-            if ts and ts.get('runs', 0) >= 80:
-                notable.append(f"{ts['name']} scored {ts['runs']} runs")
-            tb = r.get('top_bowler')
-            if tb and tb.get('wickets', 0) >= 5:
-                notable.append(f"{tb['name']} took {tb['wickets']} wickets")
+                if r.get('result_type') == 'runs' and r.get('margin_runs'):
+                    r['summary'] = f"{w_name} won by {r['margin_runs']} run{'s' if r['margin_runs'] != 1 else ''}"
+                elif r.get('result_type') == 'wickets' and r.get('margin_wickets'):
+                    r['summary'] = f"{w_name} won by {r['margin_wickets']} wicket{'s' if r['margin_wickets'] != 1 else ''}"
+                elif r.get('result_type') == 'tie':
+                    r['summary'] = "Match tied"
+                elif r.get('result_type') == 'draw':
+                    r['summary'] = "Match drawn"
 
-        # Reload updated rankings and compute position changes
-        updated_rankings = database.get_world_rankings(db, id)
-        by_fmt = {}
-        ranking_changes = {}   # {format: [{team_name, old_pos, new_pos, pos_change}]}
-        for r in updated_rankings:
-            by_fmt.setdefault(r['format'], []).append(r)
-            fmt    = r['format']
-            before = rankings_before.get(fmt, {}).get(r['team_id'])
-            if before and before.get('position') and r.get('position'):
-                delta = (before['position'] or 99) - (r['position'] or 99)
-                if delta != 0:
-                    ranking_changes.setdefault(fmt, []).append({
-                        'team_name':    r.get('team_name', '?'),
-                        'team_id':      r.get('team_id'),
-                        'old_position': before['position'],
-                        'new_position': r['position'],
-                        'pos_change':   delta,   # positive = moved up the table
-                        'points':       round(r.get('points') or 0),
-                    })
-        # Sort movers: biggest moves first
-        for fmt_moves in ranking_changes.values():
-            fmt_moves.sort(key=lambda x: -abs(x['pos_change']))
+            # Build notable events string list (kept for backward compat)
+            dates   = [r['scheduled_date'] for r in results if r.get('scheduled_date')]
+            notable = []
+            for r in results:
+                if r.get('result_type') == 'runs' and (r.get('margin_runs') or 0) >= 60:
+                    w_name = r['team1_name'] if r.get('winner_id') == r.get('team1_id') else r['team2_name']
+                    notable.append(f"{w_name} crushed opponent by {r['margin_runs']} runs")
+                ts = r.get('top_scorer')
+                if ts and ts.get('runs', 0) >= 80:
+                    notable.append(f"{ts['name']} scored {ts['runs']} runs")
+                tb = r.get('top_bowler')
+                if tb and tb.get('wickets', 0) >= 5:
+                    notable.append(f"{tb['name']} took {tb['wickets']} wickets")
 
-        # Biggest result (most decisive win by runs; fallback to wickets)
-        run_wins  = [r for r in results if r.get('result_type') == 'runs'    and r.get('margin_runs')]
-        wkt_wins  = [r for r in results if r.get('result_type') == 'wickets' and r.get('margin_wickets')]
-        biggest_by_runs    = max(run_wins,  key=lambda r: r['margin_runs'],    default=None)
-        biggest_by_wickets = max(wkt_wins,  key=lambda r: r['margin_wickets'], default=None)
+            # Reload updated rankings and compute position changes
+            updated_rankings = database.get_world_rankings(db, id)
+            by_fmt = {}
+            ranking_changes = {}   # {format: [{team_name, old_pos, new_pos, pos_change}]}
+            for r in updated_rankings:
+                by_fmt.setdefault(r['format'], []).append(r)
+                fmt    = r['format']
+                before = rankings_before.get(fmt, {}).get(r['team_id'])
+                if before and before.get('position') and r.get('position'):
+                    delta = (before['position'] or 99) - (r['position'] or 99)
+                    if delta != 0:
+                        ranking_changes.setdefault(fmt, []).append({
+                            'team_name':    r.get('team_name', '?'),
+                            'team_id':      r.get('team_id'),
+                            'old_position': before['position'],
+                            'new_position': r['position'],
+                            'pos_change':   delta,   # positive = moved up the table
+                            'points':       round(r.get('points') or 0),
+                        })
+            # Sort movers: biggest moves first
+            for fmt_moves in ranking_changes.values():
+                fmt_moves.sort(key=lambda x: -abs(x['pos_change']))
 
-        # Top batting & bowling performances across all simulated matches
-        def _perf_entry(match_result, kind):
-            p = match_result.get(kind)
-            if not p:
-                return None
-            return {
-                'name':      p.get('name', '?'),
-                'player_id': p.get('player_id'),
-                'runs':      p.get('runs'),
-                'wickets':   p.get('wickets'),
-                'format':    match_result.get('format', ''),
-                'date':      match_result.get('scheduled_date', ''),
-                'match':     f"{match_result['team1_name']} v {match_result['team2_name']}",
+            # Biggest result (most decisive win by runs; fallback to wickets)
+            run_wins  = [r for r in results if r.get('result_type') == 'runs'    and r.get('margin_runs')]
+            wkt_wins  = [r for r in results if r.get('result_type') == 'wickets' and r.get('margin_wickets')]
+            biggest_by_runs    = max(run_wins,  key=lambda r: r['margin_runs'],    default=None)
+            biggest_by_wickets = max(wkt_wins,  key=lambda r: r['margin_wickets'], default=None)
+
+            # Top batting & bowling performances across all simulated matches
+            def _perf_entry(match_result, kind):
+                p = match_result.get(kind)
+                if not p:
+                    return None
+                return {
+                    'name':      p.get('name', '?'),
+                    'player_id': p.get('player_id'),
+                    'runs':      p.get('runs'),
+                    'wickets':   p.get('wickets'),
+                    'format':    match_result.get('format', ''),
+                    'date':      match_result.get('scheduled_date', ''),
+                    'match':     f"{match_result['team1_name']} v {match_result['team2_name']}",
+                }
+
+            batting_perfs = sorted(
+                [e for r in results if (e := _perf_entry(r, 'top_scorer'))],
+                key=lambda x: -(x['runs'] or 0)
+            )[:3]
+            bowling_perfs = sorted(
+                [e for r in results if (e := _perf_entry(r, 'top_bowler'))],
+                key=lambda x: -(x['wickets'] or 0)
+            )[:3]
+
+            # Next scheduled fixtures after the sim (for "What's Next")
+            next_scheduled        = database.get_fixtures(db, world_id=id, status='scheduled')
+            next_fixtures_preview = [dict(f) for f in next_scheduled[:4]]
+
+            sim_report = {
+                'matches_simulated':       sim_result['matches_simulated'],
+                'date_from':               dates[0] if dates else None,
+                'date_to':                 dates[-1] if dates else None,
+                'results':                 results,
+                'notable_events':          notable[:10],
+                'updated_rankings':        by_fmt,
+                'ranking_changes':         ranking_changes,
+                'biggest_by_runs':         biggest_by_runs,
+                'biggest_by_wickets':      biggest_by_wickets,
+                'top_batting_perfs':       batting_perfs,
+                'top_bowling_perfs':       bowling_perfs,
+                'next_fixtures_preview':   next_fixtures_preview,
+                'truncated':               sim_result['truncated'],
             }
 
-        batting_perfs = sorted(
-            [e for r in results if (e := _perf_entry(r, 'top_scorer'))],
-            key=lambda x: -(x['runs'] or 0)
-        )[:3]
-        bowling_perfs = sorted(
-            [e for r in results if (e := _perf_entry(r, 'top_bowler'))],
-            key=lambda x: -(x['wickets'] or 0)
-        )[:3]
+            yield _sse({'type': 'done', 'data': {
+                'matches_simulated': sim_result['matches_simulated'],
+                'paused_at_fixture': sim_result['paused_at_fixture'],
+                'truncated':         sim_result['truncated'],
+                'sim_report':        sim_report,
+            }})
 
-        # Next scheduled fixtures after the sim (for "What's Next")
-        next_scheduled = database.get_fixtures(db, world_id=id, status='scheduled')
-        next_fixtures_preview = [dict(f) for f in next_scheduled[:4]]
+        except Exception as e:
+            yield _sse({'type': 'error', 'message': str(e)})
+        finally:
+            database.close_db(db)
 
-        sim_report = {
-            'matches_simulated':       sim_result['matches_simulated'],
-            'date_from':               dates[0] if dates else None,
-            'date_to':                 dates[-1] if dates else None,
-            'results':                 results,
-            'notable_events':          notable[:10],
-            'updated_rankings':        by_fmt,
-            'ranking_changes':         ranking_changes,
-            'biggest_by_runs':         biggest_by_runs,
-            'biggest_by_wickets':      biggest_by_wickets,
-            'top_batting_perfs':       batting_perfs,
-            'top_bowling_perfs':       bowling_perfs,
-            'next_fixtures_preview':   next_fixtures_preview,
-            'truncated':               sim_result['truncated'],
-        }
-
-        return jsonify({
-            'matches_simulated': sim_result['matches_simulated'],
-            'paused_at_fixture': sim_result['paused_at_fixture'],
-            'truncated':         sim_result['truncated'],
-            'sim_report':        sim_report,
-        })
-    finally:
-        database.close_db(db)
+    return Response(
+        stream_with_context(generate()),
+        content_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
 
 
 # ── Almanack ──────────────────────────────────────────────────────────────────

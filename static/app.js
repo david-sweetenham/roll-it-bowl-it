@@ -9703,7 +9703,49 @@ async function simulateWorld(target) {
       }
     }
 
-    const res = await api('POST', `/api/worlds/${id}/simulate`, body);
+    // Streaming fetch — the endpoint sends SSE progress events then a final 'done' event
+    let res = null;
+    try {
+      const response = await fetch(`/api/worlds/${id}/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        showError(`HTTP ${response.status} error starting simulation`);
+        _vdpResetInline();
+        return;
+      }
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop(); // keep any incomplete line
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let evt;
+          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+          if (evt.type === 'progress') {
+            _vdpSetProgressMsg(evt.message);
+          } else if (evt.type === 'error') {
+            showError(evt.message || 'Simulation error');
+            _vdpResetInline();
+            break outer;
+          } else if (evt.type === 'done') {
+            res = evt.data;
+            break outer;
+          }
+        }
+      }
+    } catch (fetchErr) {
+      showError('Network error during simulation');
+      _vdpResetInline();
+      return;
+    }
 
     if (!res) { _vdpResetInline(); return; }
 
@@ -9804,6 +9846,7 @@ function _vdpShowPending(target, targetDate) {
   _VDP._paused = false;
   _VDP._report = null;
   _VDP._status = 'pending';
+  _VDP._progressMsg = '';
   _VDP._pending = {
     target,
     targetDate: targetDate || '',
@@ -9811,6 +9854,17 @@ function _vdpShowPending(target, targetDate) {
   };
   _vdpSetMount('inline');
   _vdpRenderShell();
+}
+
+function _vdpSetProgressMsg(msg) {
+  _VDP._progressMsg = msg;
+  // Try fast-path: update in place without full re-render
+  const el = document.getElementById('vdp-progress-msg');
+  if (el) {
+    el.textContent = msg;
+  } else if (_VDP._status === 'pending') {
+    _vdpRenderShell();
+  }
 }
 
 function _vdpGetOverlay() {
@@ -9875,10 +9929,12 @@ function _vdpHeaderRangeText() {
 
 function _vdpPlaceholderHtml() {
   if (_VDP._status === 'pending') {
+    const msg = _VDP._progressMsg || '';
     return `
       <div class="vdp-placeholder">
         <div class="vdp-pulse"><span class="vdp-pulse-dot"></span>Simulation in progress</div>
         <div class="vdp-placeholder-title">World simulation is starting</div>
+        ${msg ? `<div class="vdp-progress-msg" id="vdp-progress-msg">${escHtml(msg)}</div>` : '<div class="vdp-progress-msg" id="vdp-progress-msg"></div>'}
         <div class="vdp-placeholder-copy">Fixtures are being gathered and resolved. This can take a moment in larger worlds, but the vidiprinter is armed and will begin updating here as soon as results arrive.</div>
       </div>`;
   }
