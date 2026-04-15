@@ -254,6 +254,18 @@
       </div>
     </div>
 
+    <!-- WORLD SIM WARNING MODAL -->
+    <div id="world-sim-warn-modal" class="mode-modal-dim hidden" role="dialog" aria-modal="true">
+      <div class="mode-modal-card mode-modal-card--narrow">
+        <div class="mode-modal-title">Large Simulation</div>
+        <p id="world-sim-warn-body" class="world-sim-warn-body"></p>
+        <div class="world-sim-warn-actions">
+          <button class="btn btn-primary" onclick="_simWarnProceed()">Simulate</button>
+          <button class="btn btn-ghost mode-modal-cancel" onclick="_simWarnCancel()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- BOWLING CHANGE PANEL -->
     <div id="bowling-change-dim" class="mode-modal-dim hidden">
       <div class="bowling-panel">
@@ -1245,11 +1257,16 @@
         </div>
 
         <div class="wd-date-centre">
-          <div id="wd-date-display" class="wd-date-display">—</div>
-          <div class="wd-date-fmt-group">
-            <button id="wd-fmt-uk"  class="wd-fmt-btn active" onclick="setWorldDateFmt('uk')">DD/MM/YYYY</button>
-            <button id="wd-fmt-usa" class="wd-fmt-btn"        onclick="setWorldDateFmt('usa')">MM/DD/YYYY</button>
-            <button id="wd-fmt-iso" class="wd-fmt-btn"        onclick="setWorldDateFmt('iso')">YYYY-MM-DD</button>
+          <div class="wd-date-pane wd-date-pane-main">
+            <div id="wd-date-display" class="wd-date-display">—</div>
+            <div class="wd-date-fmt-group">
+              <button id="wd-fmt-uk"  class="wd-fmt-btn active" onclick="setWorldDateFmt('uk')">DD/MM/YYYY</button>
+              <button id="wd-fmt-usa" class="wd-fmt-btn"        onclick="setWorldDateFmt('usa')">MM/DD/YYYY</button>
+              <button id="wd-fmt-iso" class="wd-fmt-btn"        onclick="setWorldDateFmt('iso')">YYYY-MM-DD</button>
+            </div>
+          </div>
+          <div class="wd-date-pane wd-date-pane-vidi">
+            <div id="wd-inline-vidiprinter" class="sim-vidiprinter sim-vidiprinter-inline"></div>
           </div>
         </div>
 
@@ -1343,6 +1360,135 @@
         <!-- RECORDS TAB -->
         <div id="wd-tab-records" class="hidden">
           <div id="wd-records-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD COMPETITION DETAIL -->
+    <div id="screen-world-competition-detail" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="showScreen('world-detail')">← Back to World</button>
+        <div class="world-header">
+          <div>
+            <h2 id="wcomp-name">Competition</h2>
+            <div id="wcomp-meta" class="screen-subtitle" style="margin-top:4px"></div>
+          </div>
+        </div>
+
+        <div id="wcomp-season-pills" class="world-rules-strip" style="margin-top:12px"></div>
+
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div id="wcomp-rules-btn-wrap"></div>
+          <div id="wcomp-draw-btn-wrap" style="display:none"></div>
+        </div>
+
+        <div id="wcomp-summary" class="world-desk-grid" style="margin-top:12px"></div>
+
+        <div id="wcomp-standings-wrap" style="margin-top:16px">
+          <h3>Standings</h3>
+          <div id="wcomp-standings"></div>
+        </div>
+
+        <div id="wcomp-bracket-wrap" style="margin-top:16px">
+          <h3>Bracket</h3>
+          <div id="wcomp-bracket"></div>
+        </div>
+
+        <div class="wd-overview-grid" style="margin-top:16px">
+          <div>
+            <h3 style="margin:0 0 8px">Upcoming Fixtures</h3>
+            <div id="wcomp-upcoming"></div>
+          </div>
+          <div>
+            <h3 style="margin:0 0 8px">Results</h3>
+            <div id="wcomp-results"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD COMPETITION RULES -->
+    <div id="screen-world-competition-rules" class="screen">
+      <div class="screen-inner">
+        <button class="btn-back" onclick="closeWorldCompetitionRules()">← Back</button>
+        <div class="world-header">
+          <div>
+            <h2 id="wcomp-rules-name">Competition Rules</h2>
+            <div id="wcomp-rules-meta" class="screen-subtitle" style="margin-top:4px"></div>
+          </div>
+        </div>
+
+        <div id="wcomp-rules-stage-strip" class="world-rules-strip" style="margin-top:12px"></div>
+
+        <div id="wcomp-rules-summary" class="world-desk-grid" style="margin-top:12px"></div>
+
+        <div id="wcomp-rules-sections" class="wcomp-rules-sections" style="margin-top:16px"></div>
+      </div>
+    </div>
+
+    <!-- DRAW CEREMONY -->
+    <div id="screen-draw-ceremony" class="screen">
+      <div class="screen-inner">
+        <div class="draw-ceremony-topbar">
+          <button class="btn-back" id="draw-back-btn" onclick="closeDraw()">← Back</button>
+          <div class="draw-ceremony-title-wrap">
+            <div class="draw-ceremony-eyebrow">Official Group Draw</div>
+            <h2 id="draw-comp-name" class="draw-ceremony-heading">Draw Ceremony</h2>
+            <div id="draw-comp-year" class="draw-ceremony-sub"></div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="draw-rules-btn" onclick="openWorldCompetitionRules(DrawCeremony.compKey, DrawCeremony.seasonKey, 'draw-ceremony')">Rules</button>
+          <button class="btn btn-secondary btn-sm" id="draw-replay-btn" onclick="replayDraw()" title="Replay draw from scratch">Replay Draw</button>
+        </div>
+
+        <!-- Pots panel (revealed first) -->
+        <div id="draw-pots-section" class="draw-pots-section" style="display:none">
+          <div class="draw-section-heading">
+            <span class="draw-section-label">Seeding Pots</span>
+            <span id="draw-host-badge" class="draw-host-badge" style="display:none"></span>
+          </div>
+          <div id="draw-pots" class="draw-pots-grid"></div>
+        </div>
+
+        <!-- Groups board (fills in as draw progresses) -->
+        <div id="draw-groups-section" class="draw-groups-section" style="display:none">
+          <div class="draw-section-heading">
+            <span class="draw-section-label">Groups</span>
+          </div>
+          <div id="draw-groups" class="draw-groups-grid"></div>
+        </div>
+
+        <!-- Current draw spotlight (shows team being drawn) -->
+        <div id="draw-spotlight" class="draw-spotlight" style="display:none">
+          <div class="draw-spotlight-inner">
+            <div class="draw-spotlight-pot-label" id="draw-spotlight-pot"></div>
+            <div class="draw-spotlight-ball" id="draw-spotlight-ball">
+              <div class="draw-ball-inner">
+                <span id="draw-ball-text"></span>
+              </div>
+            </div>
+            <div class="draw-spotlight-result" id="draw-spotlight-result"></div>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div id="draw-controls" class="draw-controls" style="display:none">
+          <button class="btn btn-primary" id="draw-next-btn" onclick="drawNextStep()">Begin Draw</button>
+          <div class="draw-progress-wrap">
+            <div id="draw-progress-text" class="draw-progress-text"></div>
+            <div class="draw-progress-bar-track">
+              <div id="draw-progress-bar" class="draw-progress-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="draw-skip-btn" onclick="skipToEndDraw()">Skip to End</button>
+        </div>
+
+        <!-- Complete state -->
+        <div id="draw-complete" class="draw-complete-banner" style="display:none">
+          <div class="draw-complete-inner">
+            <div class="draw-complete-icon">🏆</div>
+            <div class="draw-complete-msg">Draw Complete</div>
+            <div id="draw-complete-sub" class="draw-complete-sub"></div>
+          </div>
         </div>
       </div>
     </div>

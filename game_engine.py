@@ -1091,6 +1091,10 @@ def simulate_to(target: str, state: dict) -> dict:
     is_free_hit   = state.get('is_free_hit', False)
     total_runs    = state['total_runs']
     total_wickets = state['total_wickets']
+    runs_at_100_overs = state.get('runs_at_100_overs')
+    wickets_at_100_overs = state.get('wickets_at_100_overs')
+    runs_at_110_overs = state.get('runs_at_110_overs')
+    wickets_at_110_overs = state.get('wickets_at_110_overs')
 
     batting_players = state['batting_players']
     striker_idx     = state['striker_idx']
@@ -1249,6 +1253,13 @@ def simulate_to(target: str, state: dict) -> dict:
                 ball_in_over  = 0
                 bowler['_this_over_runs'] = 0
 
+                if over_number == 100 and runs_at_100_overs is None:
+                    runs_at_100_overs = total_runs
+                    wickets_at_100_overs = total_wickets
+                if over_number == 110 and runs_at_110_overs is None:
+                    runs_at_110_overs = total_runs
+                    wickets_at_110_overs = total_wickets
+
                 # End-of-over: swap ends
                 striker_idx, non_striker_idx = non_striker_idx, striker_idx
 
@@ -1293,6 +1304,10 @@ def simulate_to(target: str, state: dict) -> dict:
         'is_free_hit':       is_free_hit,
         'total_runs':        total_runs,
         'total_wickets':     total_wickets,
+        'runs_at_100_overs': runs_at_100_overs,
+        'wickets_at_100_overs': wickets_at_100_overs,
+        'runs_at_110_overs': runs_at_110_overs,
+        'wickets_at_110_overs': wickets_at_110_overs,
         'striker_idx':       striker_idx,
         'non_striker_idx':   non_striker_idx,
         'next_batter_idx':   next_batter_idx,
@@ -1585,7 +1600,6 @@ def simulate_world_to(target, fixtures, world_state):
     Returns: {results, new_current_date, paused_at_fixture,
               matches_simulated, updated_player_states, truncated}
     """
-    MAX_MATCHES  = 500
     user_team_ids = set(world_state.get('user_team_ids') or [])
     if not user_team_ids and world_state.get('my_team_id'):
         user_team_ids.add(world_state.get('my_team_id'))
@@ -1621,11 +1635,6 @@ def simulate_world_to(target, fixtures, world_state):
             continue
 
         f_date = fixture.get('scheduled_date', '')
-
-        if len(results) >= MAX_MATCHES:
-            truncated = True
-            paused_at = fixture
-            break
 
         if target == 'date' and target_date and f_date > target_date:
             break

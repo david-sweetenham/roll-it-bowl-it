@@ -205,7 +205,20 @@ async function api(method, endpoint, body = null) {
   _apiLoadingShow();
   try {
     const res = await fetch(endpoint, opts);
-    const data = await res.json();
+    const contentType = res.headers.get('content-type') || '';
+    let data = null;
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      if (!res.ok) {
+        const statusLabel = res.status ? `HTTP ${res.status}` : 'request';
+        showError(`${statusLabel} failed for ${endpoint}`);
+        return null;
+      }
+      showError(`Unexpected non-JSON response from ${endpoint}`);
+      return null;
+    }
 
     if (!res.ok) {
       let msg;
@@ -295,6 +308,9 @@ function onScreenLoad(name) {
     case 'almanack':          loadAlmanackScreen();      break;
     case 'world':             loadWorldsScreen();        break;
     case 'world-detail':      /* loaded by loadWorldDetail() */ break;
+    case 'world-competition-detail': /* loaded by loadWorldCompetitionDetail() */ break;
+    case 'world-competition-rules': /* loaded by openWorldCompetitionRules() */ break;
+    case 'draw-ceremony':     /* loaded by openDrawCeremony() */ break;
     case 'world-sim-report':  /* loaded by simulateWorld() */   break;
     case 'world-calendar':    /* loaded by openWorldCalendar() */ break;
     case 'player-detail': break;  // loaded by loadPlayerDetail()
@@ -4010,7 +4026,7 @@ async function showHistoricalMatchView(matchId, state) {
       <div class="archive-match-kicker">Match Archive</div>
       <div class="archive-match-headline">${escHtml(sc.result_string || 'Completed match')}</div>
       <div class="archive-match-meta">
-        ${escHtml(match.team1_name || '?')} vs ${escHtml(match.team2_name || '?')}
+        ${renderTeamLabel(match.team1_name || '?')} vs ${renderTeamLabel(match.team2_name || '?')}
         <span class="archive-match-sep">·</span>
         ${escHtml(match.format || '')}
         <span class="archive-match-sep">·</span>
@@ -4249,7 +4265,7 @@ function renderScorecardTab(state) {
       const bowlers = state.bowler_innings || [];
       const fow     = state.fall_of_wickets || [];
 
-      html += `<div class="sc-innings-header">${escHtml(inn.batting_team_name)} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
+      html += `<div class="sc-innings-header">${renderTeamLabel(inn.batting_team_name)} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
 
       html += `<table class="data-table">
         <thead><tr>
@@ -4433,7 +4449,7 @@ function _renderFullScorecardHtml(sc) {
   for (const inn of innings) {
     const ord = ['1st','2nd','3rd','4th'][inn.innings_number - 1] || `${inn.innings_number}th`;
     const decl = inn.declared ? ' (dec)' : '';
-    html += `<div class="sc-innings-header">${escHtml(inn.batting_team_name)} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
+    html += `<div class="sc-innings-header">${renderTeamLabel(inn.batting_team_name)} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
 
     // Build bowler name map from this innings' bowlers array
     const bowlerMap = {};
@@ -7760,6 +7776,9 @@ function exportAlmCSV() {
 
 const WorldUI = {
   activeWorldId:   null,
+  activeCompetitionKey: null,
+  activeCompetitionSeason: '',
+  rulesPrevScreen: 'world-detail',
   wizardStep:      1,
   wizardTeamIds:   new Set(),
   wizardAllTeams:  [],
@@ -7972,13 +7991,12 @@ function wizardNext(fromStep) {
   }
   if (fromStep === 3) {
     const scope = getWorldScope();
-    const minTeams = scope === 'domestic' ? 2 : 4;
     const calStyle = document.querySelector('input[name="wc-cal-style"]:checked')?.value || 'realistic';
     if (scope === 'domestic' && calStyle === 'realistic' && !(WorldUI.wizardDomesticLeagues || new Set()).size) {
       alert('Choose at least one domestic league for a realistic domestic world.'); return;
     }
-    if (WorldUI.wizardTeamIds.size < minTeams) {
-      alert(`Select at least ${minTeams} teams.`); return;
+    if (scope === 'domestic' && getWorldDomesticTeamMode() !== 'full_league' && WorldUI.wizardTeamIds.size < 2) {
+      alert('Select at least 2 domestic teams.'); return;
     }
     _wizardBuildSummary();
   }
@@ -8007,6 +8025,7 @@ function _refreshWizardTeamPool() {
   const scope = getWorldScope();
   const domesticMode = getWorldDomesticTeamMode();
   let pool = [];
+  let manualSelection = false;
   if (scope === 'domestic') {
     const selectedLeagueNames = new Set(
       Array.from(WorldUI.wizardDomesticLeagues || [])
@@ -8016,11 +8035,12 @@ function _refreshWizardTeamPool() {
     pool = (WorldUI.wizardDomesticTeams || []).filter(t =>
       !selectedLeagueNames.size || (t.league && selectedLeagueNames.has(t.league))
     );
+    manualSelection = domesticMode !== 'full_league';
   } else {
     pool = WorldUI.wizardInternationalTeams || [];
   }
   WorldUI.wizardAllTeams = pool;
-  if (scope === 'domestic' && domesticMode === 'full_league') {
+  if (!manualSelection) {
     WorldUI.wizardTeamIds = new Set(pool.map(t => t.id));
   } else {
     WorldUI.wizardTeamIds = new Set(Array.from(WorldUI.wizardTeamIds).filter(id => pool.some(t => t.id === id)));
@@ -8029,19 +8049,32 @@ function _refreshWizardTeamPool() {
   _refreshWizardMyTeamOptions();
   const selectAllBtn = document.getElementById('wizard-select-all-btn');
   if (selectAllBtn) {
-    const lockTeamSelection = scope === 'domestic' && domesticMode === 'full_league';
-    selectAllBtn.classList.toggle('hidden', lockTeamSelection);
+    selectAllBtn.classList.toggle('hidden', true);
+  }
+  const badgesEl = document.getElementById('wizard-team-badges');
+  if (badgesEl) {
+    badgesEl.classList.toggle('hidden', !manualSelection);
   }
   const titleEl = document.getElementById('wizard-team-step-title');
   if (titleEl) {
     if (scope === 'domestic' && domesticMode === 'full_league') {
-      titleEl.innerHTML = 'Step 3 — Review League Clubs <span class="text-muted">(all included)</span>';
+      titleEl.innerHTML = 'Step 3 — Managed Teams <span class="text-muted">(all league clubs included)</span>';
     } else if (scope === 'domestic') {
-      titleEl.innerHTML = 'Step 3 — Select Domestic Teams <span class="text-muted">(min 2)</span>';
+      titleEl.innerHTML = 'Step 3 — Managed Teams <span class="text-muted">(pick who you control)</span>';
     } else if (scope === 'combined') {
-      titleEl.innerHTML = 'Step 3 — Select International Teams <span class="text-muted">(min 4)</span>';
+      titleEl.innerHTML = 'Step 3 — Managed Teams <span class="text-muted">(all international teams included)</span>';
     } else {
-      titleEl.innerHTML = 'Step 3 — Select Teams <span class="text-muted">(min 4)</span>';
+      titleEl.innerHTML = 'Step 3 — Managed Teams <span class="text-muted">(all international teams included)</span>';
+    }
+  }
+  const countEl = document.getElementById('wizard-team-count');
+  if (countEl) {
+    if (scope === 'domestic' && manualSelection) {
+      countEl.textContent = `${WorldUI.wizardTeamIds.size} domestic teams included`;
+    } else if (scope === 'domestic') {
+      countEl.textContent = `All ${WorldUI.wizardAllTeams.length} domestic teams included`;
+    } else {
+      countEl.textContent = `All ${WorldUI.wizardAllTeams.length} international teams included`;
     }
   }
   const intlWrap = document.getElementById('wc-managed-international-wrap');
@@ -8086,7 +8119,7 @@ function _refreshWizardMyTeamOptions() {
 }
 
 function wizardToggleTeam(id) {
-  if (getWorldScope() === 'domestic' && getWorldDomesticTeamMode() === 'full_league') return;
+  if (getWorldScope() !== 'domestic' || getWorldDomesticTeamMode() === 'full_league') return;
   if (WorldUI.wizardTeamIds.has(id)) WorldUI.wizardTeamIds.delete(id);
   else WorldUI.wizardTeamIds.add(id);
   const el = document.getElementById(`wtb-${id}`);
@@ -8095,7 +8128,7 @@ function wizardToggleTeam(id) {
 }
 
 function wizardSelectAllTeams() {
-  if (getWorldScope() === 'domestic' && getWorldDomesticTeamMode() === 'full_league') return;
+  if (getWorldScope() !== 'domestic' || getWorldDomesticTeamMode() === 'full_league') return;
   const allSelected = WorldUI.wizardAllTeams.every(t => WorldUI.wizardTeamIds.has(t.id));
   if (allSelected) {
     WorldUI.wizardTeamIds.clear();
@@ -8108,11 +8141,16 @@ function wizardSelectAllTeams() {
 function _wizardUpdateCount() {
   const el = document.getElementById('wizard-team-count');
   if (!el) return;
-  if (getWorldScope() === 'domestic' && getWorldDomesticTeamMode() === 'full_league') {
-    el.textContent = `All ${WorldUI.wizardAllTeams.length} clubs included`;
-  } else {
-    el.textContent = `${WorldUI.wizardTeamIds.size} selected`;
+  const scope = getWorldScope();
+  if (scope !== 'domestic') {
+    el.textContent = `All ${WorldUI.wizardAllTeams.length} international teams included`;
+    return;
   }
+  if (getWorldDomesticTeamMode() === 'full_league') {
+    el.textContent = `All ${WorldUI.wizardAllTeams.length} domestic teams included`;
+    return;
+  }
+  el.textContent = `${WorldUI.wizardTeamIds.size} domestic teams included`;
 }
 
 function _wizardBuildSummary() {
@@ -8150,9 +8188,13 @@ function _wizardBuildSummary() {
     <div class="summary-row"><span>Managed International Team</span><strong>${myTeam ? myTeam.name : 'None'}</strong></div>
     ${worldScope !== 'international' ? `<div class="summary-row"><span>Managed Domestic Team</span><strong>${myDomesticTeam ? myDomesticTeam.name : 'None'}</strong></div>` : ''}
     <div class="summary-row"><span>Teams (${teamList.length})</span>
-      <span>${worldScope === 'domestic' && domesticTeamMode === 'full_league'
-        ? `All clubs from the selected league set (${teamList.length})`
-        : teamList.map(t => t.short_code || t.name.slice(0,3)).join(', ')}</span>
+      <span>${worldScope === 'international'
+        ? `All international teams (${teamList.length})`
+        : worldScope === 'combined'
+          ? `All international teams (${teamList.length}) plus the selected domestic leagues`
+          : domesticTeamMode === 'full_league'
+            ? `All clubs from the selected league set (${teamList.length})`
+            : teamList.map(t => t.short_code || t.name.slice(0,3)).join(', ')}</span>
     </div>
     ${domLeagueNames.length ? `<div class="summary-row"><span>Domestic Leagues</span><span>${domLeagueNames.join(', ')}</span></div>` : ''}`;
 }
@@ -8301,6 +8343,7 @@ function _fmtDate(iso) { return _formatWorldDate(iso); }
 async function loadWorldDetail(worldId) {
   WorldUI.activeWorldId = worldId;
   showScreen('world-detail');
+  _vdpResetInline();
 
   const nameEl = document.getElementById('wd-name');
   if (nameEl) nameEl.textContent = 'Loading…';
@@ -8356,7 +8399,18 @@ const _LEAGUE_DISPLAY = {
   ipl:                 'IPL',
   cpl:                 'CPL',
   psl:                 'PSL',
+  icc_champions_trophy: 'Champions Trophy',
+  icc_cricket_world_cup: 'Cricket World Cup',
+  icc_t20_world_cup:    'T20 World Cup',
+  icc_world_test_championship: 'World Test Championship',
 };
+
+function _worldCompetitionPillPair(compKey, name, prefix = '') {
+  const label = `${prefix}${name}`;
+  return [
+    `<button type="button" class="wrs-pill wrs-pill-league wrs-pill-action" onclick="loadWorldCompetitionDetail('${escHtml(compKey)}')">${escHtml(label)}</button>`,
+  ];
+}
 
 function _renderWorldRules(data, settings) {
   const el = document.getElementById('wd-world-rules');
@@ -8368,6 +8422,7 @@ function _renderWorldRules(data, settings) {
   const domesticMode    = settings.domestic_team_mode === 'full_league' ? 'Full League' : 'Selected Clubs';
   const playerLifecycle = settings.player_lifecycle === 'realistic' ? 'Retire & Regens' : 'Ageless Players';
   const leagues         = Array.isArray(settings.domestic_leagues) ? settings.domestic_leagues : [];
+  const competitions    = Array.isArray(data.available_competitions) ? data.available_competitions : [];
   const myTeamId        = settings.my_team_id || null;
   const myDomesticTeamId = settings.my_domestic_team_id || null;
   const calendarYears   = Math.max(1, Math.min(10, parseInt(settings.calendar_years, 10) || 2));
@@ -8403,9 +8458,17 @@ function _renderWorldRules(data, settings) {
     if (leagues.length) {
       leagues.forEach(key => {
         const name = _LEAGUE_DISPLAY[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        pills.push(`<span class="wrs-pill wrs-pill-league">${escHtml(name)}</span>`);
+        pills.push(..._worldCompetitionPillPair(key, name));
       });
     }
+  }
+
+  const iccCompetitions = competitions.filter(c => c.is_icc_event);
+  if (iccCompetitions.length) {
+    iccCompetitions.forEach(comp => {
+      const name = _LEAGUE_DISPLAY[comp.key] || comp.name || comp.key;
+      pills.push(..._worldCompetitionPillPair(comp.key, name, '🏆 '));
+    });
   }
 
   if (myTeamId || myDomesticTeamId) {
@@ -8731,6 +8794,605 @@ function _seriesSummaryHtml(series) {
   </div>`;
 }
 
+function _worldCompetitionFixtureCard(f, mode = 'upcoming') {
+  const fmtBadge = `<span class="badge badge-${String(f.format || '').toLowerCase()}">${escHtml(f.format || '')}</span>`;
+  const topMeta = [
+    `<span class="wcomp-fixture-date">${escHtml(_fmtDate(f.scheduled_date || ''))}</span>`,
+    fmtBadge,
+  ];
+  const clickOpen = mode === 'result' && f.match_id ? ` onclick="openPlayedMatch(${f.match_id})"` : '';
+  const clickClass = mode === 'result' && f.match_id ? ' result-row-clickable' : '';
+  const action = mode === 'upcoming' && f.is_user_match
+    ? `<div class="wcomp-fixture-result"><button class="btn btn-accent btn-sm" onclick="event.stopPropagation(); playWorldFixture(${f.id})">🏏 Play Now</button></div>`
+    : (mode === 'result' && f.result_string ? `<div class="wcomp-fixture-result">${escHtml(f.result_string)}</div>` : '');
+
+  return `<div class="wcomp-fixture-card${clickClass}"${clickOpen}>
+    <div class="wcomp-fixture-top">${topMeta.join('')}</div>
+    <div class="wcomp-fixture-title">${escHtml(f.team1_name || '?')} vs ${escHtml(f.team2_name || '?')}</div>
+    <div class="wcomp-fixture-sub">${escHtml(f.venue_name || 'Venue TBC')}${f.match_number_in_series ? ` · Match ${f.match_number_in_series}` : ''}</div>
+    ${action}
+  </div>`;
+}
+
+function _renderWorldCompetitionBracket(bracket) {
+  const quarters = bracket?.quarter_finals || [];
+  const semis = bracket?.semi_finals || [];
+  const finals = bracket?.finals || [];
+  if (!quarters.length && !semis.length && !finals.length) return '';
+
+  const renderMatch = f => `<div class="bracket-match${(f.competition_stage || f.fixture_type) === 'final' ? ' bracket-final' : ''}">
+    <div class="bracket-stage-label">${escHtml(f.competition_round || f.competition_stage || '')}</div>
+    <div class="bracket-team">${escHtml(f.team1_name || '?')}</div>
+    <div class="bracket-vs">vs</div>
+    <div class="bracket-team">${escHtml(f.team2_name || '?')}</div>
+  </div>`;
+
+  const cols = [];
+  if (quarters.length) cols.push(`<div class="bracket-col"><div class="bracket-col-label">Quarter-Finals</div>${quarters.map(renderMatch).join('')}</div>`);
+  if (semis.length) cols.push(`<div class="bracket-col"><div class="bracket-col-label">Semi-Finals</div>${semis.map(renderMatch).join('')}</div>`);
+  if (finals.length) cols.push(`<div class="bracket-col"><div class="bracket-col-label">Final</div>${finals.map(renderMatch).join('')}</div>`);
+  return `<div class="bracket-wrap">${cols.join('')}</div>`;
+}
+
+function closeWorldCompetitionRules() {
+  showScreen(WorldUI.rulesPrevScreen || 'world-detail');
+}
+
+function _worldCompetitionRulesCard(title, body) {
+  return `<div class="wcomp-rules-card">
+    <div class="wcomp-rules-label">${escHtml(title)}</div>
+    <div class="wcomp-rules-body">${escHtml(body || '—')}</div>
+  </div>`;
+}
+
+async function openWorldCompetitionRules(compKey, seasonKey = '', prevScreen = '') {
+  const worldId = WorldUI.activeWorldId || WorldUI._worldData?.world?.id || null;
+  if (!worldId || !compKey) return;
+
+  WorldUI.activeWorldId = worldId;
+  WorldUI.activeCompetitionKey = compKey;
+  if (seasonKey) WorldUI.activeCompetitionSeason = seasonKey;
+  WorldUI.rulesPrevScreen = prevScreen || AppState.currentScreen || 'world-detail';
+  if (WorldUI.rulesPrevScreen === 'draw-ceremony') _clearDrawTimer();
+  showScreen('world-competition-rules');
+
+  const nameEl = document.getElementById('wcomp-rules-name');
+  const metaEl = document.getElementById('wcomp-rules-meta');
+  const stageEl = document.getElementById('wcomp-rules-stage-strip');
+  const summaryEl = document.getElementById('wcomp-rules-summary');
+  const sectionsEl = document.getElementById('wcomp-rules-sections');
+
+  if (nameEl) nameEl.textContent = 'Loading…';
+  if (metaEl) metaEl.textContent = '';
+  if (stageEl) stageEl.innerHTML = '';
+  if (summaryEl) summaryEl.innerHTML = '<div class="spinner"></div>';
+  if (sectionsEl) sectionsEl.innerHTML = '';
+
+  const data = await api('GET', `/api/worlds/${worldId}/competitions/${compKey}/rules`);
+  if (!data?.rules || !data?.competition) return;
+
+  const comp = data.competition;
+  const rules = data.rules;
+  const stages = Array.isArray(rules.stages) ? rules.stages : [];
+
+  if (nameEl) nameEl.textContent = comp.name || 'Competition Rules';
+  if (metaEl) {
+    const bits = [comp.world_name || 'World', comp.format || '', seasonKey || ''].filter(Boolean);
+    metaEl.textContent = bits.join(' · ');
+  }
+  if (stageEl) {
+    stageEl.innerHTML = stages.length
+      ? `<span class="wrs-label">Path</span>${stages.map(stage => `<span class="wrs-pill wrs-pill-season">${escHtml(stage)}</span>`).join('')}`
+      : `<span class="wrs-label">Path</span><span class="wrs-pill wrs-pill-season">${escHtml(rules.stage_path || 'League table only')}</span>`;
+  }
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Format</div>
+        <div class="wcomp-summary-value">${escHtml(comp.format || '—')}</div>
+        <div class="wcomp-summary-sub">${escHtml(rules.format_description || rules.format_label || '')}</div>
+      </div>
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Structure</div>
+        <div class="wcomp-summary-value">${escHtml(rules.group_summary || 'Single table')}</div>
+        <div class="wcomp-summary-sub">${escHtml(rules.stage_path || 'League table only')}</div>
+      </div>
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Points</div>
+        <div class="wcomp-summary-value">${escHtml(rules.points_system_label || 'Table')}</div>
+        <div class="wcomp-summary-sub">${escHtml(rules.points_system || '')}</div>
+      </div>
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Draw</div>
+        <div class="wcomp-summary-value">${escHtml((rules.draw_type || 'single_table').replace(/_/g, ' '))}</div>
+        <div class="wcomp-summary-sub">${escHtml(rules.draw_method || '')}</div>
+      </div>`;
+  }
+  if (sectionsEl) {
+    sectionsEl.innerHTML = [
+      _worldCompetitionRulesCard('Format', rules.format_description || rules.format_label || comp.format || 'Competition format'),
+      _worldCompetitionRulesCard('Structure', rules.structure),
+      _worldCompetitionRulesCard('Points System', rules.points_system),
+      _worldCompetitionRulesCard('Tie-Breakers', rules.tie_breakers),
+      _worldCompetitionRulesCard('Qualification', rules.qualification),
+      _worldCompetitionRulesCard('Knockout Path', rules.knockout_path),
+      _worldCompetitionRulesCard('Draw Method', rules.draw_method),
+    ].join('');
+  }
+}
+
+async function loadWorldCompetitionDetail(compKey, seasonKey = '') {
+  const worldId = WorldUI.activeWorldId || WorldUI._worldData?.world?.id || null;
+  if (!worldId || !compKey) return;
+
+  WorldUI.activeWorldId = worldId;
+  WorldUI.activeCompetitionKey = compKey;
+  if (seasonKey) WorldUI.activeCompetitionSeason = seasonKey;
+  showScreen('world-competition-detail');
+
+  const nameEl = document.getElementById('wcomp-name');
+  const metaEl = document.getElementById('wcomp-meta');
+  const standingsEl = document.getElementById('wcomp-standings');
+  const upcomingEl = document.getElementById('wcomp-upcoming');
+  const resultsEl = document.getElementById('wcomp-results');
+  const summaryEl = document.getElementById('wcomp-summary');
+  const seasonEl = document.getElementById('wcomp-season-pills');
+  const bracketWrapEl = document.getElementById('wcomp-bracket-wrap');
+  const bracketEl = document.getElementById('wcomp-bracket');
+  const rulesBtnWrap = document.getElementById('wcomp-rules-btn-wrap');
+
+  if (nameEl) nameEl.textContent = 'Loading…';
+  if (metaEl) metaEl.textContent = '';
+  if (standingsEl) standingsEl.innerHTML = '<div class="spinner"></div>';
+  if (upcomingEl) upcomingEl.innerHTML = '';
+  if (resultsEl) resultsEl.innerHTML = '';
+  if (summaryEl) summaryEl.innerHTML = '';
+  if (seasonEl) seasonEl.innerHTML = '';
+  if (bracketEl) bracketEl.innerHTML = '';
+  if (rulesBtnWrap) rulesBtnWrap.innerHTML = '';
+
+  const suffix = seasonKey ? `?season=${encodeURIComponent(seasonKey)}` : '';
+  const data = await api('GET', `/api/worlds/${worldId}/competitions/${compKey}${suffix}`);
+  if (!data?.competition) return;
+
+  WorldUI.activeCompetitionSeason = data.selected_season || '';
+  const comp = data.competition;
+  const seasons = data.seasons || [];
+  const standings = data.standings || [];
+  const standingsGroups = data.standings_groups || [];
+  const upcoming = data.upcoming_fixtures || [];
+  const results = data.results || [];
+  const activeSeason = seasons.find(s => s.key === data.selected_season) || seasons[0] || null;
+
+  if (nameEl) nameEl.textContent = comp.name || 'Competition';
+  if (metaEl) metaEl.textContent = `${comp.world_name || 'World'} · ${comp.format || ''}${activeSeason?.label ? ' · ' + activeSeason.label : ''}`;
+  if (rulesBtnWrap) {
+    rulesBtnWrap.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="openWorldCompetitionRules('${escHtml(compKey)}', '${escHtml(data.selected_season || '')}', 'world-competition-detail')">Rules</button>`;
+  }
+  if (seasonEl) {
+    seasonEl.innerHTML = `<span class="wrs-label">Seasons</span>${seasons.map(s =>
+      `<button type="button" class="wrs-pill wrs-pill-season wrs-pill-action${s.key === data.selected_season ? ' active' : ''}" onclick="loadWorldCompetitionDetail('${escHtml(compKey)}', '${escHtml(s.key)}')">${escHtml(s.label)}</button>`
+    ).join('')}`;
+  }
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Season Window</div>
+        <div class="wcomp-summary-value">${activeSeason ? escHtml(_fmtDate(activeSeason.from_date || '')) : '—'}</div>
+        <div class="wcomp-summary-sub">${activeSeason?.to_date ? `to ${escHtml(_fmtDate(activeSeason.to_date))}` : 'No fixtures yet'}</div>
+      </div>
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Fixtures</div>
+        <div class="wcomp-summary-value">${activeSeason?.fixture_count || 0}</div>
+        <div class="wcomp-summary-sub">${activeSeason?.completed_count || 0} complete</div>
+      </div>
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Upcoming</div>
+        <div class="wcomp-summary-value">${upcoming.length}</div>
+        <div class="wcomp-summary-sub">Remaining in this season</div>
+      </div>
+      <div class="wcomp-summary-card">
+        <div class="wcomp-summary-label">Results</div>
+        <div class="wcomp-summary-value">${results.length}</div>
+        <div class="wcomp-summary-sub">Completed matches</div>
+      </div>`;
+  }
+
+  if (standingsEl) {
+    const groupsToRender = standingsGroups.length
+      ? standingsGroups
+      : (standings.length ? [{ group: 'Standings', rows: standings }] : []);
+    standingsEl.innerHTML = groupsToRender.length
+      ? groupsToRender.map(group => {
+          const hasNrr = group.rows.some(r => Number(r.nrr || 0) !== 0);
+          const hasBonus = group.rows.some(r => (r.batting_bonus || 0) || (r.bowling_bonus || 0));
+          const hasPct = group.rows.some(r => r.pct != null && r.pct !== 0);
+          return `<div class="wcomp-standings-group">
+            ${groupsToRender.length > 1 ? `<h4 class="wcomp-group-heading">${escHtml(group.group || 'Standings')}</h4>` : ''}
+            <table class="standings-table">
+              <thead><tr>
+                <th>Pos</th><th>Team</th><th>P</th><th>W</th><th>L</th><th>D</th><th>T</th><th>NR</th>
+                ${hasPct ? '<th>PCT</th>' : ''}
+                ${hasBonus ? '<th>Bat</th><th>Bowl</th>' : ''}
+                ${hasNrr ? '<th>NRR</th>' : ''}
+                <th>Pts</th>
+              </tr></thead>
+              <tbody>
+                ${group.rows.map(r => `
+                  <tr>
+                    <td>${r.position}</td>
+                    <td><span class="team-dot" style="background:${r.badge_colour || '#888'}"></span>${escHtml(r.team_name || '?')}</td>
+                    <td>${r.played || 0}</td>
+                    <td>${r.won || 0}</td>
+                    <td>${r.lost || 0}</td>
+                    <td>${r.drawn || 0}</td>
+                    <td>${r.tied || 0}</td>
+                    <td>${r.no_result || 0}</td>
+                    ${hasPct ? `<td>${Number(r.pct || 0).toFixed(2)}</td>` : ''}
+                    ${hasBonus ? `<td>${r.batting_bonus || 0}</td><td>${r.bowling_bonus || 0}</td>` : ''}
+                    ${hasNrr ? `<td>${Number(r.nrr || 0).toFixed(3)}</td>` : ''}
+                    <td><strong>${r.points || 0}</strong></td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`;
+        }).join('')
+      : '<p class="text-muted">No standings available yet.</p>';
+  }
+
+  if (upcomingEl) {
+    upcomingEl.innerHTML = upcoming.length
+      ? `<div class="wcomp-list">${upcoming.map(f => _worldCompetitionFixtureCard(f, 'upcoming')).join('')}</div>`
+      : '<p class="text-muted">No upcoming fixtures left in this season.</p>';
+  }
+
+  if (resultsEl) {
+    resultsEl.innerHTML = results.length
+      ? `<div class="wcomp-list">${results.map(f => _worldCompetitionFixtureCard(f, 'result')).join('')}</div>`
+      : '<p class="text-muted">No completed matches yet.</p>';
+  }
+
+  const bracketHtml = _renderWorldCompetitionBracket(data.bracket || {});
+  if (bracketWrapEl) bracketWrapEl.classList.toggle('hidden', !bracketHtml);
+  if (bracketEl) bracketEl.innerHTML = bracketHtml;
+
+  // Show "View Draw" button for seeded-group competitions
+  const drawBtnWrap = document.getElementById('wcomp-draw-btn-wrap');
+  if (drawBtnWrap) {
+    const isSeeded = comp.draw_type === 'seeded_groups' || data.has_draw_outcome;
+    drawBtnWrap.style.display = isSeeded ? '' : 'none';
+    if (isSeeded) {
+      const seasonKey = data.selected_season || (seasons[0] && seasons[0].key) || '';
+      drawBtnWrap.innerHTML = `<button class="btn btn-secondary btn-sm draw-open-btn" onclick="openDrawCeremony('${escHtml(compKey)}','${escHtml(seasonKey)}')">🎱 View Group Draw</button>`;
+    }
+  }
+}
+
+// ── Draw Ceremony ─────────────────────────────────────────────────────────────
+
+const DrawCeremony = {
+  data:        null,   // full draw outcome object from API
+  steps:       [],     // flattened steps list
+  stepIndex:   0,      // next step to reveal
+  timer:       null,   // auto-advance timer handle
+  prevScreen:  'world-competition-detail',
+  compKey:     null,
+  seasonKey:   null,
+  autoPlaying: false,
+};
+
+async function openDrawCeremony(compKey, seasonKey) {
+  const worldId = WorldUI.activeWorldId;
+  if (!worldId || !compKey || !seasonKey) return;
+
+  DrawCeremony.compKey    = compKey;
+  DrawCeremony.seasonKey  = seasonKey;
+  DrawCeremony.prevScreen = AppState.currentScreen || 'world-competition-detail';
+
+  // Extract year from season key (e.g. "icc_champions_trophy_2025" → 2025)
+  const yearMatch = seasonKey.match(/(\d{4})$/);
+  const year = yearMatch ? yearMatch[1] : '';
+  const apiKey = year ? `${compKey}_${year}` : seasonKey;
+
+  const data = await api('GET', `/api/worlds/${worldId}/draws/${compKey}/${encodeURIComponent(apiKey)}`);
+  if (!data?.draw) {
+    alert('Draw outcome not found for this season. It may have been generated before the draw ceremony was available.');
+    return;
+  }
+
+  DrawCeremony.data = data.draw;
+  showScreen('draw-ceremony');
+  _initDrawCeremony(data.draw);
+}
+
+function closeDraw() {
+  _clearDrawTimer();
+  showScreen(DrawCeremony.prevScreen);
+}
+
+function replayDraw() {
+  _clearDrawTimer();
+  _initDrawCeremony(DrawCeremony.data);
+}
+
+function _clearDrawTimer() {
+  if (DrawCeremony.timer) {
+    clearTimeout(DrawCeremony.timer);
+    DrawCeremony.timer = null;
+  }
+  DrawCeremony.autoPlaying = false;
+}
+
+function _initDrawCeremony(draw) {
+  // Header
+  const nameEl = document.getElementById('draw-comp-name');
+  const yearEl = document.getElementById('draw-comp-year');
+  if (nameEl) nameEl.textContent = draw.competition_name || 'Draw Ceremony';
+  if (yearEl) yearEl.textContent = draw.host_name ? `Host: ${draw.host_name}` : '';
+
+  // Build step list: host_placed first (if any), then pot_drawn steps
+  const steps = [];
+  const hostStep = (draw.steps || []).find(s => s.type === 'host_placed');
+  if (hostStep) steps.push(hostStep);
+  (draw.steps || []).filter(s => s.type === 'pot_drawn').forEach(s => steps.push(s));
+  DrawCeremony.steps     = steps;
+  DrawCeremony.stepIndex = 0;
+
+  // Reset UI
+  _resetDrawUI(draw);
+}
+
+function _resetDrawUI(draw) {
+  const potsSection     = document.getElementById('draw-pots-section');
+  const groupsSection   = document.getElementById('draw-groups-section');
+  const spotlight       = document.getElementById('draw-spotlight');
+  const controls        = document.getElementById('draw-controls');
+  const completeEl      = document.getElementById('draw-complete');
+  const nextBtn         = document.getElementById('draw-next-btn');
+  const progressText    = document.getElementById('draw-progress-text');
+  const progressBar     = document.getElementById('draw-progress-bar');
+
+  // Show pots section immediately
+  if (potsSection) {
+    potsSection.style.display = '';
+    _renderPots(draw);
+  }
+
+  // Render empty group slots
+  if (groupsSection) {
+    groupsSection.style.display = '';
+    _renderGroups(draw, {});  // empty initially
+  }
+
+  // Hide spotlight and complete
+  if (spotlight) spotlight.style.display = 'none';
+  if (completeEl) completeEl.style.display = 'none';
+
+  // Show controls
+  if (controls) controls.style.display = '';
+  if (nextBtn)  { nextBtn.textContent = 'Begin Draw'; nextBtn.disabled = false; }
+  if (progressText) progressText.textContent = `0 / ${DrawCeremony.steps.length} drawn`;
+  if (progressBar) progressBar.style.width = '0%';
+
+  // Host badge
+  const hostBadge = document.getElementById('draw-host-badge');
+  if (hostBadge) {
+    if (draw.host_name) {
+      hostBadge.style.display = '';
+      hostBadge.textContent   = `${draw.host_name} (Host)`;
+    } else {
+      hostBadge.style.display = 'none';
+    }
+  }
+}
+
+function _renderPots(draw) {
+  const el = document.getElementById('draw-pots');
+  if (!el) return;
+  const pots = draw.pots || [];
+  el.innerHTML = pots.map(pot => {
+    const teams = pot.teams || [];
+    return `<div class="draw-pot">
+      <div class="draw-pot-label">Pot ${pot.number}</div>
+      <div class="draw-pot-teams">
+        ${teams.map(t => `
+          <div class="draw-pot-team" id="draw-pot-team-${t.team_id}" style="--team-colour:${t.badge_colour || '#888'}">
+            <span class="draw-team-dot" style="background:${t.badge_colour || '#888'}"></span>
+            <span class="draw-team-name">${escHtml(t.team_name)}</span>
+          </div>`).join('')}
+        ${(() => {
+          // Also show host if they were in this pot (host is removed from pots_info before display)
+          const hostStep = (draw.steps || []).find(s => s.type === 'host_placed' && s.pot === pot.number);
+          if (hostStep) return `
+            <div class="draw-pot-team draw-pot-team--host" id="draw-pot-team-${hostStep.team_id}" style="--team-colour:${hostStep.badge_colour || '#888'}">
+              <span class="draw-team-dot" style="background:${hostStep.badge_colour || '#888'}"></span>
+              <span class="draw-team-name">${escHtml(hostStep.team_name)}</span>
+              <span class="draw-host-pip">H</span>
+            </div>`;
+          return '';
+        })()}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// placed: { teamId: groupName }
+function _renderGroups(draw, placed) {
+  const el = document.getElementById('draw-groups');
+  if (!el) return;
+  const groups = draw.group_names || Object.keys(draw.groups || {});
+  const allTeams = {};  // teamId → team info from draw data
+  (draw.steps || []).forEach(s => { allTeams[s.team_id] = s; });
+
+  el.innerHTML = groups.map(gname => {
+    const teamsInGroup = Object.entries(placed).filter(([,g]) => g === gname);
+    // Max slots = participants / groups (rough)
+    const total = DrawCeremony.steps.length;
+    const slotCount = Math.ceil(total / groups.length);
+
+    return `<div class="draw-group">
+      <div class="draw-group-label">${escHtml(gname)}</div>
+      <div class="draw-group-teams" id="draw-group-${gname.replace(/\s+/g,'-')}">
+        ${teamsInGroup.map(([tid]) => {
+          const t = allTeams[tid] || {};
+          const isHost = (draw.steps || []).find(s => s.team_id == tid && s.type === 'host_placed');
+          return `<div class="draw-group-team draw-group-team--placed" style="--team-colour:${t.badge_colour || '#888'}">
+            <span class="draw-team-dot" style="background:${t.badge_colour || '#888'}"></span>
+            <span>${escHtml(t.team_name || '?')}</span>
+            ${isHost ? '<span class="draw-host-pip">H</span>' : ''}
+          </div>`;
+        }).join('')}
+        ${Array.from({length: Math.max(0, slotCount - teamsInGroup.length)}).map(() =>
+          `<div class="draw-group-team draw-group-team--empty"></div>`
+        ).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function drawNextStep() {
+  const steps    = DrawCeremony.steps;
+  const idx      = DrawCeremony.stepIndex;
+  const nextBtn  = document.getElementById('draw-next-btn');
+  const skipBtn  = document.getElementById('draw-skip-btn');
+
+  if (idx >= steps.length) {
+    _showDrawComplete();
+    return;
+  }
+
+  // Disable button during animation
+  if (nextBtn) nextBtn.disabled = true;
+
+  const step = steps[idx];
+  DrawCeremony.stepIndex++;
+
+  // Track placed teams so far
+  const placed = {};
+  for (let i = 0; i < DrawCeremony.stepIndex; i++) {
+    placed[steps[i].team_id] = steps[i].group;
+  }
+
+  _showDrawSpotlight(step, () => {
+    // After spotlight animation, update groups board
+    _renderGroups(DrawCeremony.data, placed);
+    _dimPotTeam(step.team_id);
+    _updateDrawProgress(DrawCeremony.stepIndex, steps.length);
+
+    if (DrawCeremony.stepIndex >= steps.length) {
+      _showDrawComplete();
+    } else {
+      if (nextBtn) {
+        nextBtn.disabled = false;
+        nextBtn.textContent = 'Draw Next';
+      }
+    }
+  });
+}
+
+function _showDrawSpotlight(step, onDone) {
+  const spotlight  = document.getElementById('draw-spotlight');
+  const potLabel   = document.getElementById('draw-spotlight-pot');
+  const ballEl     = document.getElementById('draw-spotlight-ball');
+  const ballText   = document.getElementById('draw-ball-text');
+  const resultEl   = document.getElementById('draw-spotlight-result');
+
+  if (!spotlight) { onDone && onDone(); return; }
+
+  // Set pot label
+  if (potLabel) {
+    potLabel.textContent = step.type === 'host_placed'
+      ? 'Host Nation Placement'
+      : `Pot ${step.pot}`;
+  }
+
+  // Reset ball
+  if (ballEl) ballEl.classList.remove('draw-ball--revealed');
+  if (ballText) ballText.textContent = '';
+  if (resultEl) resultEl.textContent = '';
+
+  spotlight.style.display = '';
+  spotlight.classList.remove('draw-spotlight--done');
+  spotlight.classList.add('draw-spotlight--active');
+
+  // Phase 1: rolling ball animation (500ms)
+  if (ballEl) ballEl.classList.add('draw-ball--rolling');
+
+  const ROLL_MS    = 600;
+  const REVEAL_MS  = 900;
+  const DONE_MS    = 1400;
+
+  setTimeout(() => {
+    // Phase 2: reveal team name
+    if (ballEl) { ballEl.classList.remove('draw-ball--rolling'); ballEl.classList.add('draw-ball--revealed'); }
+    if (ballEl) ballEl.style.setProperty('--ball-colour', step.badge_colour || '#888');
+    if (ballText) ballText.textContent = step.team_name;
+  }, ROLL_MS);
+
+  setTimeout(() => {
+    // Phase 3: show group placement
+    if (resultEl) resultEl.textContent = `→ ${step.group}`;
+    spotlight.classList.add('draw-spotlight--done');
+  }, REVEAL_MS);
+
+  setTimeout(() => {
+    onDone && onDone();
+  }, DONE_MS);
+}
+
+function _dimPotTeam(teamId) {
+  const el = document.getElementById(`draw-pot-team-${teamId}`);
+  if (el) el.classList.add('draw-pot-team--drawn');
+}
+
+function _updateDrawProgress(done, total) {
+  const progressText = document.getElementById('draw-progress-text');
+  const progressBar  = document.getElementById('draw-progress-bar');
+  if (progressText) progressText.textContent = `${done} / ${total} drawn`;
+  if (progressBar) progressBar.style.width = `${(done / total) * 100}%`;
+}
+
+function skipToEndDraw() {
+  _clearDrawTimer();
+  const steps = DrawCeremony.steps;
+  DrawCeremony.stepIndex = steps.length;
+
+  const placed = {};
+  steps.forEach(s => { placed[s.team_id] = s.group; });
+  _renderGroups(DrawCeremony.data, placed);
+
+  // Dim all pot teams
+  steps.forEach(s => _dimPotTeam(s.team_id));
+  _updateDrawProgress(steps.length, steps.length);
+
+  // Hide spotlight, show complete
+  const spotlight = document.getElementById('draw-spotlight');
+  if (spotlight) spotlight.style.display = 'none';
+
+  _showDrawComplete();
+}
+
+function _showDrawComplete() {
+  const controls  = document.getElementById('draw-controls');
+  const complete  = document.getElementById('draw-complete');
+  const completeSub = document.getElementById('draw-complete-sub');
+  const nextBtn   = document.getElementById('draw-next-btn');
+  const skipBtn   = document.getElementById('draw-skip-btn');
+
+  if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Draw Complete'; }
+  if (skipBtn) skipBtn.style.display = 'none';
+
+  if (complete) {
+    complete.style.display = '';
+    if (completeSub) {
+      const draw  = DrawCeremony.data;
+      const groups = draw.group_names || [];
+      completeSub.textContent = `${draw.competition_name} — ${groups.length} group${groups.length !== 1 ? 's' : ''} confirmed`;
+    }
+  }
+}
+
 function _renderRecordsSection(elId, records) {
   const el = document.getElementById(elId);
   if (!el) return;
@@ -8965,6 +9627,23 @@ async function playWorldFixture(fixtureId) {
   }
 }
 
+let _simWarnResolve = null;
+function _showSimWarnModal(bodyHtml) {
+  return new Promise(resolve => {
+    _simWarnResolve = resolve;
+    document.getElementById('world-sim-warn-body').innerHTML = bodyHtml;
+    document.getElementById('world-sim-warn-modal').classList.remove('hidden');
+  });
+}
+function _simWarnProceed() {
+  document.getElementById('world-sim-warn-modal').classList.add('hidden');
+  if (_simWarnResolve) { _simWarnResolve(true); _simWarnResolve = null; }
+}
+function _simWarnCancel() {
+  document.getElementById('world-sim-warn-modal').classList.add('hidden');
+  if (_simWarnResolve) { _simWarnResolve(false); _simWarnResolve = null; }
+}
+
 async function simulateWorld(target) {
   const id = WorldUI.activeWorldId;
   if (!id) return;
@@ -8979,29 +9658,41 @@ async function simulateWorld(target) {
   }
 
   const body = { target };
+  let pendingTargetDate = '';
   if (target === 'date') {
     const d = document.getElementById('wd-sim-date').value;
     if (!d) { alert('Select a date first.'); return; }
     body.target_date = d;
+    pendingTargetDate = d;
   }
 
-  // 500-match guard: count scheduled fixtures
+  // Warn before large simulations
   const calData = await api('GET', `/api/worlds/${id}/calendar?status=scheduled&limit=1`);
   const total = (calData || {}).total || 0;
-  if (total > 500) {
-    if (!confirm(`This could simulate up to ${total} matches. Continue?`)) return;
+  if (total > 200) {
+    const timeEst = total < 500 ? 'a few seconds' : total < 1500 ? 'up to a minute' : 'several minutes';
+    const ok = await _showSimWarnModal(
+      `<strong>${total.toLocaleString()} fixtures</strong> are scheduled to be simulated. This could take ${timeEst}.<br><br>` +
+      `You can stop the vidiprinter at any time using <strong>Stop → Report</strong> and view results so far.`
+    );
+    if (!ok) return;
   }
 
   // Disable sim buttons
   document.querySelectorAll('#screen-world-detail .btn-sim').forEach(b => b.disabled = true);
+  _vdpShowPending(target, pendingTargetDate);
 
   const res = await api('POST', `/api/worlds/${id}/simulate`, body);
 
   document.querySelectorAll('#screen-world-detail .btn-sim').forEach(b => b.disabled = false);
 
-  if (!res) return;
+  if (!res) {
+    _vdpResetInline();
+    return;
+  }
 
   if (res.matches_simulated === 0) {
+    _vdpResetInline();
     alert(res.message || 'Nothing to simulate. You may need to generate more fixtures.');
     return;
   }
@@ -9038,6 +9729,10 @@ const _VDP = {
   _onDone:   null,
   _speed:    320,   // ms between results
   _paused:   false,
+  _mount:    'inline',
+  _report:   null,
+  _status:   'idle',
+  _pending:  null,
 };
 
 const _VDP_FORMAT_BADGE = { Test: 'T', ODI: 'O', T20: '20' };
@@ -9046,42 +9741,56 @@ function _vidiprinterShow(report, onDone) {
   if (!report) { onDone?.(); return; }
 
   const results = report.results || [];
-  if (!results.length) { onDone?.(); return; }
-
   _VDP._results = results;
   _VDP._idx     = 0;
   _VDP._onDone  = onDone;
   _VDP._paused  = false;
+  _VDP._report  = report;
+  _VDP._status  = results.length ? 'playing' : 'idle';
+  _VDP._pending = null;
 
-  const overlay = _vdpGetOverlay();
-  overlay.classList.remove('hidden');
-
-  const from = report.date_from || '';
-  const to   = report.date_to   || '';
-  const n    = results.length;
-
-  overlay.innerHTML = `
-    <div class="vdp-header">
-      <div class="vdp-title">WORLD SIMULATION</div>
-      <div class="vdp-daterange">${escHtml(from)}${to && to !== from ? ' → ' + escHtml(to) : ''} &nbsp;·&nbsp; ${n} match${n !== 1 ? 'es' : ''}</div>
-      <div class="vdp-header-controls">
-        <button class="vdp-btn" id="vdp-btn-pause" onclick="_vdpTogglePause()">⏸</button>
-        <select class="vdp-speed-sel" id="vdp-speed-sel" onchange="_vdpSetSpeed(this.value)">
-          <option value="600">Slow</option>
-          <option value="320" selected>Normal</option>
-          <option value="120">Fast</option>
-          <option value="0">Instant</option>
-        </select>
-        <button class="vdp-btn vdp-btn-skip" onclick="_vdpSkipAll()">Skip All →</button>
-      </div>
-    </div>
-    <div class="vdp-feed" id="vdp-feed"></div>
-    <div class="vdp-footer">
-      <div class="vdp-progress-text" id="vdp-progress-text">0 / ${n}</div>
-      <div class="vdp-progress-bar"><div class="vdp-progress-fill" id="vdp-progress-fill" style="width:0%"></div></div>
-    </div>`;
-
+  _vdpSetMount('inline');
+  _vdpRenderShell();
+  if (!_VDP._results.length) {
+    _vdpFinish();
+    return;
+  }
   _vdpTick();
+}
+
+function _vdpResetInline() {
+  clearTimeout(_VDP._timer);
+  _VDP._results = [];
+  _VDP._idx = 0;
+  _VDP._onDone = null;
+  _VDP._paused = false;
+  _VDP._mount = 'inline';
+  _VDP._report = null;
+  _VDP._status = 'idle';
+  _VDP._pending = null;
+  const overlay = document.getElementById('sim-vidiprinter');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    overlay.innerHTML = '';
+  }
+  _vdpRenderShell();
+}
+
+function _vdpShowPending(target, targetDate) {
+  clearTimeout(_VDP._timer);
+  _VDP._results = [];
+  _VDP._idx = 0;
+  _VDP._onDone = null;
+  _VDP._paused = false;
+  _VDP._report = null;
+  _VDP._status = 'pending';
+  _VDP._pending = {
+    target,
+    targetDate: targetDate || '',
+    currentDate: WorldUI._worldData?.world?.current_date || '',
+  };
+  _vdpSetMount('inline');
+  _vdpRenderShell();
 }
 
 function _vdpGetOverlay() {
@@ -9093,6 +9802,112 @@ function _vdpGetOverlay() {
     document.body.appendChild(el);
   }
   return el;
+}
+
+function _vdpGetInlineMount() {
+  return document.getElementById('wd-inline-vidiprinter');
+}
+
+function _vdpGetMount() {
+  return _VDP._mount === 'fullscreen' ? _vdpGetOverlay() : _vdpGetInlineMount();
+}
+
+function _vdpSetMount(mode) {
+  _VDP._mount = mode === 'fullscreen' ? 'fullscreen' : 'inline';
+  const overlay = _vdpGetOverlay();
+  const inlineEl = _vdpGetInlineMount();
+  if (_VDP._mount === 'fullscreen') {
+    overlay.classList.remove('hidden');
+    // Clear inline so getElementById('vdp-feed') resolves to the overlay's feed, not the stale inline one
+    if (inlineEl) inlineEl.innerHTML = '';
+  } else {
+    overlay.classList.add('hidden');
+    overlay.innerHTML = '';
+  }
+}
+
+function _vdpToggleFullscreen() {
+  const next = _VDP._mount === 'fullscreen' ? 'inline' : 'fullscreen';
+  _vdpSetMount(next);
+  _vdpRenderShell();
+  if (_VDP._status === 'playing') _vdpRenderFeedRows();
+}
+
+function _vdpHeaderRangeText() {
+  if (_VDP._report) {
+    const from = _VDP._report.date_from || '';
+    const to = _VDP._report.date_to || '';
+    const n = _VDP._results.length;
+    return `${escHtml(from)}${to && to !== from ? ' → ' + escHtml(to) : ''} &nbsp;·&nbsp; ${n} match${n !== 1 ? 'es' : ''}`;
+  }
+  if (_VDP._pending) {
+    const labels = {
+      next_match: 'Preparing next match simulation',
+      end_of_series: 'Preparing series block',
+      next_my_match: 'Preparing your next fixture',
+      date: _VDP._pending.targetDate ? `Preparing run to ${escHtml(_fmtDate(_VDP._pending.targetDate))}` : 'Preparing dated run',
+    };
+    const currentDate = _VDP._pending.currentDate ? `From ${escHtml(_fmtDate(_VDP._pending.currentDate))}` : 'Building fixtures';
+    return `${labels[_VDP._pending.target] || 'Preparing simulation'} &nbsp;·&nbsp; ${currentDate}`;
+  }
+  return 'Results will appear here while the world catches up.';
+}
+
+function _vdpPlaceholderHtml() {
+  if (_VDP._status === 'pending') {
+    return `
+      <div class="vdp-placeholder">
+        <div class="vdp-pulse"><span class="vdp-pulse-dot"></span>Simulation in progress</div>
+        <div class="vdp-placeholder-title">World simulation is starting</div>
+        <div class="vdp-placeholder-copy">Fixtures are being gathered and resolved. This can take a moment in larger worlds, but the vidiprinter is armed and will begin updating here as soon as results arrive.</div>
+      </div>`;
+  }
+  return `
+    <div class="vdp-placeholder">
+      <div class="vdp-placeholder-title">Simulation Vidiprinter</div>
+      <div class="vdp-placeholder-copy">Launch a world simulation and the incoming results feed will appear here. Use the expand control when you want the full broadcast-board view.</div>
+    </div>`;
+}
+
+function _vdpRenderShell() {
+  const mount = _vdpGetMount();
+  if (!mount) return;
+
+  const isActive = _VDP._status === 'playing';
+  const isPending = _VDP._status === 'pending';
+  const total = _VDP._results.length;
+  const progressText = isActive ? `${_VDP._idx} / ${total}` : (isPending ? 'arming…' : 'stand by');
+  const progressPct = isActive && total ? Math.round((_VDP._idx / total) * 100) : 0;
+  const fullscreenLabel = _VDP._mount === 'fullscreen' ? 'Dock' : 'Full Screen';
+
+  mount.innerHTML = `
+    <div class="vdp-header">
+      <div class="vdp-title">WORLD SIMULATION</div>
+      <div class="vdp-daterange">${_vdpHeaderRangeText()}</div>
+      <div class="vdp-header-controls">
+        <button class="vdp-btn" type="button" onclick="_vdpToggleFullscreen()">${fullscreenLabel}</button>
+        <button class="vdp-btn" id="vdp-btn-pause" type="button" onclick="_vdpTogglePause()" ${isActive ? '' : 'disabled'}>${_VDP._paused ? '▶' : '⏸'}</button>
+        <select class="vdp-speed-sel" id="vdp-speed-sel" onchange="_vdpSetSpeed(this.value)" ${isActive ? '' : 'disabled'}>
+          <option value="600" ${_VDP._speed === 600 ? 'selected' : ''}>Slow</option>
+          <option value="320" ${_VDP._speed === 320 ? 'selected' : ''}>Normal</option>
+          <option value="120" ${_VDP._speed === 120 ? 'selected' : ''}>Fast</option>
+          <option value="0" ${_VDP._speed === 0 ? 'selected' : ''}>Instant</option>
+        </select>
+        <button class="vdp-btn vdp-btn-skip" type="button" onclick="_vdpSkipAll()" ${isActive ? '' : 'disabled'}>Stop → Report</button>
+      </div>
+    </div>
+    ${isActive ? '<div class="vdp-feed" id="vdp-feed"></div>' : _vdpPlaceholderHtml()}
+    <div class="vdp-footer">
+      <div class="vdp-progress-text" id="vdp-progress-text">${progressText}</div>
+      <div class="vdp-progress-bar"><div class="vdp-progress-fill" id="vdp-progress-fill" style="width:${progressPct}%"></div></div>
+    </div>`;
+}
+
+function _vdpRenderFeedRows() {
+  const feed = document.getElementById('vdp-feed');
+  if (!feed) return;
+  feed.innerHTML = '';
+  for (let i = 0; i < _VDP._idx; i++) _vdpRenderResult(_VDP._results[i]);
 }
 
 function _vdpTick() {
@@ -9169,6 +9984,7 @@ function _vdpRenderResult(r) {
 }
 
 function _vdpTogglePause() {
+  if (_VDP._status !== 'playing') return;
   _VDP._paused = !_VDP._paused;
   const btn = document.getElementById('vdp-btn-pause');
   if (btn) btn.textContent = _VDP._paused ? '▶' : '⏸';
@@ -9176,10 +9992,12 @@ function _vdpTogglePause() {
 }
 
 function _vdpSetSpeed(val) {
-  _VDP._speed = parseInt(val, 10) || 320;
+  const next = parseInt(val, 10);
+  _VDP._speed = Number.isNaN(next) ? 320 : next;
 }
 
 function _vdpSkipAll() {
+  if (_VDP._status !== 'playing') return;
   clearTimeout(_VDP._timer);
   const feed = document.getElementById('vdp-feed');
   // Render all remaining at once
@@ -9197,8 +10015,10 @@ function _vdpSkipAll() {
 
 function _vdpFinish() {
   clearTimeout(_VDP._timer);
-  const overlay = document.getElementById('sim-vidiprinter');
-  if (overlay) overlay.classList.add('hidden');
+  _VDP._status = 'idle';
+  _VDP._pending = null;
+  _vdpSetMount('inline');
+  _vdpRenderShell();
   _VDP._onDone?.();
 }
 
