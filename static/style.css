@@ -3140,8 +3140,16 @@ body.broadcast-mode .btn-howzat {
   font-size: var(--fs-xs);
 }
 .sim-date-input {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface2); border: 1px solid rgba(127,179,211,0.45); border-radius: 6px;
   color: var(--text); padding: 5px 8px; font-size: var(--fs-xs);
+  color-scheme: dark;
+}
+.sim-date-input:focus {
+  outline: none; border-color: var(--accent);
+}
+body.light-mode .sim-date-input {
+  background: #fff; border-color: rgba(0,0,0,0.25);
+  color-scheme: light;
 }
 
 /* Calendar fixture rows */
