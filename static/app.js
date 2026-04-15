@@ -9666,45 +9666,50 @@ async function simulateWorld(target) {
     pendingTargetDate = d;
   }
 
-  // Warn before large simulations
-  const calData = await api('GET', `/api/worlds/${id}/calendar?status=scheduled&limit=1`);
-  const total = (calData || {}).total || 0;
-  if (total > 200) {
-    const timeEst = total < 500 ? 'a few seconds' : total < 1500 ? 'up to a minute' : 'several minutes';
-    const ok = await _showSimWarnModal(
-      `<strong>${total.toLocaleString()} fixtures</strong> are scheduled to be simulated. This could take ${timeEst}.<br><br>` +
-      `You can stop the vidiprinter at any time using <strong>Stop → Report</strong> and view results so far.`
-    );
-    if (!ok) return;
-  }
-
-  // Disable sim buttons
-  document.querySelectorAll('#screen-world-detail .btn-sim').forEach(b => b.disabled = true);
+  // Disable buttons and show pending state immediately so the user sees activity right away
+  const simBtns = document.querySelectorAll('#screen-world-detail .btn-sim');
+  simBtns.forEach(b => b.disabled = true);
+  const simControls = document.querySelector('#screen-world-detail .world-sim-controls');
+  if (simControls) simControls.classList.add('world-sim-controls--running');
   _vdpShowPending(target, pendingTargetDate);
 
-  const res = await api('POST', `/api/worlds/${id}/simulate`, body);
+  try {
+    // Warn before large simulations (only relevant for open-ended targets)
+    if (target === 'date' || target === 'next_my_match') {
+      const calData = await api('GET', `/api/worlds/${id}/calendar?status=scheduled&limit=1`);
+      const total = (calData || {}).total || 0;
+      if (total > 200) {
+        const timeEst = total < 500 ? 'a few seconds' : total < 1500 ? 'up to a minute' : 'several minutes';
+        const ok = await _showSimWarnModal(
+          `<strong>${total.toLocaleString()} fixtures</strong> are scheduled to be simulated. This could take ${timeEst}.<br><br>` +
+          `You can stop the vidiprinter at any time using <strong>Stop → Report</strong> and view results so far.`
+        );
+        if (!ok) { _vdpResetInline(); return; }
+      }
+    }
 
-  document.querySelectorAll('#screen-world-detail .btn-sim').forEach(b => b.disabled = false);
+    const res = await api('POST', `/api/worlds/${id}/simulate`, body);
 
-  if (!res) {
-    _vdpResetInline();
-    return;
+    if (!res) { _vdpResetInline(); return; }
+
+    if (res.matches_simulated === 0) {
+      _vdpResetInline();
+      alert(res.message || 'Nothing to simulate. You may need to generate more fixtures.');
+      return;
+    }
+
+    // Stash paused fixture onto the report so _renderSimReport can use it
+    if (res.sim_report) res.sim_report._pausedFixture = res.paused_at_fixture || null;
+
+    // Show vidiprinter, then transition to full report when done
+    _vidiprinterShow(res.sim_report, () => {
+      _renderSimReport(res.sim_report);
+      showScreen('world-sim-report');
+    });
+  } finally {
+    simBtns.forEach(b => b.disabled = false);
+    if (simControls) simControls.classList.remove('world-sim-controls--running');
   }
-
-  if (res.matches_simulated === 0) {
-    _vdpResetInline();
-    alert(res.message || 'Nothing to simulate. You may need to generate more fixtures.');
-    return;
-  }
-
-  // Stash paused fixture onto the report so _renderSimReport can use it
-  if (res.sim_report) res.sim_report._pausedFixture = res.paused_at_fixture || null;
-
-  // Show vidiprinter, then transition to full report when done
-  _vidiprinterShow(res.sim_report, () => {
-    _renderSimReport(res.sim_report);
-    showScreen('world-sim-report');
-  });
 }
 
 async function extendWorldCalendar() {

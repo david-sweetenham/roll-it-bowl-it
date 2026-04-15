@@ -3115,6 +3115,18 @@ body.broadcast-mode .btn-howzat {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 16px; margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+.world-sim-controls--running {
+  border-color: var(--accent);
+  animation: sim-controls-pulse 1.4s ease-in-out infinite;
+}
+.world-sim-controls--running .sim-btn-label::before {
+  content: '⏳ ';
+}
+@keyframes sim-controls-pulse {
+  0%, 100% { border-color: var(--accent); }
+  50%       { border-color: transparent; }
 }
 .world-extend-controls {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
