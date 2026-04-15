@@ -11,6 +11,7 @@ generate_fixture_calendar() in game_engine.py remains available as the
 
 from datetime import date, timedelta
 from itertools import combinations
+import competition_rules
 
 # ── Home Season Windows ────────────────────────────────────────────────────────
 
@@ -1261,11 +1262,36 @@ def generate_realistic_calendar(
     all_fixtures = []
 
     # ── Step 1: Place ICC events ──────────────────────────────────────────────
-    icc_fxs = _place_icc_events(
-        team_ids, id_to_name, venue_lookup, sched,
-        start_date, end_date, density,
+    icc_fxs = competition_rules.generate_icc_competitions(
+        team_ids, team_names, venue_ids, start_date, end_date
     )
     all_fixtures.extend(icc_fxs)
+    icc_windows = {}
+    for fx in icc_fxs:
+        sk = fx.get('series_key')
+        if not sk:
+            continue
+        slot = icc_windows.setdefault(sk, {
+            'min': fx.get('scheduled_date'),
+            'max': fx.get('scheduled_date'),
+            'teams': set(),
+        })
+        fx_date = fx.get('scheduled_date')
+        if fx_date and (not slot['min'] or fx_date < slot['min']):
+            slot['min'] = fx_date
+        if fx_date and (not slot['max'] or fx_date > slot['max']):
+            slot['max'] = fx_date
+        if fx.get('team1_id'):
+            slot['teams'].add(fx['team1_id'])
+        if fx.get('team2_id'):
+            slot['teams'].add(fx['team2_id'])
+    for slot in icc_windows.values():
+        if not slot.get('min') or not slot.get('max'):
+            continue
+        start_busy = date.fromisoformat(slot['min'])
+        end_busy = date.fromisoformat(slot['max'])
+        for tid in slot['teams']:
+            sched.book(tid, start_busy, end_busy)
 
     # ── Step 2: Ashes (if both England and Australia present) ─────────────────
     eng_id = name_to_id.get('England')
@@ -1313,7 +1339,7 @@ def generate_realistic_calendar(
             ]
             if len(league_team_list) < 2:
                 continue
-            dom_fxs = generate_domestic_fixtures(
+            dom_fxs = competition_rules.generate_domestic_competition(
                 comp_key, league_team_list, start_year, end_year
             )
             all_fixtures.extend(dom_fxs)

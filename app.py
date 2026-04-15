@@ -3,9 +3,11 @@ from flask_cors import CORS
 import json
 import os
 import random
+from werkzeug.exceptions import HTTPException
 import database
 import game_engine
 import cricket_calendar
+import competition_rules
 import ai_captain
 import config
 
@@ -51,6 +53,26 @@ def _start_innings(db, match_id, innings_number, batting_team_id, bowling_team_i
             batting_players[0]['id'], batting_players[1]['id']
         )
     return innings_id
+
+
+def _apply_innings_cutoff_snapshots(existing_innings, innings_update):
+    existing = existing_innings or {}
+    updated = dict(innings_update or {})
+    overs = updated.get('overs_completed')
+    if overs is None:
+        overs = existing.get('overs_completed')
+    if overs is None:
+        return updated
+
+    current_runs = updated.get('total_runs', existing.get('total_runs'))
+    current_wickets = updated.get('total_wickets', existing.get('total_wickets'))
+    if overs >= 100 and existing.get('runs_at_100_overs') is None and updated.get('runs_at_100_overs') is None:
+        updated['runs_at_100_overs'] = current_runs
+        updated['wickets_at_100_overs'] = current_wickets
+    if overs >= 110 and existing.get('runs_at_110_overs') is None and updated.get('runs_at_110_overs') is None:
+        updated['runs_at_110_overs'] = current_runs
+        updated['wickets_at_110_overs'] = current_wickets
+    return updated
 
 
 def _determine_next_innings(match, all_innings, fmt):
@@ -237,6 +259,21 @@ app = Flask(__name__,
             template_folder=config.TEMPLATE_DIR,
             static_folder=config.STATIC_DIR)
 CORS(app)
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': exc.description or exc.name}), exc.code
+    return exc
+
+
+@app.errorhandler(Exception)
+def handle_unhandled_exception(exc):
+    if request.path.startswith('/api/'):
+        app.logger.exception('Unhandled API exception on %s', request.path)
+        return jsonify({'error': str(exc) or 'Internal server error'}), 500
+    raise exc
 
 
 @app.route('/')
@@ -934,6 +971,7 @@ def bowl_ball_route(id):
             inn_update['extras_byes']    = innings['extras_byes'] + extras_scored
         elif ball_result['extras_type'] == 'leg_bye':
             inn_update['extras_legbyes'] = innings['extras_legbyes'] + extras_scored
+        inn_update = _apply_innings_cutoff_snapshots(innings, inn_update)
 
         # ── Update current partnership ────────────────────────────────────────
         current_partnership = state['partnerships'][-1] if state['partnerships'] else None
@@ -1355,16 +1393,21 @@ def fast_sim(id):
                 )
 
             overs_dec = result['overs_completed']
-            database.update_innings(db, innings_id, {
+            innings_update = {
                 'total_runs':     result['total_runs'],
                 'total_wickets':  result['total_wickets'],
                 'overs_completed': overs_dec,
+                'runs_at_100_overs': result.get('runs_at_100_overs'),
+                'wickets_at_100_overs': result.get('wickets_at_100_overs'),
+                'runs_at_110_overs': result.get('runs_at_110_overs'),
+                'wickets_at_110_overs': result.get('wickets_at_110_overs'),
                 'extras_wides':   result['extras']['wides'],
                 'extras_noballs': result['extras']['no_balls'],
                 'extras_byes':    result['extras']['byes'],
                 'extras_legbyes': result['extras']['leg_byes'],
                 'status':         'complete',
-            })
+            }
+            database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(inn, innings_update))
 
             # Next innings or complete
             all_innings_fresh = database.get_innings(db, id)
@@ -1503,10 +1546,14 @@ def _persist_sim_result(db, match_id, match_state, sim_result):
         'total_runs':      updated_state['total_runs'],
         'total_wickets':   updated_state['total_wickets'],
         'overs_completed': new_over + new_ball / 10,
+        'runs_at_100_overs': updated_state.get('runs_at_100_overs'),
+        'wickets_at_100_overs': updated_state.get('wickets_at_100_overs'),
+        'runs_at_110_overs': updated_state.get('runs_at_110_overs'),
+        'wickets_at_110_overs': updated_state.get('wickets_at_110_overs'),
     }
     if sim_result['innings_complete']:
         inn_upd['status'] = 'complete'
-    database.update_innings(db, innings_id, inn_upd)
+    database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings, inn_upd))
 
     # Handle innings → match completion
     match_complete = False
@@ -3255,7 +3302,8 @@ def _persist_quick_sim_innings(db, match_id, innings_number, batting_team_id, bo
     remaining_extras -= wides
     no_balls = remaining_extras
 
-    database.update_innings(db, innings_id, {
+    innings_row = database.get_innings_by_id(db, innings_id)
+    database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings_row, {
         'total_runs': total_runs,
         'total_wickets': total_wickets,
         'overs_completed': overs_completed,
@@ -3264,7 +3312,7 @@ def _persist_quick_sim_innings(db, match_id, innings_number, batting_team_id, bo
         'extras_wides': wides,
         'extras_noballs': no_balls,
         'status': 'complete',
-    })
+    }))
 
     for idx, batter in enumerate(active_batters):
         runs = run_alloc[idx]
@@ -3547,6 +3595,7 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
 
     # Advance world current date
     database.update_world(db, world_id, {'current_date': new_current_date})
+    _advance_world_competitions(db, world_id)
 
 
 def _user_team_ids(settings):
@@ -3557,6 +3606,633 @@ def _user_team_ids(settings):
     if settings.get('my_domestic_team_id'):
         ids.add(int(settings['my_domestic_team_id']))
     return ids
+
+
+def _fixture_result_string(fixture):
+    rt = fixture.get('result_type')
+    winner = fixture.get('winning_team_name', '')
+    if fixture.get('status') != 'complete' or not rt:
+        return ''
+    if rt == 'runs':
+        return f"{winner} won by {fixture.get('margin_runs') or 0} runs"
+    if rt == 'wickets':
+        return f"{winner} won by {fixture.get('margin_wickets') or 0} wickets"
+    if rt == 'draw':
+        return 'Match drawn'
+    if rt == 'tie':
+        return 'Match tied'
+    if rt == 'no_result':
+        return 'No result'
+    return str(rt)
+
+
+def _world_competition_rows(db, world_id, competition_key):
+    rows = db.execute(
+        "SELECT f.id, f.world_id, f.scheduled_date, f.status, f.fixture_type, f.format, "
+        " f.is_user_match, f.match_id, f.series_name, f.match_number_in_series, f.series_length, "
+        " f.tour_template, f.season_year, f.competition_key, f.competition_name, "
+        " f.competition_stage, f.competition_group, f.competition_round, f.competition_order, "
+        " f.is_icc_event, f.icc_event_name, f.team1_id, f.team2_id, "
+        " t1.name as team1_name, t1.badge_colour as team1_colour, "
+        " t2.name as team2_name, t2.badge_colour as team2_colour, "
+        " v.name as venue_name, "
+        " m.result_type, m.margin_runs, m.margin_wickets, m.winning_team_id, "
+        " wt.name as winning_team_name "
+        "FROM fixtures f "
+        "JOIN teams t1 ON f.team1_id = t1.id "
+        "JOIN teams t2 ON f.team2_id = t2.id "
+        "LEFT JOIN venues v ON f.venue_id = v.id "
+        "LEFT JOIN matches m ON f.match_id = m.id "
+        "LEFT JOIN teams wt ON m.winning_team_id = wt.id "
+        "WHERE f.world_id = ? AND f.competition_key = ? "
+        "ORDER BY COALESCE(f.competition_order, 999999), f.scheduled_date, f.id",
+        (world_id, competition_key)
+    ).fetchall()
+    fixtures = [dict(r) for r in rows]
+    for fixture in fixtures:
+        fixture['result_string'] = _fixture_result_string(fixture)
+    return fixtures
+
+
+def _competition_match_innings(db, match_ids):
+    if not match_ids:
+        return {}
+    placeholders = ','.join('?' for _ in match_ids)
+    rows = db.execute(
+        "SELECT match_id, innings_number, batting_team_id, total_runs, total_wickets, overs_completed "
+        f"FROM innings WHERE match_id IN ({placeholders}) ORDER BY match_id, innings_number",
+        list(match_ids)
+    ).fetchall()
+    out = {}
+    for row in rows:
+        r = dict(row)
+        out.setdefault(r['match_id'], []).append(r)
+    return out
+
+
+def _limited_team_stats(innings_rows):
+    stats = {}
+    for inn in innings_rows[:2]:
+        tid = inn.get('batting_team_id')
+        if tid:
+            stats[tid] = {
+                'runs': int(inn.get('total_runs') or 0),
+                'overs': _cricket_overs_to_decimal(inn.get('overs_completed') or 0, fallback=0.0),
+                'wickets': int(inn.get('total_wickets') or 0),
+            }
+    return stats
+
+
+def _county_bonus_points(innings_rows):
+    by_team = {}
+    seen = set()
+    for inn in innings_rows:
+        tid = inn.get('batting_team_id')
+        if tid and tid not in seen:
+            seen.add(tid)
+            snapshot_runs = inn.get('runs_at_110_overs')
+            snapshot_wickets = inn.get('wickets_at_110_overs')
+            runs = int(snapshot_runs if snapshot_runs is not None else (inn.get('total_runs') or 0))
+            wickets_lost = int(snapshot_wickets if snapshot_wickets is not None else (inn.get('total_wickets') or 0))
+            bat = 0
+            for threshold in (250, 300, 350, 400, 450):
+                if runs >= threshold:
+                    bat += 1
+            bowl = 0
+            for threshold in (3, 6, 9):
+                if wickets_lost >= threshold:
+                    bowl += 1
+            by_team[tid] = {'batting_bonus': bat, 'bowling_bonus': bowl}
+        if len(by_team) >= 2:
+            break
+    return by_team
+
+
+def _shield_bonus_points(innings_rows):
+    by_team = {}
+    seen = set()
+    for inn in innings_rows:
+        tid = inn.get('batting_team_id')
+        if tid and tid not in seen:
+            seen.add(tid)
+            snapshot_runs = inn.get('runs_at_100_overs')
+            snapshot_wickets = inn.get('wickets_at_100_overs')
+            overs = _cricket_overs_to_decimal(inn.get('overs_completed') or 0, fallback=0.0)
+            if snapshot_runs is not None and snapshot_wickets is not None:
+                runs = int(snapshot_runs)
+                wickets_lost = int(snapshot_wickets)
+            else:
+                runs = int(inn.get('total_runs') or 0)
+                wickets_lost = int(inn.get('total_wickets') or 0)
+                if not (overs and overs <= 100):
+                    by_team[tid] = {'batting_bonus': 0.0, 'bowling_bonus': 0.0}
+                    if len(by_team) >= 2:
+                        break
+                    continue
+            bat = round(max(0.0, runs - 200) * 0.01, 2)
+            bowl = round(min(10, wickets_lost) * 0.1, 2)
+            by_team[tid] = {'batting_bonus': bat, 'bowling_bonus': bowl}
+        if len(by_team) >= 2:
+            break
+    return by_team
+
+
+def _marsh_victory_bonus(fixture, innings_rows):
+    if not innings_rows or fixture.get('result_type') not in ('runs', 'wickets'):
+        return {}
+    limited = _limited_team_stats(innings_rows)
+    winner_id = fixture.get('winning_team_id')
+    if not winner_id or winner_id not in limited:
+        return {}
+    loser_id = fixture.get('team1_id') if winner_id == fixture.get('team2_id') else fixture.get('team2_id')
+    if loser_id not in limited:
+        return {}
+
+    winner = limited[winner_id]
+    loser = limited[loser_id]
+    winner_batted_second = innings_rows[1].get('batting_team_id') == winner_id if len(innings_rows) > 1 else False
+
+    # Marsh Cup bonus point: either win while batting first with run rate >= 1.25 x opponent,
+    # or chase the target inside 40 overs.
+    if winner_batted_second:
+        if (winner.get('overs') or 0) <= 40:
+            return {winner_id: {'batting_bonus': 1}}
+        return {}
+
+    loser_overs = loser.get('overs') or 0
+    winner_overs = winner.get('overs') or 0
+    if winner_overs > 0 and loser_overs > 0:
+        winner_rr = winner['runs'] / winner_overs
+        loser_rr = loser['runs'] / loser_overs
+        if winner_rr >= loser_rr * 1.25:
+            return {winner_id: {'batting_bonus': 1}}
+    return {}
+
+
+def _sort_competition_rows(rows, tie_breakers):
+    def key(row):
+        vals = []
+        for breaker in tie_breakers or []:
+            if breaker in ('points', 'wins', 'nrr', 'pct'):
+                vals.append(-(row.get(breaker) or 0))
+            else:
+                vals.append(row.get(breaker) or '')
+        vals.append(row.get('team_name') or '')
+        return tuple(vals)
+    ordered = sorted(rows, key=key)
+    for idx, row in enumerate(ordered, start=1):
+        row['position'] = idx
+    return ordered
+
+
+def _build_competition_standings(rule, fixtures, innings_map):
+    points_system = (rule or {}).get('points_system', 'limited_nrr')
+    grouping_mode = (rule or {}).get('standings_grouping', 'combined')
+    standings = {}
+
+    def ensure_team(tid, name, colour, group_name=None):
+        if tid not in standings:
+            standings[tid] = {
+                'team_id': tid,
+                'team_name': name or '?',
+                'badge_colour': colour or '#888',
+                'competition_group': group_name,
+                'played': 0,
+                'won': 0,
+                'lost': 0,
+                'drawn': 0,
+                'tied': 0,
+                'no_result': 0,
+                'points': 0,
+                'wins': 0,
+                'runs_scored': 0,
+                'runs_conceded': 0,
+                'overs_faced': 0.0,
+                'overs_bowled': 0.0,
+                'nrr': 0.0,
+                'batting_bonus': 0,
+                'bowling_bonus': 0,
+                'pct': 0.0,
+            }
+        elif group_name and not standings[tid].get('competition_group'):
+            standings[tid]['competition_group'] = group_name
+        return standings[tid]
+
+    for fixture in fixtures:
+        group_name = fixture.get('competition_group')
+        t1 = ensure_team(fixture.get('team1_id'), fixture.get('team1_name'), fixture.get('team1_colour'), group_name)
+        t2 = ensure_team(fixture.get('team2_id'), fixture.get('team2_name'), fixture.get('team2_colour'), group_name)
+        if fixture.get('status') != 'complete':
+            continue
+
+        t1['played'] += 1
+        t2['played'] += 1
+        rt = fixture.get('result_type')
+        winner_id = fixture.get('winning_team_id')
+        if rt in ('runs', 'wickets') and winner_id:
+            if winner_id == fixture.get('team1_id'):
+                t1['won'] += 1
+                t1['wins'] += 1
+                t2['lost'] += 1
+            elif winner_id == fixture.get('team2_id'):
+                t2['won'] += 1
+                t2['wins'] += 1
+                t1['lost'] += 1
+        elif rt == 'draw':
+            t1['drawn'] += 1
+            t2['drawn'] += 1
+        elif rt == 'tie':
+            t1['tied'] += 1
+            t2['tied'] += 1
+        elif rt == 'no_result':
+            t1['no_result'] += 1
+            t2['no_result'] += 1
+
+        innings_rows = innings_map.get(fixture.get('match_id'), [])
+        limited = _limited_team_stats(innings_rows)
+        for team, opp in ((t1, t2), (t2, t1)):
+            tid = team['team_id']
+            oid = opp['team_id']
+            if tid in limited:
+                team['runs_scored'] += limited[tid]['runs']
+                team['overs_faced'] += limited[tid]['overs']
+            if oid in limited:
+                team['runs_conceded'] += limited[oid]['runs']
+                team['overs_bowled'] += limited[oid]['overs']
+
+        if points_system in ('limited_nrr', 'marsh_cup'):
+            if rt in ('runs', 'wickets') and winner_id:
+                if winner_id == fixture.get('team1_id'):
+                    t1['points'] += 2 if points_system == 'limited_nrr' else 4
+                elif winner_id == fixture.get('team2_id'):
+                    t2['points'] += 2 if points_system == 'limited_nrr' else 4
+            elif rt in ('tie', 'no_result'):
+                split = 1 if points_system == 'limited_nrr' else 2
+                t1['points'] += split
+                t2['points'] += split
+            if points_system == 'marsh_cup':
+                for tid, extra in _marsh_victory_bonus(fixture, innings_rows).items():
+                    if tid in standings:
+                        standings[tid]['batting_bonus'] += extra.get('batting_bonus', 0)
+                        standings[tid]['points'] += extra.get('batting_bonus', 0)
+        elif points_system == 'county':
+            if rt in ('runs', 'wickets') and winner_id:
+                if winner_id == fixture.get('team1_id'):
+                    t1['points'] += 16
+                elif winner_id == fixture.get('team2_id'):
+                    t2['points'] += 16
+            elif rt == 'draw':
+                t1['points'] += 8
+                t2['points'] += 8
+            elif rt == 'tie':
+                t1['points'] += 8
+                t2['points'] += 8
+            elif rt == 'no_result':
+                t1['points'] += 8
+                t2['points'] += 8
+            bonus = _county_bonus_points(innings_rows)
+            for tid, vals in bonus.items():
+                if tid in standings:
+                    standings[tid]['batting_bonus'] += vals.get('batting_bonus', 0)
+                    standings[tid]['bowling_bonus'] += vals.get('bowling_bonus', 0)
+                    standings[tid]['points'] += vals.get('batting_bonus', 0) + vals.get('bowling_bonus', 0)
+        elif points_system == 'shield':
+            if rt in ('runs', 'wickets') and winner_id:
+                if winner_id == fixture.get('team1_id'):
+                    t1['points'] += 6
+                elif winner_id == fixture.get('team2_id'):
+                    t2['points'] += 6
+            elif rt == 'draw':
+                t1['points'] += 1
+                t2['points'] += 1
+            elif rt == 'tie':
+                t1['points'] += 3
+                t2['points'] += 3
+            elif rt == 'no_result':
+                t1['points'] += 3
+                t2['points'] += 3
+            bonus = _shield_bonus_points(innings_rows)
+            for tid, vals in bonus.items():
+                if tid in standings:
+                    standings[tid]['batting_bonus'] += vals.get('batting_bonus', 0)
+                    standings[tid]['bowling_bonus'] += vals.get('bowling_bonus', 0)
+                    standings[tid]['points'] += vals.get('batting_bonus', 0) + vals.get('bowling_bonus', 0)
+
+    for row in standings.values():
+        if row['overs_faced'] > 0 and row['overs_bowled'] > 0:
+            row['nrr'] = round(
+                (row['runs_scored'] / row['overs_faced']) - (row['runs_conceded'] / row['overs_bowled']),
+                3
+            )
+        if points_system == 'wtc':
+            possible = max(1, row['played'] * 12)
+            row['pct'] = round((row['points'] / possible) * 100, 2)
+
+    grouped = {}
+    for row in standings.values():
+        group_name = row.get('competition_group') if grouping_mode == 'by_group' else 'Standings'
+        grouped.setdefault(group_name or 'Standings', []).append(row)
+
+    ordered_groups = []
+    for group_name, rows in grouped.items():
+        ordered_groups.append({
+            'group': group_name,
+            'rows': _sort_competition_rows(rows, (rule or {}).get('tie_breakers', [])),
+        })
+    ordered_groups.sort(key=lambda g: g['group'])
+    flat = [row for group in ordered_groups for row in group['rows']]
+    return flat, ordered_groups
+
+
+def _competition_stage_blocks(fixtures):
+    blocks = {}
+    for fixture in fixtures:
+        stage = fixture.get('competition_stage') or fixture.get('fixture_type') or 'league'
+        blocks.setdefault(stage, []).append(fixture)
+    return blocks
+
+
+def _competition_next_date(fixtures, gap_days=2):
+    from datetime import date, timedelta
+    max_date = None
+    for fixture in fixtures:
+        try:
+            dt = date.fromisoformat(fixture.get('scheduled_date'))
+        except Exception:
+            continue
+        max_date = dt if max_date is None or dt > max_date else max_date
+    base = max_date or date.today()
+    return (base + timedelta(days=gap_days)).isoformat()
+
+
+def _competition_add_world_fixture(db, world_id, template, team1_id, team2_id, stage, round_label, order_index, match_date, group_name=None):
+    before = db.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM fixtures").fetchone()['max_id']
+    database.bulk_create_fixtures(db, [{
+        'world_id': world_id,
+        'tournament_id': None,
+        'series_id': None,
+        'scheduled_date': match_date,
+        'venue_id': template.get('venue_id'),
+        'team1_id': team1_id,
+        'team2_id': team2_id,
+        'fixture_type': stage,
+        'format': template.get('format'),
+        'is_user_match': template.get('is_user_match', 0),
+        'series_name': template.get('series_name'),
+        'match_number_in_series': order_index + 1,
+        'series_length': 1,
+        'is_icc_event': template.get('is_icc_event', False),
+        'icc_event_name': template.get('icc_event_name'),
+        'is_home_for_team1': True,
+        'tour_template': template.get('tour_template'),
+        'season_year': template.get('season_year'),
+        'competition_key': template.get('competition_key'),
+        'competition_name': template.get('competition_name'),
+        'competition_stage': stage,
+        'competition_group': group_name,
+        'competition_round': round_label,
+        'competition_order': (template.get('competition_order') or 0) + order_index + 1000,
+    }])
+    row = db.execute("SELECT MAX(id) AS max_id FROM fixtures").fetchone()
+    return row['max_id'] if row and row['max_id'] and row['max_id'] > before else None
+
+
+def _advance_world_competitions(db, world_id):
+    rows = db.execute(
+        "SELECT DISTINCT competition_key, series_name "
+        "FROM fixtures WHERE world_id = ? AND competition_key IS NOT NULL",
+        (world_id,)
+    ).fetchall()
+    advanced = 0
+    for row in rows:
+        competition_key = row['competition_key']
+        season_name = row['series_name']
+        fixtures = [f for f in _world_competition_rows(db, world_id, competition_key) if f.get('series_name') == season_name]
+        if not fixtures:
+            continue
+        rule = competition_rules.get_rule(competition_key)
+        if not rule:
+            continue
+        stages = _competition_stage_blocks(fixtures)
+        league_done = stages.get('league') and all(f.get('status') == 'complete' for f in stages.get('league', []))
+        match_ids = [f.get('match_id') for f in fixtures if f.get('match_id')]
+        innings_map = _competition_match_innings(db, match_ids)
+        _, grouped = _build_competition_standings(rule, stages.get('league', []), innings_map)
+        overall = [r for group in grouped for r in group['rows']]
+        template = fixtures[0]
+        next_date = _competition_next_date(fixtures, gap_days=max(1, rule.get('default_gap_days', 2)))
+
+        def winners(stage_name):
+            out = []
+            for fixture in stages.get(stage_name, []):
+                if fixture.get('status') != 'complete':
+                    return None
+                if fixture.get('winning_team_id'):
+                    out.append(fixture['winning_team_id'])
+            return out
+
+        if competition_key == 't20_blast' and league_done and not stages.get('quarter'):
+            by_group = {g['group']: g['rows'] for g in grouped}
+            north = by_group.get('North', [])
+            south = by_group.get('South', [])
+            pairs = []
+            if len(north) >= 4 and len(south) >= 4:
+                pairs = [
+                    (north[0]['team_id'], south[3]['team_id']),
+                    (south[0]['team_id'], north[3]['team_id']),
+                    (north[1]['team_id'], south[2]['team_id']),
+                    (south[1]['team_id'], north[2]['team_id']),
+                ]
+            for idx, (a, b) in enumerate(pairs):
+                _competition_add_world_fixture(db, world_id, template, a, b, 'quarter', f'Quarter-Final {idx + 1}', idx, next_date)
+                advanced += 1
+            continue
+
+        if competition_key == 'royal_london_cup' and league_done and not stages.get('quarter') and not stages.get('semi'):
+            by_group = {g['group']: g['rows'] for g in grouped}
+            ga = by_group.get('Group A', [])
+            gb = by_group.get('Group B', [])
+            if len(ga) >= 3 and len(gb) >= 3:
+                _competition_add_world_fixture(db, world_id, template, ga[1]['team_id'], gb[2]['team_id'], 'quarter', 'Quarter-Final 1', 0, next_date)
+                _competition_add_world_fixture(db, world_id, template, gb[1]['team_id'], ga[2]['team_id'], 'quarter', 'Quarter-Final 2', 1, next_date)
+                advanced += 2
+            continue
+
+        if competition_key in ('icc_champions_trophy',) and league_done and not stages.get('semi'):
+            by_group = {g['group']: g['rows'] for g in grouped}
+            ga = by_group.get('Group A', [])
+            gb = by_group.get('Group B', [])
+            if len(ga) >= 2 and len(gb) >= 2:
+                _competition_add_world_fixture(db, world_id, template, ga[0]['team_id'], gb[1]['team_id'], 'semi', 'Semi-Final 1', 0, next_date)
+                _competition_add_world_fixture(db, world_id, template, gb[0]['team_id'], ga[1]['team_id'], 'semi', 'Semi-Final 2', 1, next_date)
+                advanced += 2
+            continue
+
+        if competition_key in ('icc_cricket_world_cup',) and league_done and not stages.get('semi') and len(overall) >= 4:
+            _competition_add_world_fixture(db, world_id, template, overall[0]['team_id'], overall[3]['team_id'], 'semi', 'Semi-Final 1', 0, next_date)
+            _competition_add_world_fixture(db, world_id, template, overall[1]['team_id'], overall[2]['team_id'], 'semi', 'Semi-Final 2', 1, next_date)
+            advanced += 2
+            continue
+
+        if competition_key in ('sheffield_shield', 'marsh_cup') and league_done and not stages.get('final') and len(overall) >= 2:
+            _competition_add_world_fixture(db, world_id, template, overall[0]['team_id'], overall[1]['team_id'], 'final', 'Final', 0, next_date)
+            advanced += 1
+            continue
+
+        if competition_key in ('ipl', 'psl') and league_done and not stages.get('qualifier') and not stages.get('eliminator') and len(overall) >= 4:
+            _competition_add_world_fixture(db, world_id, template, overall[0]['team_id'], overall[1]['team_id'], 'qualifier', 'Qualifier 1', 0, next_date)
+            _competition_add_world_fixture(db, world_id, template, overall[2]['team_id'], overall[3]['team_id'], 'eliminator', 'Eliminator', 1, next_date)
+            advanced += 2
+            continue
+
+        if competition_key == 'bbl' and league_done and not stages.get('qualifier') and not stages.get('knockout') and len(overall) >= 4:
+            _competition_add_world_fixture(db, world_id, template, overall[0]['team_id'], overall[1]['team_id'], 'qualifier', 'Qualifier', 0, next_date)
+            _competition_add_world_fixture(db, world_id, template, overall[2]['team_id'], overall[3]['team_id'], 'knockout', 'Knockout', 1, next_date)
+            advanced += 2
+            continue
+
+        if competition_key == 'cpl' and league_done and not stages.get('qualifier') and not stages.get('eliminator') and len(overall) >= 4:
+            _competition_add_world_fixture(db, world_id, template, overall[0]['team_id'], overall[1]['team_id'], 'qualifier', 'Qualifier 1', 0, next_date)
+            _competition_add_world_fixture(db, world_id, template, overall[2]['team_id'], overall[3]['team_id'], 'eliminator', 'Eliminator', 1, next_date)
+            advanced += 2
+            continue
+
+        if competition_key == 'icc_t20_world_cup' and league_done and not stages.get('super8'):
+            by_group = {g['group']: g['rows'] for g in grouped}
+            groups = {name: by_group.get(name, []) for name in ('Group A', 'Group B', 'Group C', 'Group D')}
+            if all(len(groups[name]) >= 2 for name in groups):
+                super8_groups = {
+                    'Super 8 Group 1': [
+                        groups['Group A'][0]['team_id'],
+                        groups['Group B'][0]['team_id'],
+                        groups['Group C'][1]['team_id'],
+                        groups['Group D'][1]['team_id'],
+                    ],
+                    'Super 8 Group 2': [
+                        groups['Group A'][1]['team_id'],
+                        groups['Group B'][1]['team_id'],
+                        groups['Group C'][0]['team_id'],
+                        groups['Group D'][0]['team_id'],
+                    ],
+                }
+                idx = 0
+                for grp, team_ids in super8_groups.items():
+                    for a, b in _round_robin_pairs(team_ids):
+                        _competition_add_world_fixture(
+                            db, world_id, template, a, b, 'super8', 'Super 8', idx, next_date, group_name=grp
+                        )
+                        idx += 1
+                advanced += idx
+            continue
+
+        if stages.get('quarter') and all(f.get('status') == 'complete' for f in stages.get('quarter', [])) and not stages.get('semi'):
+            quarter_winners = winners('quarter') or []
+            if competition_key == 'royal_london_cup':
+                by_group = {g['group']: g['rows'] for g in grouped}
+                ga = by_group.get('Group A', [])
+                gb = by_group.get('Group B', [])
+                if len(ga) >= 1 and len(gb) >= 1 and len(quarter_winners) >= 2:
+                    _competition_add_world_fixture(db, world_id, template, ga[0]['team_id'], quarter_winners[1], 'semi', 'Semi-Final 1', 0, next_date)
+                    _competition_add_world_fixture(db, world_id, template, gb[0]['team_id'], quarter_winners[0], 'semi', 'Semi-Final 2', 1, next_date)
+                    advanced += 2
+            elif len(quarter_winners) >= 4:
+                _competition_add_world_fixture(db, world_id, template, quarter_winners[0], quarter_winners[1], 'semi', 'Semi-Final 1', 0, next_date)
+                _competition_add_world_fixture(db, world_id, template, quarter_winners[2], quarter_winners[3], 'semi', 'Semi-Final 2', 1, next_date)
+                advanced += 2
+            continue
+
+        if stages.get('semi') and all(f.get('status') == 'complete' for f in stages.get('semi', [])) and not stages.get('final'):
+            semi_winners = winners('semi') or []
+            if len(semi_winners) >= 2:
+                _competition_add_world_fixture(db, world_id, template, semi_winners[0], semi_winners[1], 'final', 'Final', 0, next_date)
+                advanced += 1
+            continue
+
+        if competition_key in ('ipl', 'psl', 'cpl') and stages.get('qualifier') and stages.get('eliminator'):
+            qualifier_winners = winners('qualifier')
+            eliminator_winners = winners('eliminator')
+            qualifier_losers = [
+                f['team2_id'] if f.get('winning_team_id') == f.get('team1_id') else f['team1_id']
+                for f in stages.get('qualifier', []) if f.get('status') == 'complete' and f.get('winning_team_id')
+            ]
+            if qualifier_winners and eliminator_winners and qualifier_losers and not stages.get('challenger'):
+                _competition_add_world_fixture(db, world_id, template, qualifier_losers[0], eliminator_winners[0], 'challenger', 'Qualifier 2', 0, next_date)
+                advanced += 1
+                continue
+            if stages.get('challenger') and all(f.get('status') == 'complete' for f in stages.get('challenger', [])) and not stages.get('final'):
+                challenger_winners = winners('challenger') or []
+                if qualifier_winners and challenger_winners:
+                    _competition_add_world_fixture(db, world_id, template, qualifier_winners[0], challenger_winners[0], 'final', 'Final', 0, next_date)
+                    advanced += 1
+                    continue
+
+        if competition_key == 'bbl' and stages.get('qualifier') and stages.get('knockout'):
+            qualifier_winners = winners('qualifier')
+            knockout_winners = winners('knockout')
+            qualifier_losers = [
+                f['team2_id'] if f.get('winning_team_id') == f.get('team1_id') else f['team1_id']
+                for f in stages.get('qualifier', []) if f.get('status') == 'complete' and f.get('winning_team_id')
+            ]
+            if qualifier_winners and knockout_winners and qualifier_losers and not stages.get('challenger'):
+                _competition_add_world_fixture(db, world_id, template, qualifier_losers[0], knockout_winners[0], 'challenger', 'Challenger', 0, next_date)
+                advanced += 1
+                continue
+            if stages.get('challenger') and all(f.get('status') == 'complete' for f in stages.get('challenger', [])) and not stages.get('final'):
+                challenger_winners = winners('challenger') or []
+                if qualifier_winners and challenger_winners:
+                    _competition_add_world_fixture(db, world_id, template, qualifier_winners[0], challenger_winners[0], 'final', 'Final', 0, next_date)
+                    advanced += 1
+                    continue
+
+        if competition_key == 'icc_t20_world_cup' and stages.get('super8') and all(f.get('status') == 'complete' for f in stages.get('super8', [])) and not stages.get('semi'):
+            super8_flat, super8_groups = _build_competition_standings(
+                {**rule, 'tie_breakers': ['points', 'nrr', 'wins', 'team_name']},
+                stages.get('super8', []),
+                innings_map
+            )
+            by_group = {g['group']: g['rows'] for g in super8_groups}
+            g1 = by_group.get('Super 8 Group 1', [])
+            g2 = by_group.get('Super 8 Group 2', [])
+            if len(g1) >= 2 and len(g2) >= 2:
+                _competition_add_world_fixture(db, world_id, template, g1[0]['team_id'], g2[1]['team_id'], 'semi', 'Semi-Final 1', 0, next_date)
+                _competition_add_world_fixture(db, world_id, template, g2[0]['team_id'], g1[1]['team_id'], 'semi', 'Semi-Final 2', 1, next_date)
+                advanced += 2
+                continue
+    if advanced:
+        db.commit()
+    return advanced
+
+
+def _world_available_competitions(db, world_id):
+    rows = db.execute(
+        "SELECT competition_key, competition_name, MIN(is_icc_event) AS is_icc_event, MIN(series_name) AS label "
+        "FROM fixtures WHERE world_id=? AND competition_key IS NOT NULL "
+        "GROUP BY competition_key, competition_name "
+        "ORDER BY MIN(COALESCE(competition_order, 999999)), competition_name",
+        (world_id,)
+    ).fetchall()
+    items = []
+    for row in rows:
+        key = row['competition_key']
+        rule = competition_rules.get_rule(key) or {}
+        items.append({
+            'key': key,
+            'name': row['competition_name'] or rule.get('name') or key,
+            'format': rule.get('format'),
+            'is_icc_event': bool(row['is_icc_event']),
+        })
+    has_test_fixtures = db.execute(
+        "SELECT 1 FROM fixtures WHERE world_id=? AND format='Test' AND competition_key IS NULL LIMIT 1",
+        (world_id,)
+    ).fetchone()
+    if has_test_fixtures and not any(item['key'] == 'icc_world_test_championship' for item in items):
+        items.append({
+            'key': 'icc_world_test_championship',
+            'name': 'ICC World Test Championship',
+            'format': 'Test',
+            'is_icc_event': True,
+        })
+    return items
 
 # ── Worlds — routes ───────────────────────────────────────────────────────────
 
@@ -3732,7 +4408,7 @@ def create_world():
                 'venue_id':                venue_id,
                 'team1_id':                t1,
                 'team2_id':                t2,
-                'fixture_type':            'world',
+                'fixture_type':            fx.get('fixture_type', 'world'),
                 'format':                  fx.get('format'),
                 'is_user_match':           is_user,
                 'series_name':             fx.get('series_name'),
@@ -3743,9 +4419,38 @@ def create_world():
                 'is_home_for_team1':       fx.get('is_home_for_team1', True),
                 'tour_template':           fx.get('tour_template'),
                 'season_year':             year,
+                'competition_key':         fx.get('competition_key'),
+                'competition_name':        fx.get('competition_name'),
+                'competition_stage':       fx.get('competition_stage'),
+                'competition_group':       fx.get('competition_group'),
+                'competition_round':       fx.get('competition_round'),
+                'competition_order':       fx.get('competition_order'),
             })
 
         database.bulk_create_fixtures(db, fixtures_to_insert)
+
+        # ── Persist draw outcomes for seeded ICC competitions ─────────────────
+        if cal_style == 'realistic' and calendar_team_ids:
+            try:
+                team_colours_map = {}
+                for tid in calendar_team_ids:
+                    t = database.get_team(db, tid)
+                    if t:
+                        team_colours_map[tid] = t.get('badge_colour', '#888888')
+                draw_outcomes = competition_rules.compute_icc_draw_outcomes(
+                    calendar_team_ids, team_name_map, start_date, end_date, team_colours_map
+                )
+                for outcome in draw_outcomes:
+                    database.save_draw_outcome(
+                        db,
+                        world_id,
+                        outcome['competition_key'],
+                        outcome['season_key'],
+                        outcome['draw_type'],
+                        json.dumps(outcome),
+                    )
+            except Exception:
+                pass  # non-fatal
 
         # ── Create world_series records ───────────────────────────────────────
         for sk, sd in series_dates.items():
@@ -3900,6 +4605,7 @@ def get_world(id):
             'completed_count':  len(completed),
             'upcoming_count':   len(fixtures),
             'generated_through': generated_through,
+            'available_competitions': _world_available_competitions(db, id),
         })
     finally:
         database.close_db(db)
@@ -3940,7 +4646,7 @@ def world_calendar(id):
             " t1.name as team1_name, t1.short_code as team1_code, t1.badge_colour as team1_colour, "
             " t2.name as team2_name, t2.short_code as team2_code, t2.badge_colour as team2_colour, "
             " v.name as venue_name, "
-            " m.result_type, m.margin_runs, m.margin_wickets, "
+            " m.result_type, m.margin_runs, m.margin_wickets, m.winning_team_id, "
             " wt.name as winning_team_name "
             "FROM fixtures f "
             "JOIN teams t1 ON f.team1_id = t1.id "
@@ -4048,6 +4754,203 @@ def world_calendar_series(id):
             s['matches_played']    = completed
             s['matches_remaining'] = max(0, (s.get('total_matches') or 0) - completed)
         return jsonify({'series': series})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/competitions/<comp_key>', methods=['GET'])
+def world_competition_detail(id, comp_key):
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+
+        rule = competition_rules.get_rule(comp_key)
+        if not rule:
+            return err('Competition not found', 404)
+
+        if comp_key == 'icc_world_test_championship':
+            rows = db.execute(
+                "SELECT f.id, f.world_id, f.scheduled_date, f.status, f.fixture_type, f.format, "
+                " f.is_user_match, f.match_id, f.series_name, f.match_number_in_series, f.series_length, "
+                " f.team1_id, f.team2_id, t1.name as team1_name, t1.badge_colour as team1_colour, "
+                " t2.name as team2_name, t2.badge_colour as team2_colour, v.name as venue_name, "
+                " m.result_type, m.margin_runs, m.margin_wickets, m.winning_team_id, wt.name as winning_team_name "
+                "FROM fixtures f "
+                "JOIN teams t1 ON f.team1_id = t1.id "
+                "JOIN teams t2 ON f.team2_id = t2.id "
+                "LEFT JOIN venues v ON f.venue_id = v.id "
+                "LEFT JOIN matches m ON f.match_id = m.id "
+                "LEFT JOIN teams wt ON m.winning_team_id = wt.id "
+                "WHERE f.world_id = ? AND f.format = 'Test' AND f.is_icc_event = 0 "
+                "AND f.competition_key IS NULL "
+                "ORDER BY f.scheduled_date, f.id",
+                (id,)
+            ).fetchall()
+            fixtures = [dict(r) for r in rows]
+            for fixture in fixtures:
+                fixture['result_string'] = _fixture_result_string(fixture)
+                fixture['season_key'] = fixture.get('scheduled_date', '')[:4]
+                fixture['competition_group'] = 'Championship'
+            cycle_map = {}
+            for fixture in fixtures:
+                try:
+                    year = int((fixture.get('scheduled_date') or '0')[:4])
+                except Exception:
+                    continue
+                cycle_start = year if year % 2 == 0 else year - 1
+                season_key = f"{cycle_start}-{cycle_start + 1}"
+                fixture['season_key'] = season_key
+                bucket = cycle_map.setdefault(season_key, {
+                    'key': season_key,
+                    'label': f"WTC {season_key}",
+                    'from_date': fixture.get('scheduled_date'),
+                    'to_date': fixture.get('scheduled_date'),
+                    'fixture_count': 0,
+                    'completed_count': 0,
+                })
+                fx_date = fixture.get('scheduled_date')
+                if fx_date and (not bucket['from_date'] or fx_date < bucket['from_date']):
+                    bucket['from_date'] = fx_date
+                if fx_date and (not bucket['to_date'] or fx_date > bucket['to_date']):
+                    bucket['to_date'] = fx_date
+                bucket['fixture_count'] += 1
+                if fixture.get('status') == 'complete':
+                    bucket['completed_count'] += 1
+            seasons = sorted(cycle_map.values(), key=lambda s: s['key'], reverse=True)
+            if not seasons:
+                return err('No Test championship fixtures found in this world', 404)
+            requested_season = request.args.get('season')
+            selected_season = requested_season if requested_season in cycle_map else seasons[0]['key']
+            season_fixtures = [f for f in fixtures if f.get('season_key') == selected_season]
+            innings_map = _competition_match_innings(db, [f.get('match_id') for f in season_fixtures if f.get('match_id')])
+            standings_rows, grouped_rows = _build_competition_standings({
+                **rule,
+                'tie_breakers': ['pct', 'points', 'wins', 'team_name'],
+            }, season_fixtures, innings_map)
+            for row in standings_rows:
+                row['played'] = row.get('played') or 0
+                row['points'] = row.get('won', 0) * 12 + row.get('drawn', 0) * 4 + row.get('tied', 0) * 6
+                row['pct'] = round((row['points'] / max(1, row['played'] * 12)) * 100, 2) if row.get('played') else 0.0
+            standings_groups = [{
+                'group': 'Championship Table',
+                'rows': _sort_competition_rows(standings_rows, ['pct', 'points', 'wins', 'team_name']),
+            }]
+            upcoming = [f for f in season_fixtures if f.get('status') == 'scheduled']
+            results = [f for f in season_fixtures if f.get('status') == 'complete']
+            bracket = {'quarter_finals': [], 'semi_finals': [], 'finals': []}
+        else:
+            fixtures = _world_competition_rows(db, id, comp_key)
+            if not fixtures:
+                return err('No fixtures found for this competition in the selected world', 404)
+
+            season_map = {}
+            for fixture in fixtures:
+                season_key = fixture.get('series_name') or f"{rule.get('name', comp_key)} {fixture.get('season_year') or ''}".strip()
+                bucket = season_map.setdefault(season_key, {
+                    'key': season_key,
+                    'label': season_key,
+                    'from_date': fixture.get('scheduled_date'),
+                    'to_date': fixture.get('scheduled_date'),
+                    'fixture_count': 0,
+                    'completed_count': 0,
+                })
+                fx_date = fixture.get('scheduled_date')
+                if fx_date and (not bucket['from_date'] or fx_date < bucket['from_date']):
+                    bucket['from_date'] = fx_date
+                if fx_date and (not bucket['to_date'] or fx_date > bucket['to_date']):
+                    bucket['to_date'] = fx_date
+                bucket['fixture_count'] += 1
+                if fixture.get('status') == 'complete':
+                    bucket['completed_count'] += 1
+                fixture['season_key'] = season_key
+
+            seasons = sorted(
+                season_map.values(),
+                key=lambda s: (s.get('from_date') or '', s.get('label') or ''),
+                reverse=True
+            )
+            requested_season = request.args.get('season')
+            selected_season = requested_season if requested_season in season_map else seasons[0]['key']
+            season_fixtures = [f for f in fixtures if f.get('season_key') == selected_season]
+            innings_map = _competition_match_innings(db, [f.get('match_id') for f in season_fixtures if f.get('match_id')])
+            super8_fixtures = [f for f in season_fixtures if (f.get('competition_stage') or f.get('fixture_type')) == 'super8']
+            league_fixtures = super8_fixtures or [
+                f for f in season_fixtures if (f.get('competition_stage') or 'league') == 'league'
+            ]
+            standings_rows, standings_groups = _build_competition_standings(rule, league_fixtures, innings_map)
+            upcoming = [f for f in season_fixtures if f.get('status') == 'scheduled']
+            results = [f for f in season_fixtures if f.get('status') == 'complete']
+            bracket = {
+                'quarter_finals': [f for f in season_fixtures if (f.get('competition_stage') or f.get('fixture_type')) == 'quarter'],
+                'semi_finals': [f for f in season_fixtures if (f.get('competition_stage') or f.get('fixture_type')) in ('semi', 'qualifier', 'eliminator', 'knockout', 'challenger')],
+                'finals': [f for f in season_fixtures if (f.get('competition_stage') or f.get('fixture_type')) == 'final'],
+            }
+
+        # Check if a persisted draw outcome exists for the selected season
+        has_draw = False
+        try:
+            import re as _re
+            m = _re.search(r'(\d{4})\s*$', selected_season or '')
+            if m:
+                candidate_key = f"{comp_key}_{m.group(1)}"
+                has_draw = database.get_draw_outcome(db, id, comp_key, candidate_key) is not None
+        except Exception:
+            pass
+
+        return jsonify({
+            'competition': {
+                'key': comp_key,
+                'name': rule.get('name', comp_key),
+                'format': rule.get('format'),
+                'world_name': world.get('name'),
+                'draw_type': rule.get('draw_type'),
+            },
+            'rules': competition_rules.get_rule_explainer(comp_key),
+            'seasons': seasons,
+            'selected_season': selected_season,
+            'standings': standings_rows,
+            'standings_groups': standings_groups,
+            'upcoming_fixtures': upcoming,
+            'results': list(reversed(results)),
+            'bracket': bracket,
+            'has_draw_outcome': has_draw,
+        })
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/competitions/<comp_key>/rules', methods=['GET'])
+def world_competition_rules(id, comp_key):
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+
+        rule = competition_rules.get_rule(comp_key)
+        if not rule:
+            return err('Competition not found', 404)
+
+        explainer = competition_rules.get_rule_explainer(comp_key)
+        if not explainer:
+            return err('Competition rules not found', 404)
+
+        available = _world_available_competitions(db, id)
+        in_world = any(item.get('key') == comp_key for item in available)
+        if not in_world and comp_key != 'icc_world_test_championship':
+            return err('Competition not found in this world', 404)
+
+        return jsonify({
+            'competition': {
+                'key': comp_key,
+                'name': rule.get('name', comp_key),
+                'format': rule.get('format'),
+                'world_name': world.get('name'),
+            },
+            'rules': explainer,
+        })
     finally:
         database.close_db(db)
 
@@ -4193,7 +5096,7 @@ def world_regenerate_calendar(id):
             fixtures_to_insert.append({
                 'world_id': id, 'tournament_id': None, 'series_id': None,
                 'scheduled_date': sdate, 'venue_id': vid,
-                'team1_id': t1, 'team2_id': t2, 'fixture_type': 'world',
+                'team1_id': t1, 'team2_id': t2, 'fixture_type': fx.get('fixture_type', 'world'),
                 'format': fx.get('format'), 'is_user_match': is_user,
                 'series_name': fx.get('series_name'),
                 'match_number_in_series': fx.get('match_number_in_series', 1),
@@ -4203,6 +5106,12 @@ def world_regenerate_calendar(id):
                 'is_home_for_team1': fx.get('is_home_for_team1', True),
                 'tour_template': fx.get('tour_template'),
                 'season_year': int(sdate[:4]) if sdate else None,
+                'competition_key': fx.get('competition_key'),
+                'competition_name': fx.get('competition_name'),
+                'competition_stage': fx.get('competition_stage'),
+                'competition_group': fx.get('competition_group'),
+                'competition_round': fx.get('competition_round'),
+                'competition_order': fx.get('competition_order'),
             })
 
         database.bulk_create_fixtures(db, fixtures_to_insert)
@@ -4383,7 +5292,7 @@ def world_extend_calendar(id):
             fixtures_to_insert.append({
                 'world_id': id, 'tournament_id': None, 'series_id': None,
                 'scheduled_date': sdate, 'venue_id': vid,
-                'team1_id': t1, 'team2_id': t2, 'fixture_type': 'world',
+                'team1_id': t1, 'team2_id': t2, 'fixture_type': fx.get('fixture_type', 'world'),
                 'format': fx.get('format'), 'is_user_match': is_user,
                 'series_name': fx.get('series_name'),
                 'match_number_in_series': fx.get('match_number_in_series', 1),
@@ -4393,6 +5302,12 @@ def world_extend_calendar(id):
                 'is_home_for_team1': fx.get('is_home_for_team1', True),
                 'tour_template': fx.get('tour_template'),
                 'season_year': int(sdate[:4]) if sdate else None,
+                'competition_key': fx.get('competition_key'),
+                'competition_name': fx.get('competition_name'),
+                'competition_stage': fx.get('competition_stage'),
+                'competition_group': fx.get('competition_group'),
+                'competition_round': fx.get('competition_round'),
+                'competition_order': fx.get('competition_order'),
             })
 
         if fixtures_to_insert:
@@ -4445,6 +5360,55 @@ def toggle_play_fixture(id, fid):
         new_val = 0 if row['is_user_match'] else 1
         database.update_fixture(db, fid, {'is_user_match': new_val})
         return jsonify({'is_user_match': new_val})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/draws', methods=['GET'])
+def world_draws_list(id):
+    """Return all persisted draw outcomes for a world."""
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+        outcomes = database.get_world_draw_outcomes(db, id)
+        # Return light summary (without full steps for list view)
+        summaries = []
+        for o in outcomes:
+            try:
+                data = json.loads(o['outcome_json'])
+            except Exception:
+                data = {}
+            summaries.append({
+                'competition_key':  o['competition_key'],
+                'competition_name': data.get('competition_name', o['competition_key']),
+                'season_key':       o['season_key'],
+                'draw_type':        o['draw_type'],
+                'year':             data.get('year'),
+                'group_names':      data.get('group_names', []),
+            })
+        return jsonify({'draws': summaries})
+    finally:
+        database.close_db(db)
+
+
+@app.route('/api/worlds/<int:id>/draws/<comp_key>/<season_key>', methods=['GET'])
+def world_draw_detail(id, comp_key, season_key):
+    """Return the full draw outcome for a specific competition season."""
+    db = database.get_db()
+    try:
+        world = database.get_world(db, id)
+        if not world:
+            return err('World not found', 404)
+        outcome = database.get_draw_outcome(db, id, comp_key, season_key)
+        if not outcome:
+            return err('Draw outcome not found', 404)
+        try:
+            data = json.loads(outcome['outcome_json'])
+        except Exception:
+            return err('Invalid draw outcome data', 500)
+        return jsonify({'draw': data})
     finally:
         database.close_db(db)
 
@@ -4713,6 +5677,7 @@ def broadcast_complete_match(id):
             world = database.get_world(db, world_id)
             if md and md >= (world.get('current_date') or ''):
                 database.update_world(db, world_id, {'current_date': md})
+            _advance_world_competitions(db, world_id)
 
             # Rankings for response
             rank_rows2 = db.execute(

@@ -329,7 +329,16 @@ def test_domestic_fixtures_are_tagged():
     Every fixture produced from a domestic league entry must carry the
     domestic_competition key set to the competition key string.
     """
-    dom = _dom_teams('IPL', range(101, 107))
+    ipl_names = [
+        'Mumbai Indians', 'Kolkata Knight Riders', 'Rajasthan Royals',
+        'Delhi Capitals', 'Lucknow Super Giants', 'Chennai Super Kings',
+        'Sunrisers Hyderabad', 'Royal Challengers Bangalore',
+        'Punjab Kings', 'Gujarat Titans',
+    ]
+    dom = [
+        {'team_id': 101 + i, 'name': name, 'league': 'IPL', 'home_venue_id': 500 + i}
+        for i, name in enumerate(ipl_names)
+    ]
     fixtures = cc.generate_realistic_calendar(
         team_ids=[], team_names={}, venue_ids={},
         start_date_str='2026-01-01', years=1,
@@ -508,6 +517,59 @@ def test_world_settings_normalisation():
     )
 
 
+# ── Test 18: Champions Trophy uses a real seeded draw with host lock ─────────
+
+def test_champions_trophy_draw_is_variable():
+    nations = [
+        'Pakistan', 'India', 'Australia', 'England',
+        'New Zealand', 'South Africa', 'Sri Lanka', 'Bangladesh',
+    ]
+    seen_draws = set()
+    host_in_group_a = True
+    for _ in range(6):
+        _, _, fixtures = _intl_world(nations, start='2025-01-01', years=1)
+        ct = [f for f in fixtures if f.get('competition_key') == 'icc_champions_trophy']
+        groups = {}
+        for fx in ct:
+            grp = fx.get('competition_group')
+            groups.setdefault(grp, set()).update([fx['team1_id'], fx['team2_id']])
+        rep = tuple(sorted(tuple(sorted(v)) for v in groups.values()))
+        seen_draws.add(rep)
+        pakistan_id = nations.index('Pakistan') + 1
+        host_in_group_a = host_in_group_a and pakistan_id in groups.get('Group A', set())
+
+    _check(
+        'Test 18: Champions Trophy draw varies between generated worlds and keeps host in Group A',
+        len(seen_draws) > 1 and host_in_group_a,
+        f'unique_draws={len(seen_draws)}, host_in_group_a={host_in_group_a}',
+    )
+
+
+# ── Test 19: T20 World Cup uses drawn first-round groups of five ─────────────
+
+def test_t20_world_cup_draw_structure():
+    nations = [
+        'India', 'Pakistan', 'Australia', 'England', 'New Zealand',
+        'South Africa', 'Sri Lanka', 'West Indies', 'Bangladesh', 'Afghanistan',
+        'Ireland', 'Zimbabwe', 'Scotland', 'Netherlands', 'Nepal',
+        'Namibia', 'UAE', 'Oman', 'Canada', 'USA',
+    ]
+    _, _, fixtures = _intl_world(nations, start='2026-01-01', years=1)
+    wc = [f for f in fixtures if f.get('competition_key') == 'icc_t20_world_cup']
+    groups = {}
+    for fx in wc:
+        grp = fx.get('competition_group')
+        groups.setdefault(grp, set()).update([fx['team1_id'], fx['team2_id']])
+    india_id = nations.index('India') + 1
+    valid_sizes = sorted(len(v) for v in groups.values()) == [5, 5, 5, 5]
+
+    _check(
+        'Test 19: T20 World Cup draw creates four groups of five with host in Group A',
+        valid_sizes and india_id in groups.get('Group A', set()),
+        f'group_sizes={[len(v) for v in groups.values()]}, india_group_a={india_id in groups.get("Group A", set())}',
+    )
+
+
 # ── Runner ─────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -529,6 +591,8 @@ if __name__ == '__main__':
     test_combined_world_no_cross_pool_fixtures()
     test_domestic_competition_format()
     test_world_settings_normalisation()
+    test_champions_trophy_draw_is_variable()
+    test_t20_world_cup_draw_structure()
 
     print(f'\nResults: {_passed} passed, {_failed} failed')
     if _failed == 0:

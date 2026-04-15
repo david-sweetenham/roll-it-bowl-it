@@ -315,6 +315,8 @@ def get_innings_by_id(db, innings_id):
 def update_innings(db, innings_id, data):
     allowed = [
         'total_runs', 'total_wickets', 'overs_completed',
+        'runs_at_100_overs', 'wickets_at_100_overs',
+        'runs_at_110_overs', 'wickets_at_110_overs',
         'extras_byes', 'extras_legbyes', 'extras_wides', 'extras_noballs',
         'declared', 'follow_on', 'status'
     ]
@@ -816,11 +818,15 @@ def bulk_create_fixtures(db, fixtures):
         "(tournament_id, series_id, world_id, scheduled_date, venue_id, "
         " team1_id, team2_id, fixture_type, format, is_user_match, status, "
         " series_name, match_number_in_series, series_length, "
-        " is_icc_event, icc_event_name, is_home_for_team1, tour_template, season_year) "
+        " is_icc_event, icc_event_name, is_home_for_team1, tour_template, season_year, "
+        " competition_key, competition_name, competition_stage, competition_group, "
+        " competition_round, competition_order) "
         "VALUES (:tournament_id, :series_id, :world_id, :scheduled_date, :venue_id, "
         " :team1_id, :team2_id, :fixture_type, :format, :is_user_match, 'scheduled', "
         " :series_name, :match_number_in_series, :series_length, "
-        " :is_icc_event, :icc_event_name, :is_home_for_team1, :tour_template, :season_year)",
+        " :is_icc_event, :icc_event_name, :is_home_for_team1, :tour_template, :season_year, "
+        " :competition_key, :competition_name, :competition_stage, :competition_group, "
+        " :competition_round, :competition_order)",
         [{
             **f,
             'format':                  f.get('format'),
@@ -833,6 +839,12 @@ def bulk_create_fixtures(db, fixtures):
             'is_home_for_team1':       1 if f.get('is_home_for_team1', True) else 0,
             'tour_template':           f.get('tour_template'),
             'season_year':             f.get('season_year'),
+            'competition_key':         f.get('competition_key'),
+            'competition_name':        f.get('competition_name'),
+            'competition_stage':       f.get('competition_stage'),
+            'competition_group':       f.get('competition_group'),
+            'competition_round':       f.get('competition_round'),
+            'competition_order':       f.get('competition_order'),
         } for f in fixtures]
     )
     db.commit()
@@ -1178,6 +1190,10 @@ def run_migrations(db):
         "ALTER TABLE matches ADD COLUMN player_mode TEXT DEFAULT 'ai_vs_ai'",
         "ALTER TABLE matches ADD COLUMN human_team_id INTEGER DEFAULT NULL",
         "ALTER TABLE matches ADD COLUMN scoring_mode TEXT DEFAULT 'modern'",
+        "ALTER TABLE innings ADD COLUMN runs_at_100_overs INTEGER",
+        "ALTER TABLE innings ADD COLUMN wickets_at_100_overs INTEGER",
+        "ALTER TABLE innings ADD COLUMN runs_at_110_overs INTEGER",
+        "ALTER TABLE innings ADD COLUMN wickets_at_110_overs INTEGER",
         # Calendar engine columns
         "ALTER TABLE fixtures ADD COLUMN series_name TEXT",
         "ALTER TABLE fixtures ADD COLUMN match_number_in_series INTEGER DEFAULT 1",
@@ -1187,6 +1203,12 @@ def run_migrations(db):
         "ALTER TABLE fixtures ADD COLUMN is_home_for_team1 INTEGER DEFAULT 1",
         "ALTER TABLE fixtures ADD COLUMN tour_template TEXT",
         "ALTER TABLE fixtures ADD COLUMN season_year INTEGER",
+        "ALTER TABLE fixtures ADD COLUMN competition_key TEXT",
+        "ALTER TABLE fixtures ADD COLUMN competition_name TEXT",
+        "ALTER TABLE fixtures ADD COLUMN competition_stage TEXT",
+        "ALTER TABLE fixtures ADD COLUMN competition_group TEXT",
+        "ALTER TABLE fixtures ADD COLUMN competition_round TEXT",
+        "ALTER TABLE fixtures ADD COLUMN competition_order INTEGER",
         # Calendar style on worlds table
         "ALTER TABLE worlds ADD COLUMN calendar_style TEXT DEFAULT 'random'",
         # Domestic / franchise team type
@@ -1361,6 +1383,21 @@ def run_migrations(db):
         "JOIN innings i ON p.innings_id = i.id "
         "JOIN matches m ON i.match_id = m.id "
         "WHERE COALESCE(m.canon_status, 'canon') = 'canon'"
+    )
+
+    # Draw outcomes — persisted results of group/bracket draws for world competitions
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS draw_outcomes ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  world_id INTEGER NOT NULL,"
+        "  competition_key TEXT NOT NULL,"
+        "  season_key TEXT NOT NULL,"
+        "  draw_type TEXT NOT NULL,"
+        "  outcome_json TEXT NOT NULL,"
+        "  created_at TEXT DEFAULT (datetime('now')),"
+        "  UNIQUE(world_id, competition_key, season_key),"
+        "  FOREIGN KEY (world_id) REFERENCES worlds(id)"
+        ")"
     )
 
     # Real-world records reference table
@@ -2656,3 +2693,36 @@ def get_match_state(db, match_id):
         'max_overs':              max_overs,
         'target':                 target,
     }
+
+
+# ── Draw Outcomes ─────────────────────────────────────────────────────────────
+
+def save_draw_outcome(db, world_id, competition_key, season_key, draw_type, outcome_json_str):
+    """Persist a draw outcome for a competition season. Idempotent (upsert)."""
+    db.execute(
+        "INSERT INTO draw_outcomes (world_id, competition_key, season_key, draw_type, outcome_json) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(world_id, competition_key, season_key) "
+        "DO UPDATE SET draw_type=excluded.draw_type, outcome_json=excluded.outcome_json, "
+        "  created_at=datetime('now')",
+        (world_id, competition_key, season_key, draw_type, outcome_json_str),
+    )
+    db.commit()
+
+
+def get_draw_outcome(db, world_id, competition_key, season_key):
+    """Return a single draw outcome dict or None."""
+    row = db.execute(
+        "SELECT * FROM draw_outcomes WHERE world_id=? AND competition_key=? AND season_key=?",
+        (world_id, competition_key, season_key),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_world_draw_outcomes(db, world_id):
+    """Return all draw outcomes for a world, ordered by season_key."""
+    rows = db.execute(
+        "SELECT * FROM draw_outcomes WHERE world_id=? ORDER BY season_key",
+        (world_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
