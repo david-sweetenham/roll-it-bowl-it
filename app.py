@@ -5829,6 +5829,7 @@ def simulate_world(id):
                 if delta != 0:
                     ranking_changes.setdefault(fmt, []).append({
                         'team_name':    r.get('team_name', '?'),
+                        'team_id':      r.get('team_id'),
                         'old_position': before['position'],
                         'new_position': r['position'],
                         'pos_change':   delta,   # positive = moved up the table
@@ -5850,12 +5851,13 @@ def simulate_world(id):
             if not p:
                 return None
             return {
-                'name':    p.get('name', '?'),
-                'runs':    p.get('runs'),
-                'wickets': p.get('wickets'),
-                'format':  match_result.get('format', ''),
-                'date':    match_result.get('scheduled_date', ''),
-                'match':   f"{match_result['team1_name']} v {match_result['team2_name']}",
+                'name':      p.get('name', '?'),
+                'player_id': p.get('player_id'),
+                'runs':      p.get('runs'),
+                'wickets':   p.get('wickets'),
+                'format':    match_result.get('format', ''),
+                'date':      match_result.get('scheduled_date', ''),
+                'match':     f"{match_result['team1_name']} v {match_result['team2_name']}",
             }
 
         batting_perfs = sorted(

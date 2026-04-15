@@ -1148,6 +1148,19 @@ function getTeamFlag(teamName) {
   return TEAM_FLAGS[base] || '';
 }
 
+// Render a player name as a clickable link to their almanack page (falls back to plain text if no id)
+function _playerLink(name, id) {
+  const safe = escHtml(name || '');
+  if (!id) return safe;
+  return `<a class="alm-link" onclick="goToPlayer(${+id})">${safe}</a>`;
+}
+// Render a team name as a clickable link to their almanack page (falls back to plain text if no id)
+function _teamLink(name, id) {
+  const safe = escHtml(name || '');
+  if (!id) return safe;
+  return `<a class="alm-link" onclick="goToTeam(${+id})">${safe}</a>`;
+}
+
 function renderTeamLabel(teamName, { compact = false } = {}) {
   const safeName = escHtml(teamName || '');
   if ((teamName || '').trim() === 'England') {
@@ -3918,10 +3931,10 @@ async function showResultScreen(matchId) {
       })[0];
     const lastInn = sc.innings[sc.innings.length - 1];
     if (topBat) {
-      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Top score</div><div class="result-note-value">${escHtml(topBat.player_name || '')} ${topBat.runs || 0}${topBat.not_out ? '*' : ''} (${topBat.balls_faced || 0}b)</div></div>`);
+      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Top score</div><div class="result-note-value">${_playerLink(topBat.player_name, topBat.player_id)} ${topBat.runs || 0}${topBat.not_out ? '*' : ''} (${topBat.balls_faced || 0}b)</div></div>`);
     }
     if (topBowl) {
-      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Best bowling</div><div class="result-note-value">${escHtml(topBowl.player_name || '')} ${topBowl.wickets || 0}/${topBowl.runs_conceded || 0}</div></div>`);
+      noteCards.push(`<div class="result-note-card"><div class="result-note-label">Best bowling</div><div class="result-note-value">${_playerLink(topBowl.player_name, topBowl.player_id)} ${topBowl.wickets || 0}/${topBowl.runs_conceded || 0}</div></div>`);
     }
     if (lastInn && match.target) {
       const targetRuns = match.target - 1;
@@ -4265,7 +4278,8 @@ function renderScorecardTab(state) {
       const bowlers = state.bowler_innings || [];
       const fow     = state.fall_of_wickets || [];
 
-      html += `<div class="sc-innings-header">${renderTeamLabel(inn.batting_team_name)} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
+      const _scTeamLive = inn.batting_team_id ? `<a class="alm-link" onclick="goToTeam(${inn.batting_team_id})">${renderTeamLabel(inn.batting_team_name)}</a>` : renderTeamLabel(inn.batting_team_name);
+      html += `<div class="sc-innings-header">${_scTeamLive} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
 
       html += `<table class="data-table">
         <thead><tr>
@@ -4449,7 +4463,8 @@ function _renderFullScorecardHtml(sc) {
   for (const inn of innings) {
     const ord = ['1st','2nd','3rd','4th'][inn.innings_number - 1] || `${inn.innings_number}th`;
     const decl = inn.declared ? ' (dec)' : '';
-    html += `<div class="sc-innings-header">${renderTeamLabel(inn.batting_team_name)} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
+    const _scTeamFull = inn.batting_team_id ? `<a class="alm-link" onclick="goToTeam(${inn.batting_team_id})">${renderTeamLabel(inn.batting_team_name)}</a>` : renderTeamLabel(inn.batting_team_name);
+    html += `<div class="sc-innings-header">${_scTeamFull} — ${ord} Innings: ${formatScore(inn.total_runs, inn.total_wickets)}${decl}</div>`;
 
     // Build bowler name map from this innings' bowlers array
     const bowlerMap = {};
@@ -4478,9 +4493,9 @@ function _renderFullScorecardHtml(sc) {
       const bowlerName = b.bowler_id ? (bowlerMap[b.bowler_id] || '') : '';
       const notOut = b.not_out ? '*' : '';
       html += `<tr>
-        <td><strong>${escHtml(b.player_name || '')}</strong></td>
+        <td><strong>${_playerLink(b.player_name, b.player_id)}</strong></td>
         <td class="stat-muted">${escHtml(howOut)}</td>
-        <td class="stat-muted">${escHtml(bowlerName)}</td>
+        <td class="stat-muted">${_playerLink(bowlerName, b.bowler_id)}</td>
         <td style="text-align:right" class="stat-highlight">${b.runs}${notOut}</td>
         <td style="text-align:right" class="stat-muted">${b.balls_faced}</td>
         <td style="text-align:right">${b.fours}</td>
@@ -4504,8 +4519,8 @@ function _renderFullScorecardHtml(sc) {
     // Fall of wickets
     const fow = inn.fall_of_wickets || [];
     if (fow.length) {
-      const fowStr = fow.map(f => `${f.wicket_number}-${f.score_at_fall} (${f.batter_name})`).join(', ');
-      html += `<div class="sc-fow">FoW: ${escHtml(fowStr)}</div>`;
+      const fowParts = fow.map(f => `${f.wicket_number}-${f.score_at_fall} (${_playerLink(f.batter_name, f.dismissed_batter_id)})`);
+      html += `<div class="sc-fow">FoW: ${fowParts.join(', ')}</div>`;
     }
 
     // Bowlers table
@@ -4516,7 +4531,7 @@ function _renderFullScorecardHtml(sc) {
         <tbody>`;
       for (const bw of bowlers) {
         html += `<tr>
-          <td><strong>${escHtml(bw.player_name || '')}</strong></td>
+          <td><strong>${_playerLink(bw.player_name, bw.player_id)}</strong></td>
           <td style="text-align:right">${formatBowlerOvers(bw.overs, bw.balls)}</td>
           <td style="text-align:right">${bw.maidens}</td>
           <td style="text-align:right">${bw.runs_conceded}</td>
@@ -9960,8 +9975,8 @@ function _vdpRenderResult(r) {
   if (!feed) return;
 
   const fmt   = _VDP_FORMAT_BADGE[r.format] || r.format || '';
-  const t1    = escHtml(r.team1_name || '?');
-  const t2    = escHtml(r.team2_name || '?');
+  const t1    = _teamLink(r.team1_name || '?', r.team1_id);
+  const t2    = _teamLink(r.team2_name || '?', r.team2_id);
   const s1    = escHtml(r.team1_score || '');
   const s2    = escHtml(r.team2_score || '');
   const isT1Win = r.winner_id && r.winner_id === r.team1_id;
@@ -10054,15 +10069,15 @@ function _renderSimReport(report) {
       const ts = r.top_scorer;
       const tb = r.top_bowler;
       const performer = [
-        ts ? `🏏 ${escHtml(ts.name)} — ${ts.runs} runs` : '',
-        tb ? `🎳 ${escHtml(tb.name)} — ${tb.wickets} wkts` : '',
+        ts ? `🏏 ${_playerLink(ts.name, ts.player_id)} — ${ts.runs} runs` : '',
+        tb ? `🎳 ${_playerLink(tb.name, tb.player_id)} — ${tb.wickets} wkts` : '',
       ].filter(Boolean).join(' &nbsp;·&nbsp; ');
       return `
         <div class="wsim-big-result">
           <div class="wsim-big-result-summary">${escHtml(r.summary || '')}</div>
           <div class="wsim-big-result-detail">
             ${fmtBadge}
-            <span>${escHtml(r.team1_name||'')} v ${escHtml(r.team2_name||'')}</span>
+            <span>${_teamLink(r.team1_name, r.team1_id)} v ${_teamLink(r.team2_name, r.team2_id)}</span>
             <span>${escHtml(_fmtDate(r.scheduled_date))}</span>
           </div>
           <div class="wsim-big-result-scores">${escHtml(r.team1_score||'')} &nbsp;/&nbsp; ${escHtml(r.team2_score||'')}</div>
@@ -10089,7 +10104,7 @@ function _renderSimReport(report) {
         <div class="wsim-perf-row">
           <div class="wsim-perf-stat">${p[statKey] ?? '–'}</div>
           <div>
-            <div class="wsim-perf-name">${escHtml(p.name)}</div>
+            <div class="wsim-perf-name">${_playerLink(p.name, p.player_id)}</div>
             <div class="wsim-perf-ctx">${escHtml(p.match)} · ${escHtml(p.format)} · ${escHtml(p.date)}</div>
           </div>
         </div>`).join('');
@@ -10129,7 +10144,7 @@ function _renderSimReport(report) {
       return `
         <div class="wsim-rank-mover">
           <span class="wsim-rank-arrow ${up ? 'up' : 'down'}">${arrow}</span>
-          <span class="wsim-rank-name">${escHtml(m.team_name)}</span>
+          <span class="wsim-rank-name">${_teamLink(m.team_name, m.team_id)}</span>
           <span class="wsim-rank-change">${m.old_position} → ${m.new_position} &nbsp;(${up ? '+' : ''}${up ? delta : -delta} place${delta !== 1 ? 's' : ''})</span>
           <span class="wsim-rank-fmt">${fmtBadge}</span>
         </div>`;
@@ -10143,14 +10158,12 @@ function _renderSimReport(report) {
 
     // Paused fixture (user match) always goes first if present
     if (pausedFixture) {
-      const t1 = escHtml(pausedFixture.team1_name || '?');
-      const t2 = escHtml(pausedFixture.team2_name || '?');
       const fmtBadge = `<span class="badge badge-${(pausedFixture.format||'').toLowerCase()}">${pausedFixture.format||''}</span>`;
       rows.push(`
         <div class="wsim-next-row">
           <span class="wsim-next-date">${escHtml(_fmtDate(pausedFixture.scheduled_date))}</span>
           ${fmtBadge}
-          <span class="wsim-next-teams">${t1} v ${t2}</span>
+          <span class="wsim-next-teams">${_teamLink(pausedFixture.team1_name, pausedFixture.team1_id)} v ${_teamLink(pausedFixture.team2_name, pausedFixture.team2_id)}</span>
           <span class="wsim-next-user">▶ Your match</span>
         </div>`);
     }
@@ -10159,14 +10172,12 @@ function _renderSimReport(report) {
       // Skip the paused fixture if it appears in the list too
       if (pausedFixture && f.id === pausedFixture.id) continue;
       if (rows.length >= 4) break;
-      const t1 = escHtml(f.team1_name || '?');
-      const t2 = escHtml(f.team2_name || '?');
-      const fmtBadge = `<span class="badge badge-${(f.format||'').toLowerCase()}">${f.format||''}</span>`;
+      const fmtBadge2 = `<span class="badge badge-${(f.format||'').toLowerCase()}">${f.format||''}</span>`;
       rows.push(`
         <div class="wsim-next-row">
           <span class="wsim-next-date">${escHtml(_fmtDate(f.scheduled_date))}</span>
-          ${fmtBadge}
-          <span class="wsim-next-teams">${t1} v ${t2}</span>
+          ${fmtBadge2}
+          <span class="wsim-next-teams">${_teamLink(f.team1_name, f.team1_id)} v ${_teamLink(f.team2_name, f.team2_id)}</span>
         </div>`);
     }
 
@@ -10188,8 +10199,8 @@ function _renderSimReport(report) {
           </div>
           <div class="wsim-result-summary">${escHtml(r.summary||'')}</div>
           <div class="wsim-scores">${escHtml(r.team1_score||'')} &nbsp;/&nbsp; ${escHtml(r.team2_score||'')}</div>
-          ${ts ? `<div class="wsim-performer">🏏 ${escHtml(ts.name)} — ${ts.runs} runs</div>` : ''}
-          ${tb ? `<div class="wsim-performer">🎳 ${escHtml(tb.name)} — ${tb.wickets} wickets</div>` : ''}
+          ${ts ? `<div class="wsim-performer">🏏 ${_playerLink(ts.name, ts.player_id)} — ${ts.runs} runs</div>` : ''}
+          ${tb ? `<div class="wsim-performer">🎳 ${_playerLink(tb.name, tb.player_id)} — ${tb.wickets} wickets</div>` : ''}
         </div>`;
     }).join('');
   }
@@ -10205,7 +10216,7 @@ function _renderSimReport(report) {
         <table class="standings-table">
           <thead><tr><th>#</th><th>Team</th><th>Pts</th><th>M</th></tr></thead>
           <tbody>${rows.map(r => `
-            <tr><td>${r.position||'–'}</td><td>${escHtml(r.team_name)}</td>
+            <tr><td>${r.position||'–'}</td><td>${_teamLink(r.team_name, r.team_id)}</td>
                 <td>${Math.round(r.points||0)}</td><td>${r.matches_counted||0}</td>
             </tr>`).join('')}
           </tbody>
