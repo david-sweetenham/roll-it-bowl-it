@@ -1217,12 +1217,38 @@ def run_migrations(db):
         "ALTER TABLE players ADD COLUMN source_world_id INTEGER",
         "ALTER TABLE players ADD COLUMN is_regen INTEGER DEFAULT 0",
         # domestic_leagues on worlds settings (stored in settings_json; no column needed)
+        # The Hundred — team and venue flags
+        "ALTER TABLE teams ADD COLUMN is_hundred_team INTEGER DEFAULT 0",
+        "ALTER TABLE venues ADD COLUMN is_hundred_venue INTEGER DEFAULT 0",
+        # The Hundred — innings phase columns
+        "ALTER TABLE innings ADD COLUMN powerplay_runs INTEGER DEFAULT 0",
+        "ALTER TABLE innings ADD COLUMN powerplay_wickets INTEGER DEFAULT 0",
+        "ALTER TABLE innings ADD COLUMN death_runs INTEGER DEFAULT 0",
+        "ALTER TABLE innings ADD COLUMN death_wickets INTEGER DEFAULT 0",
+        "ALTER TABLE innings ADD COLUMN balls_used INTEGER DEFAULT 0",
+        "ALTER TABLE innings ADD COLUMN strategic_timeout_ball INTEGER DEFAULT NULL",
     ]
     for sql in migrations:
         try:
             db.execute(sql)
         except Exception:
             pass  # column already exists
+
+    # The Hundred — set-by-set data table
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS hundred_sets ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  innings_id INTEGER NOT NULL,"
+        "  set_number INTEGER NOT NULL,"
+        "  bowler_id INTEGER NOT NULL,"
+        "  end_name TEXT,"
+        "  balls_bowled INTEGER DEFAULT 0,"
+        "  runs_conceded INTEGER DEFAULT 0,"
+        "  wickets INTEGER DEFAULT 0,"
+        "  is_powerplay INTEGER DEFAULT 0,"
+        "  FOREIGN KEY (innings_id) REFERENCES innings(id)"
+        ")"
+    )
 
     # Ensure player_world_state table exists (for DBs created before this migration)
     db.execute(
@@ -2511,7 +2537,7 @@ def get_match_state(db, match_id):
 
     all_innings = get_innings(db, match_id)
     fmt = match['format']
-    max_overs_map = {'T20': 20, 'ODI': 50, 'Test': None}
+    max_overs_map = {'T20': 20, 'ODI': 50, 'Test': None, 'Hundred': 20}
     max_overs = max_overs_map.get(fmt)
 
     current_innings = next((i for i in all_innings if i['status'] == 'in_progress'), None)

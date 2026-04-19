@@ -409,6 +409,49 @@ COMMENTARY = {
         "{batter} strides to the crease. Big moment. Big opportunity.",
         "A fresh face at the crease — {batter} will be eager to make their mark.",
     ],
+
+    # ── The Hundred specific commentary ──────────────────────────────────────
+    'hundred_set_complete': [
+        "That's five! End of the set from {bowler}.",
+        "Set complete — {bowler} has bowled their allocation from this end.",
+        "Five balls done. {bowler} hands the ball back.",
+        "That's your lot for this set from {bowler}.",
+    ],
+    'hundred_powerplay_start': [
+        "Here we go — the powerplay is on! Fielders inside the circle.",
+        "Powerplay cricket! Only two fielders allowed outside the ring.",
+        "The first 25 balls — the powerplay is live. Attack time!",
+    ],
+    'hundred_powerplay_end': [
+        "Powerplay over! {score} after 25 balls. Fielders spread now.",
+        "25 balls gone — that's your powerplay. {score} on the board.",
+        "The powerplay closes at {score}. Now the death begins early in The Hundred.",
+    ],
+    'hundred_final_ten': [
+        "TEN BALLS LEFT! It's all to play for!",
+        "Double figures remaining — the pressure is enormous.",
+        "Ten balls to go. This is The Hundred at its best.",
+    ],
+    'hundred_final_five': [
+        "FIVE BALLS! This is it!",
+        "Last five deliveries. Everything on the line.",
+        "Five balls remaining — can you feel the tension?",
+    ],
+    'hundred_final_ball': [
+        "THE FINAL BALL! One delivery to decide it all!",
+        "Last ball of the innings! The crowd is electric!",
+        "This. Is. It. One ball remaining.",
+    ],
+    'hundred_bowler_maxed': [
+        "{bowler} has bowled their full allocation — 20 balls done.",
+        "That's {bowler}'s lot — 20 balls, {wickets} wickets, {runs} runs.",
+        "Full allocation for {bowler}. Captain must find another bowler.",
+    ],
+    'hundred_strategic_timeout': [
+        "STRATEGIC TIMEOUT! The fielding side takes a breather.",
+        "Timeout called — 90 seconds for the fielding captain to think.",
+        "Strategic timeout — a chance to regroup at a key moment.",
+    ],
 }
 
 # ── Core Functions ─────────────────────────────────────────────────────────────

@@ -157,6 +157,11 @@
                 <span class="fmt-overs">2 innings each</span>
                 <span class="fmt-desc">The ultimate examination — declare or fight to the last</span>
               </button>
+              <button class="format-btn" data-format="Hundred">
+                <span class="fmt-name">The Hundred</span>
+                <span class="fmt-overs">100 balls per side</span>
+                <span class="fmt-desc">Short, sharp, 100 balls — every ball counts</span>
+              </button>
             </div>
           </div>
           <div id="play-domestic-league-section" class="form-section hidden">
@@ -235,7 +240,7 @@
           <span class="canon-row-label">Count in statistics?</span>
           <div class="canon-row-btns">
             <button class="canon-btn" id="canon-btn-yes" onclick="setCanonChoice('canon')">Yes &mdash; Canon</button>
-            <button class="canon-btn canon-btn-active" id="canon-btn-no" onclick="setCanonChoice('exhibition')">No &mdash; Exhibition</button>
+            <button class="canon-btn canon-btn-active" id="canon-btn-no" data-canon="exhibition" onclick="setCanonChoice('exhibition')">No &mdash; Exhibition</button>
           </div>
         </div>
         <button class="btn btn-ghost mode-modal-cancel" onclick="closeModeModal()">Cancel</button>

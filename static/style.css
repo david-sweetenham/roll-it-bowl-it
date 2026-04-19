@@ -4436,6 +4436,11 @@ body.light-mode .select-input {
   background: rgba(74,222,128,0.15);
   color: #4ade80;
 }
+.canon-btn[data-canon="exhibition"].canon-btn-active {
+  border-color: rgba(248,113,113,0.5);
+  background: rgba(248,113,113,0.15);
+  color: #f87171;
+}
 
 /* ── Almanack Manage Tab ─────────────────────────────────────────────────── */
 

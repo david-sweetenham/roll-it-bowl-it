@@ -16,6 +16,7 @@ import subprocess
 # Each entry: key -> module name within uat/ (no .py extension)
 SUITES = {
     'calendar': 'test_calendar',
+    'hundred':  'test_hundred',
 }
 
 # ── Runner ─────────────────────────────────────────────────────────────────────

@@ -1115,6 +1115,28 @@ DOMESTIC_COMPETITIONS = {
         'home_away':   True,
         'series_key_prefix': 'psl',
     },
+    'the_hundred': {
+        'name':        'The Hundred',
+        'league':      'The Hundred',
+        'format':      'Hundred',
+        'start_month': 7,
+        'end_month':   8,
+        'gap_days':    2,        # 100-ball matches every 2 days through July-August
+        'home_away':   True,
+        'series_key_prefix': 'hundred',
+        'duration_weeks': 3,     # ~3 weeks annual slot
+        'annual': True,
+    },
+}
+
+# ── The Hundred annual schedule ───────────────────────────────────────────────
+
+HUNDRED_SCHEDULE = {
+    'months':         [7, 8],       # July – August
+    'duration_weeks': 3,
+    'annual':         True,
+    'format':         'Hundred',
+    'teams':          'hundred_teams',
 }
 
 
@@ -1339,7 +1361,10 @@ def generate_realistic_calendar(
             ]
             if len(league_team_list) < 2:
                 continue
-            dom_fxs = competition_rules.generate_domestic_competition(
+            # Use generate_domestic_fixtures (works with generic team IDs)
+            # instead of competition_rules.generate_domestic_competition
+            # (which requires real team names like "Mumbai Indians")
+            dom_fxs = generate_domestic_fixtures(
                 comp_key, league_team_list, start_year, end_year
             )
             all_fixtures.extend(dom_fxs)

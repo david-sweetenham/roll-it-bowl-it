@@ -22,6 +22,7 @@ const AppState = {
   defaultVenueId:    null,
   defaultScoringMode:'modern',
   defaultRollMode:   'auto',
+  defaultCanonStatus:'canon',
   recordPopups:      false,   // false = collect records and show at end of match
   playerMode:        'ai_vs_ai',   // 'ai_vs_ai' | 'human_vs_ai' | 'human_vs_human'
   humanTeamId:       null,         // team id for human-controlled team in human_vs_ai
@@ -606,6 +607,10 @@ function syncPlayFormatLabels() {
         nameEl.textContent = 'T20';
         oversEl.textContent = '20 overs per side';
         descEl.textContent = 'Franchise pace, pressure overs and fast scoring';
+      } else if (format === 'Hundred') {
+        nameEl.textContent = 'The Hundred';
+        oversEl.textContent = '100 balls per side';
+        descEl.textContent = 'Sets of 5, powerplay first 25, countdown to the final ball';
       }
     } else {
       if (format === 'Test') {
@@ -620,6 +625,10 @@ function syncPlayFormatLabels() {
         nameEl.textContent = 'T20';
         oversEl.textContent = '20 overs per side';
         descEl.textContent = 'Fast-paced, big hitting, decided in an evening';
+      } else if (format === 'Hundred') {
+        nameEl.textContent = 'The Hundred';
+        oversEl.textContent = '100 balls per side';
+        descEl.textContent = 'Sets of 5, powerplay first 25, countdown to the final ball';
       }
     }
   });
@@ -629,8 +638,14 @@ function applyPlayTeamFilters() {
   const allTeams = AppState._playTeams || [];
   const scope = getPlayCricketScope();
   const league = AppState._playDomesticLeague || '';
+  const fmt = document.querySelector('.format-btn.active')?.dataset?.format || AppState.defaultFormat || 'T20';
   const filtered = allTeams.filter(t => {
     const isDomestic = !!t.team_type && t.team_type !== 'international';
+    const isHundred  = !!(t.is_hundred_team);
+    // The Hundred format: only show Hundred franchise teams
+    if (fmt === 'Hundred') return isHundred;
+    // Non-Hundred formats: never show Hundred teams
+    if (isHundred) return false;
     if (scope === 'international') {
       return !isDomestic;
     }
@@ -787,18 +802,20 @@ function closeModeModal() {
 
 function setCanonChoice(choice) {
   AppState._canonChoice = choice;
+  AppState.defaultCanonStatus = choice;
+  try { localStorage.setItem('ribi_default_canon', choice); } catch (_) {}
   const yes = document.getElementById('canon-btn-yes');
   const no  = document.getElementById('canon-btn-no');
   if (!yes || !no) return;
   yes.classList.toggle('canon-btn-active', choice === 'canon');
   yes.dataset.canon = 'canon';
+  no.dataset.canon  = 'exhibition';
   no.classList.toggle('canon-btn-active',  choice === 'exhibition');
 }
 
 function _showModeModal() {
-  // Reset canon choice to exhibition (standalone default)
-  AppState._canonChoice = 'exhibition';
-  setCanonChoice('exhibition');
+  AppState._canonChoice = AppState.defaultCanonStatus;
+  setCanonChoice(AppState.defaultCanonStatus);
   document.getElementById('mode-select-modal').classList.remove('hidden');
 }
 
@@ -1313,14 +1330,24 @@ function updateLiveView(state) {
       renderTeamLabel(inn.batting_team_name || inn.batting_team_code || '');
     document.getElementById('sb-score').textContent =
       formatScore(inn.total_runs, inn.total_wickets);
-    const overs = inn.overs_completed || 0;
-    document.getElementById('sb-overs').textContent = `${formatOvers(overs)} ov`;
 
+    const fmt = state.format || match?.format;
     const legalBalls = state.over_number * 6 + state.ball_in_over;
-    const crr = legalBalls >= 6
-      ? (inn.total_runs / (legalBalls / 6)).toFixed(2)
-      : '—';
-    document.getElementById('sb-rr').textContent = `RR: ${crr}`;
+
+    if (fmt === 'Hundred') {
+      // Hundred: show balls remaining countdown
+      const remaining = Math.max(0, 100 - legalBalls);
+      document.getElementById('sb-overs').textContent = `${remaining}b rem`;
+      const crr = legalBalls >= 5 ? (inn.total_runs / legalBalls * 100 / 5).toFixed(2) : '—';
+      document.getElementById('sb-rr').textContent = `RR/5: ${crr}`;
+    } else {
+      const overs = inn.overs_completed || 0;
+      document.getElementById('sb-overs').textContent = `${formatOvers(overs)} ov`;
+      const crr = legalBalls >= 6
+        ? (inn.total_runs / (legalBalls / 6)).toFixed(2)
+        : '—';
+      document.getElementById('sb-rr').textContent = `RR: ${crr}`;
+    }
 
     const chaseEl = document.getElementById('sb-chase');
     if (state.target) {
@@ -1328,12 +1355,19 @@ function updateLiveView(state) {
       document.getElementById('sb-target').textContent =
         `Target: ${state.target}`;
       const needed = state.target - inn.total_runs;
-      const maxLegalBalls = oversToLegalBalls(state.max_overs || 0);
-      const remainingBalls = Math.max(0, maxLegalBalls - legalBalls);
-      const remOvers = remainingBalls / 6;
-      const rrr = remOvers > 0 ? (needed / remOvers).toFixed(2) : '—';
-      document.getElementById('sb-required').textContent =
-        `Need ${needed} (RRR: ${rrr})`;
+      if (fmt === 'Hundred') {
+        const remainingBalls = Math.max(0, 100 - legalBalls);
+        const rrr = remainingBalls > 0 ? (needed / remainingBalls * 5).toFixed(2) : '—';
+        document.getElementById('sb-required').textContent =
+          `Need ${needed} off ${remainingBalls}b`;
+      } else {
+        const maxLegalBalls = oversToLegalBalls(state.max_overs || 0);
+        const remainingBalls = Math.max(0, maxLegalBalls - legalBalls);
+        const remOvers = remainingBalls / 6;
+        const rrr = remOvers > 0 ? (needed / remOvers).toFixed(2) : '—';
+        document.getElementById('sb-required').textContent =
+          `Need ${needed} (RRR: ${rrr})`;
+      }
     } else {
       chaseEl.classList.add('hidden');
     }
@@ -3730,17 +3764,27 @@ async function showInningsTransition(completedInnings, target) {
     }
     const nextBatting = MatchUI.lastState?.current_innings?.batting_team_name || 'Next side';
     const freshMatch = MatchUI.lastState?.match || {};
-    const maxOvers   = { T20: 20, ODI: 50, Test: null }[freshMatch.format] ?? null;
+    const maxOvers   = { T20: 20, ODI: 50, Test: null, Hundred: null }[freshMatch.format] ?? null;
+    const isHundredFmt = freshMatch.format === 'Hundred';
     const chaseText = target
-      ? `${nextBatting} need ${target} to win`
+      ? (isHundredFmt
+          ? `${nextBatting} need ${target} off 100 balls`
+          : `${nextBatting} need ${target} to win`)
       : `${nextBatting} coming out to begin the ${n + 1}${n + 1 === 2 ? 'nd' : n + 1 === 3 ? 'rd' : 'th'} innings`;
     const stakeLines = [];
     if (topScorer) stakeLines.push(`<div class="stake-line"><span class="stake-label">Top scorer</span><span class="stake-value">${escHtml(topScorer)}</span></div>`);
     if (bestBowling) stakeLines.push(`<div class="stake-line"><span class="stake-label">Best bowling</span><span class="stake-value">${escHtml(bestBowling)}</span></div>`);
-    if (target && maxOvers) {
+    if (target && isHundredFmt) {
+      stakeLines.push(`<div class="stake-line"><span class="stake-label">Target</span><span class="stake-value">${target} off 100 balls</span></div>`);
+    } else if (target && maxOvers) {
       stakeLines.push(`<div class="stake-line"><span class="stake-label">Required rate</span><span class="stake-value">${(target / maxOvers).toFixed(2)} from ${maxOvers} overs</span></div>`);
     } else if (completedInnings.total_wickets >= 10) {
-      stakeLines.push(`<div class="stake-line"><span class="stake-label">Shape of innings</span><span class="stake-value">All out after ${formatOvers(completedInnings.overs_completed || 0)} overs</span></div>`);
+      if (isHundredFmt) {
+        const bu = completedInnings.balls_used || Math.round((completedInnings.overs_completed || 0) * 6);
+        stakeLines.push(`<div class="stake-line"><span class="stake-label">Shape of innings</span><span class="stake-value">All out after ${bu} balls</span></div>`);
+      } else {
+        stakeLines.push(`<div class="stake-line"><span class="stake-label">Shape of innings</span><span class="stake-value">All out after ${formatOvers(completedInnings.overs_completed || 0)} overs</span></div>`);
+      }
     } else {
       stakeLines.push(`<div class="stake-line"><span class="stake-label">Shape of innings</span><span class="stake-value">${completedInnings.batting_team_name} closed on ${scoreStr}</span></div>`);
     }
@@ -5826,6 +5870,63 @@ function _detectAndQueueGraphics(res, delivery, preBallState, freshState) {
     }
   }
 
+  // ── The Hundred specific graphics ─────────────────────────────
+  const hs = res.hundred_state;
+  if (hs && !res.innings_complete && !res.match_complete) {
+    const freshInn  = freshState?.current_innings;
+    const teamScore = freshInn ? formatScore(freshInn.total_runs, freshInn.total_wickets) : '';
+    const bowlerPid = preBallState?.current_bowler_id;
+    const bInfo     = bowlerPid ? MatchUI.allPlayers[bowlerPid] : null;
+    const bwi       = (preBallState?.bowler_innings || []).find(b => b.player_id === bowlerPid) || {};
+
+    // Powerplay complete (ball 25 just crossed)
+    if (hs.powerplay_complete && preBallState) {
+      const prevBalls = (preBallState.over_number ?? 0) * 6 + (preBallState.ball_in_over ?? 0);
+      if (prevBalls < 25) {
+        gfx.push({
+          type: 'hundred_powerplay_complete',
+          teamScore,
+          balls: 25,
+        });
+      }
+    }
+
+    // Set complete (every 5 balls)
+    if (hs.set_complete) {
+      gfx.push({
+        type: 'hundred_set_complete',
+        setNumber: hs.set_number - 1,
+        bowlerName: bInfo?.name || 'Bowler',
+        runs: bwi.runs_conceded ?? 0,
+        wickets: bwi.wickets ?? 0,
+        progressBar: hs.progress_bar || '',
+      });
+    }
+
+    // Bowler maxed (20 balls)
+    const bwiAfter = (freshState?.bowler_innings || []).find(b => b.player_id === bowlerPid) || {};
+    const totalBallsAfter = (bwiAfter.overs ?? 0) * 6 + (bwiAfter.balls ?? 0);
+    if (totalBallsAfter >= 20 && ((bwi.overs ?? 0) * 6 + (bwi.balls ?? 0)) < 20) {
+      gfx.push({
+        type: 'hundred_bowler_maxed',
+        bowlerName: bInfo?.name || 'Bowler',
+        wickets: bwiAfter.wickets ?? 0,
+        runs: bwiAfter.runs_conceded ?? 0,
+      });
+    }
+
+    // Final 10 / 5 / 1 ball banners
+    if (hs.final_ball) {
+      gfx.push({ type: 'hundred_final_ball', ballsRemaining: 1 });
+    } else if (hs.final_five && !hs.final_ball) {
+      const prevBalls2 = (preBallState?.over_number ?? 0) * 6 + (preBallState?.ball_in_over ?? 0);
+      if (prevBalls2 < 95) gfx.push({ type: 'hundred_final_five', ballsRemaining: 5 });
+    } else if (hs.final_ten && !hs.final_five) {
+      const prevBalls3 = (preBallState?.over_number ?? 0) * 6 + (preBallState?.ball_in_over ?? 0);
+      if (prevBalls3 < 90) gfx.push({ type: 'hundred_final_ten', ballsRemaining: 10 });
+    }
+  }
+
   // Sort highest priority first and add to queue
   gfx.sort((a, b) => getGraphicPriority(b.type) - getGraphicPriority(a.type));
   gfx.forEach(g => GraphicQueue.add(g));
@@ -6480,7 +6581,7 @@ const ALM = {
   total:   0,
   sort:    '',
   dir:     'DESC',
-  formats: new Set(['Test', 'ODI', 'T20']),
+  formats: new Set(['Test', 'ODI', 'T20', 'Hundred']),
   modes:   new Set(['ai_vs_ai', 'human_vs_ai', 'human_vs_human']),
   _searchTimer: null,
 };
@@ -6732,7 +6833,7 @@ function resetAlmFilters() {
   document.getElementById('alm-f-mininnings').value = '';
   document.getElementById('alm-f-datefrom').value   = '';
   document.getElementById('alm-f-dateto').value     = '';
-  ALM.formats = new Set(['Test', 'ODI', 'T20']);
+  ALM.formats = new Set(['Test', 'ODI', 'T20', 'Hundred']);
   document.querySelectorAll('.alm-fmt-btn').forEach(b => b.classList.add('active'));
   ALM.modes   = new Set(['ai_vs_ai', 'human_vs_ai', 'human_vs_human']);
   document.querySelectorAll('.alm-mode-btn').forEach(b => b.classList.add('active'));
@@ -11010,7 +11111,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.body.classList.add('broadcast-mode');
     }
     const fmtSaved = localStorage.getItem('ribi_default_format');
-    if (fmtSaved && ['Test', 'ODI', 'T20'].includes(fmtSaved)) {
+    if (fmtSaved && ['Test', 'ODI', 'T20', 'Hundred'].includes(fmtSaved)) {
       AppState.defaultFormat = fmtSaved;
     }
     const scoringSaved = localStorage.getItem('ribi_default_scoring_mode');
@@ -11020,6 +11121,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const rollModeSaved = localStorage.getItem('ribi_default_roll_mode');
     if (rollModeSaved && ['auto', 'manual'].includes(rollModeSaved)) {
       AppState.defaultRollMode = rollModeSaved;
+    }
+    const canonSaved = localStorage.getItem('ribi_default_canon');
+    if (canonSaved && ['canon', 'exhibition'].includes(canonSaved)) {
+      AppState.defaultCanonStatus = canonSaved;
     }
     const venueSaved = localStorage.getItem('ribi_default_venue');
     if (venueSaved) {

@@ -602,3 +602,295 @@ def seed_world_records(db):
         row = {**defaults, **r}
         db.execute(insert_sql, row)
     db.commit()
+
+
+# ── The Hundred ────────────────────────────────────────────────────────────────
+
+# "The Hundred" is a registered trademark of the England and Wales Cricket Board (ECB).
+# The team names Birmingham Phoenix, London Spirit, Manchester Super Giants, MI London,
+# Southern Brave, Sunrisers Leeds, Trent Rockets, and Welsh Fire are trademarks of their
+# respective owners. This is an independent fan recreation not affiliated with the ECB.
+
+HUNDRED_VENUES = [
+    # Existing venues that need flagging — also add missing Hundred grounds
+    # (name, city, country)  — inserted only if not present, then flagged
+    ("Lord's Cricket Ground",      "London",       "England"),
+    ("The Oval",                   "London",       "England"),
+    ("Headingley",                 "Leeds",        "England"),
+    ("Edgbaston",                  "Birmingham",   "England"),
+    ("Old Trafford",               "Manchester",   "England"),
+    ("Ageas Bowl",                 "Southampton",  "England"),
+    ("Trent Bridge",               "Nottingham",   "England"),
+    ("Sophia Gardens",             "Cardiff",      "Wales"),
+]
+
+# Tuple: (team_name, player_name, batting_pos, bat_rating, bat_hand,
+#          bowl_type, bowl_action, bowl_rating)
+HUNDRED_SQUADS = [
+
+    # ── BIRMINGHAM PHOENIX ────────────────────────────────────────────────────
+    ("Birmingham Phoenix", "P. Salt",          1, 4, "right", "none",  None,                       0),
+    ("Birmingham Phoenix", "D. Mousley",       2, 3, "right", "none",  None,                       0),
+    ("Birmingham Phoenix", "H. Hameed",        3, 3, "right", "none",  None,                       0),
+    ("Birmingham Phoenix", "M. Critchley",     4, 3, "right", "spin",  "leg-break",                3),
+    ("Birmingham Phoenix", "B. Cox",           5, 3, "right", "none",  None,                       0),
+    ("Birmingham Phoenix", "K. Pieters",       6, 3, "right", "none",  None,                       0),
+    ("Birmingham Phoenix", "L. Banks",         7, 3, "left",  "spin",  "left-arm orthodox",        3),
+    ("Birmingham Phoenix", "C. Woakes",        8, 3, "right", "pace",  "right-arm seam",           4),
+    ("Birmingham Phoenix", "H. Brookes",       9, 2, "right", "pace",  "right-arm fast-medium",    3),
+    ("Birmingham Phoenix", "T. Mills",        10, 2, "left",  "pace",  "left-arm fast",            4),
+    ("Birmingham Phoenix", "O. Hannon-Dalby", 11, 1, "right", "pace",  "right-arm fast-medium",    3),
+    ("Birmingham Phoenix", "E. Bamber",       12, 1, "right", "pace",  "right-arm fast",           4),
+    ("Birmingham Phoenix", "R. Patel",        13, 2, "right", "spin",  "off-break",                3),
+    ("Birmingham Phoenix", "F. Vilas",        14, 4, "right", "none",  None,                       0),
+    ("Birmingham Phoenix", "J. Finch",        15, 3, "right", "spin",  "off-break",                2),
+
+    # ── LONDON SPIRIT ─────────────────────────────────────────────────────────
+    ("London Spirit", "Z. Crawley",          1, 3, "right", "none",  None,                         0),
+    ("London Spirit", "J. Roy",              2, 4, "right", "none",  None,                         0),
+    ("London Spirit", "D. Vince",            3, 3, "right", "none",  None,                         0),
+    ("London Spirit", "R. Bopara",           4, 3, "right", "pace",  "right-arm medium",           2),
+    ("London Spirit", "J. de Silva",         5, 3, "right", "spin",  "off-break",                  3),
+    ("London Spirit", "J. Overton",          6, 3, "right", "pace",  "right-arm fast-medium",      3),
+    ("London Spirit", "G. Clark",            7, 3, "right", "none",  None,                         0),
+    ("London Spirit", "Z. Gohar",            8, 2, "left",  "spin",  "left-arm orthodox",          4),
+    ("London Spirit", "D. Payne",            9, 1, "left",  "pace",  "left-arm fast-medium",       3),
+    ("London Spirit", "C. McKerr",          10, 1, "right", "pace",  "right-arm fast",             3),
+    ("London Spirit", "B. White",           11, 1, "right", "pace",  "right-arm fast-medium",      3),
+    ("London Spirit", "M. Quinn",           12, 1, "right", "pace",  "right-arm fast",             4),
+    ("London Spirit", "L. Trevaskis",       13, 2, "left",  "spin",  "left-arm orthodox",          3),
+    ("London Spirit", "S. Robson",          14, 3, "right", "none",  None,                         0),
+    ("London Spirit", "P. Handscomb",       15, 4, "right", "none",  None,                         0),
+
+    # ── MANCHESTER SUPER GIANTS ───────────────────────────────────────────────
+    ("Manchester Super Giants", "L. Livingstone",   1, 4, "right", "spin",  "leg-break",           2),
+    ("Manchester Super Giants", "S. Hain",          2, 3, "right", "none",  None,                  0),
+    ("Manchester Super Giants", "J. Buttler",       3, 5, "right", "none",  None,                  0),
+    ("Manchester Super Giants", "T. Head",          4, 4, "left",  "spin",  "off-break",           2),
+    ("Manchester Super Giants", "D. Bedingham",     5, 3, "right", "none",  None,                  0),
+    ("Manchester Super Giants", "R. Gleeson",       6, 1, "right", "pace",  "right-arm fast",      4),
+    ("Manchester Super Giants", "M. Parkinson",     7, 1, "right", "spin",  "leg-break",           4),
+    ("Manchester Super Giants", "T. Hartley",       8, 2, "left",  "spin",  "left-arm orthodox",   4),
+    ("Manchester Super Giants", "L. Wood",          9, 2, "left",  "pace",  "left-arm fast-medium",3),
+    ("Manchester Super Giants", "K. Carver",       10, 1, "right", "spin",  "leg-break",           3),
+    ("Manchester Super Giants", "J. Blatherwick",  11, 1, "right", "pace",  "right-arm fast",      3),
+    ("Manchester Super Giants", "J. Anderson",     12, 1, "right", "pace",  "right-arm fast-medium",4),
+    ("Manchester Super Giants", "M. Revis",        13, 3, "right", "none",  None,                  0),
+    ("Manchester Super Giants", "H. Hameed",       14, 3, "right", "none",  None,                  0),
+    ("Manchester Super Giants", "T. Tully",        15, 2, "right", "pace",  "right-arm medium",    2),
+
+    # ── MI LONDON ─────────────────────────────────────────────────────────────
+    ("MI London", "J. Burns",           1, 3, "right", "none",  None,                               0),
+    ("MI London", "W. Jacks",           2, 4, "right", "spin",  "off-break",                        3),
+    ("MI London", "D. Miller",          3, 4, "left",  "none",  None,                               0),
+    ("MI London", "S. Curran",          4, 3, "left",  "pace",  "left-arm fast-medium",             4),
+    ("MI London", "M. Pepper",          5, 3, "right", "none",  None,                               0),
+    ("MI London", "L. Plunkett",        6, 3, "right", "pace",  "right-arm fast-medium",            3),
+    ("MI London", "J. Winslow",         7, 3, "right", "none",  None,                               0),
+    ("MI London", "D. Willey",          8, 3, "left",  "pace",  "left-arm fast-medium",             4),
+    ("MI London", "T. Curran",          9, 3, "right", "pace",  "right-arm fast-medium",            4),
+    ("MI London", "R. Clarke",         10, 1, "right", "pace",  "right-arm fast-medium",            3),
+    ("MI London", "D. Moriarty",       11, 1, "left",  "spin",  "left-arm orthodox",                4),
+    ("MI London", "B. Geddes",         12, 1, "right", "pace",  "right-arm fast",                   3),
+    ("MI London", "J. Smith",          13, 3, "right", "spin",  "off-break",                        2),
+    ("MI London", "O. Pope",           14, 4, "right", "none",  None,                               0),
+    ("MI London", "N. Maddinson",      15, 3, "left",  "none",  None,                               0),
+
+    # ── SOUTHERN BRAVE ────────────────────────────────────────────────────────
+    ("Southern Brave", "J. Vince",          1, 4, "right", "none",  None,                           0),
+    ("Southern Brave", "Q. de Kock",        2, 4, "left",  "none",  None,                           0),
+    ("Southern Brave", "T. Alsop",          3, 3, "left",  "none",  None,                           0),
+    ("Southern Brave", "A. Rossington",     4, 3, "right", "none",  None,                           0),
+    ("Southern Brave", "C. Morris",         5, 3, "right", "pace",  "right-arm fast-medium",        4),
+    ("Southern Brave", "A. Turner",         6, 4, "right", "spin",  "off-break",                    2),
+    ("Southern Brave", "C. Jordan",         7, 2, "right", "pace",  "right-arm fast",               4),
+    ("Southern Brave", "D. Pretorius",      8, 2, "right", "pace",  "right-arm fast-medium",        3),
+    ("Southern Brave", "R. Topley",         9, 1, "left",  "pace",  "left-arm fast",                4),
+    ("Southern Brave", "C. Overton",       10, 2, "right", "pace",  "right-arm fast-medium",        3),
+    ("Southern Brave", "L. Dawson",        11, 3, "right", "spin",  "left-arm orthodox",            3),
+    ("Southern Brave", "F. Organ",         12, 3, "right", "spin",  "off-break",                    3),
+    ("Southern Brave", "J. Weatherley",    13, 3, "right", "none",  None,                           0),
+    ("Southern Brave", "I. Holland",       14, 2, "right", "spin",  "off-break",                    3),
+    ("Southern Brave", "T. Prest",         15, 3, "right", "none",  None,                           0),
+
+    # ── SUNRISERS LEEDS ───────────────────────────────────────────────────────
+    ("Sunrisers Leeds", "A. Lyth",           1, 3, "left",  "none",  None,                           0),
+    ("Sunrisers Leeds", "D. Malan",          2, 4, "left",  "spin",  "leg-break",                    1),
+    ("Sunrisers Leeds", "H. Brook",          3, 5, "right", "none",  None,                           0),
+    ("Sunrisers Leeds", "M. Lees",           4, 3, "right", "none",  None,                           0),
+    ("Sunrisers Leeds", "J. Tattersall",     5, 3, "right", "none",  None,                           0),
+    ("Sunrisers Leeds", "A. Hickey",         6, 3, "left",  "none",  None,                           0),
+    ("Sunrisers Leeds", "D. Willey",         7, 3, "left",  "pace",  "left-arm fast-medium",         4),
+    ("Sunrisers Leeds", "A. Waite",          8, 2, "right", "pace",  "right-arm fast-medium",        3),
+    ("Sunrisers Leeds", "M. Fisher",         9, 1, "right", "pace",  "right-arm fast",               3),
+    ("Sunrisers Leeds", "J. Thompson",      10, 1, "right", "pace",  "right-arm fast-medium",        3),
+    ("Sunrisers Leeds", "M. Cummins",       11, 1, "right", "pace",  "right-arm fast",               4),
+    ("Sunrisers Leeds", "D. Wiese",         12, 3, "right", "pace",  "right-arm fast-medium",        3),
+    ("Sunrisers Leeds", "A. Rashid",        13, 2, "right", "spin",  "leg-break",                    4),
+    ("Sunrisers Leeds", "T. Köhler-Cadmore",14, 4, "right", "none",  None,                           0),
+    ("Sunrisers Leeds", "B. Coad",          15, 1, "right", "pace",  "right-arm fast-medium",        3),
+
+    # ── TRENT ROCKETS ─────────────────────────────────────────────────────────
+    ("Trent Rockets", "A. Hales",         1, 4, "right", "none",  None,                              0),
+    ("Trent Rockets", "D. Conway",        2, 4, "left",  "none",  None,                              0),
+    ("Trent Rockets", "J. Fraser-McGurk", 3, 4, "right", "none",  None,                              0),
+    ("Trent Rockets", "G. Billings",      4, 3, "right", "none",  None,                              0),
+    ("Trent Rockets", "D. Christian",     5, 3, "right", "pace",  "right-arm medium",                3),
+    ("Trent Rockets", "L. Gregory",       6, 3, "right", "pace",  "right-arm fast-medium",           3),
+    ("Trent Rockets", "S. Mullaney",      7, 3, "right", "pace",  "right-arm medium",                2),
+    ("Trent Rockets", "L. Fletcher",      8, 2, "right", "pace",  "right-arm fast-medium",           4),
+    ("Trent Rockets", "J. Ball",          9, 1, "right", "pace",  "right-arm fast",                  4),
+    ("Trent Rockets", "M. Carter",       10, 1, "right", "spin",  "off-break",                       3),
+    ("Trent Rockets", "Z. Chappell",     11, 1, "right", "pace",  "right-arm fast",                  3),
+    ("Trent Rockets", "P. Coughlin",     12, 2, "right", "pace",  "right-arm fast-medium",           3),
+    ("Trent Rockets", "R. Paik",         13, 2, "right", "spin",  "off-break",                       3),
+    ("Trent Rockets", "S. Patel",        14, 3, "right", "spin",  "off-break",                       3),
+    ("Trent Rockets", "B. Duckett",      15, 3, "left",  "none",  None,                              0),
+
+    # ── WELSH FIRE ────────────────────────────────────────────────────────────
+    ("Welsh Fire", "T. Beaumont",        1, 4, "right", "none",  None,                               0),
+    ("Welsh Fire", "D. Lloyd",           2, 3, "left",  "none",  None,                               0),
+    ("Welsh Fire", "M. Labuschagne",     3, 5, "right", "spin",  "leg-break",                        2),
+    ("Welsh Fire", "C. Cooke",           4, 3, "right", "none",  None,                               0),
+    ("Welsh Fire", "K. Neesham",         5, 4, "left",  "pace",  "right-arm fast-medium",            3),
+    ("Welsh Fire", "R. Das",             6, 3, "right", "none",  None,                               0),
+    ("Welsh Fire", "K. Denly",           7, 3, "right", "spin",  "leg-break",                        2),
+    ("Welsh Fire", "M. de Lange",        8, 1, "right", "pace",  "right-arm fast",                   4),
+    ("Welsh Fire", "T. van der Gugten",  9, 1, "right", "pace",  "right-arm fast",                   4),
+    ("Welsh Fire", "L. Carey",          10, 1, "right", "pace",  "right-arm fast-medium",            3),
+    ("Welsh Fire", "R. Higgins",        11, 2, "right", "pace",  "right-arm fast-medium",            3),
+    ("Welsh Fire", "A. Salter",         12, 2, "right", "spin",  "off-break",                        3),
+    ("Welsh Fire", "N. Selman",         13, 3, "right", "none",  None,                               0),
+    ("Welsh Fire", "J. Weighell",       14, 2, "right", "pace",  "right-arm fast-medium",            3),
+    ("Welsh Fire", "D. Douthwaite",     15, 3, "right", "pace",  "right-arm fast-medium",            3),
+]
+
+
+def seed_hundred_teams(db):
+    """Seed The Hundred franchise teams, venues, players, and records. Idempotent."""
+
+    # 1. Ensure Hundred venues exist and are flagged
+    for name, city, country in HUNDRED_VENUES:
+        exists = db.execute("SELECT id FROM venues WHERE name=?", (name,)).fetchone()
+        if not exists:
+            db.execute(
+                "INSERT INTO venues (name, city, country) VALUES (?, ?, ?)",
+                (name, city, country)
+            )
+        # Flag as Hundred venue (idempotent update)
+        db.execute(
+            "UPDATE venues SET is_hundred_venue=1 WHERE name=?", (name,)
+        )
+
+    # 2. Hundred team definitions
+    hundred_team_defs = [
+        ("Birmingham Phoenix",     "PHX", "#FF6B35", "Edgbaston"),
+        ("London Spirit",          "SPR", "#003087", "Lord's Cricket Ground"),
+        ("Manchester Super Giants","MSG", "#C41E3A", "Old Trafford"),
+        ("MI London",              "MIL", "#004BA0", "The Oval"),
+        ("Southern Brave",         "BRV", "#E4002B", "Ageas Bowl"),
+        ("Sunrisers Leeds",        "SRL", "#FF6600", "Headingley"),
+        ("Trent Rockets",          "TRR", "#00205B", "Trent Bridge"),
+        ("Welsh Fire",             "WLF", "#E4002B", "Sophia Gardens"),
+    ]
+
+    for team_name, code, colour, venue_name in hundred_team_defs:
+        exists = db.execute("SELECT id FROM teams WHERE name=?", (team_name,)).fetchone()
+        if exists:
+            continue
+        venue_row = db.execute("SELECT id FROM venues WHERE name=?", (venue_name,)).fetchone()
+        venue_id  = venue_row['id'] if venue_row else None
+        db.execute(
+            "INSERT INTO teams (name, short_code, badge_colour, home_venue_id, "
+            "is_real, team_type, league, is_hundred_team) "
+            "VALUES (?, ?, ?, ?, 1, 'domestic', 'The Hundred', 1)",
+            (team_name, code, colour, venue_id)
+        )
+
+    # 3. Seed players for each Hundred team
+    for (team_name, name, pos, bat_r, bat_h, bowl_t, bowl_a, bowl_r) in HUNDRED_SQUADS:
+        team_row = db.execute("SELECT id FROM teams WHERE name=?", (team_name,)).fetchone()
+        if not team_row:
+            continue
+        team_id = team_row['id']
+        exists = db.execute(
+            "SELECT id FROM players WHERE team_id=? AND name=?", (team_id, name)
+        ).fetchone()
+        if exists:
+            continue
+        db.execute(
+            "INSERT INTO players (team_id, name, batting_position, batting_rating, "
+            "batting_hand, bowling_type, bowling_action, bowling_rating) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (team_id, name, pos, bat_r, bat_h, bowl_t, bowl_a, bowl_r)
+        )
+
+    # 4. Seed Hundred real-world records
+    hundred_records = [
+        {
+            'record_key':   'highest_score_hundred',
+            'format':       'Hundred',
+            'record_type':  'batting_score',
+            'value_runs':   118,
+            'display_value':'118',
+            'holder_name':  'T. Beaumont',
+            'team_name':    'Welsh Fire',
+            'opponent_name':'Trent Rockets',
+            'match_date':   '2023-08-14',
+            'notes':        'Highest individual score in Hundred history (Women, 61 balls)',
+        },
+        {
+            'record_key':   'highest_team_total_hundred',
+            'format':       'Hundred',
+            'record_type':  'team_total',
+            'value_runs':   226,
+            'value_wickets': 4,
+            'display_value':'226/4',
+            'team_name':    'MI London',
+            'opponent_name':'Welsh Fire',
+            'notes':        'Highest team total in Hundred history (Men)',
+        },
+        {
+            'record_key':   'lowest_team_total_hundred',
+            'format':       'Hundred',
+            'record_type':  'team_total_low',
+            'value_runs':   75,
+            'value_wickets': 10,
+            'display_value':'75 all out',
+            'team_name':    'Birmingham Phoenix',
+            'opponent_name':'Manchester Originals',
+            'notes':        'Lowest team total in Hundred history (Men, 74 balls)',
+        },
+        {
+            'record_key':   'best_bowling_hundred',
+            'format':       'Hundred',
+            'record_type':  'bowling_figures',
+            'value_wickets': 5,
+            'value_runs_conceded': 16,
+            'display_value':'5/16',
+            'holder_name':  'S. Curran',
+            'team_name':    'MI London',
+            'opponent_name':'London Spirit',
+            'notes':        'Best bowling figures in Hundred history (Men)',
+        },
+    ]
+
+    insert_sql = (
+        "INSERT OR IGNORE INTO real_world_records "
+        "(record_key, format, record_type, value_runs, value_wickets, "
+        " value_runs_conceded, value_decimal, display_value, "
+        " holder_name, team_name, opponent_name, venue_name, match_date, notes) "
+        "VALUES "
+        "(:record_key, :format, :record_type, :value_runs, :value_wickets, "
+        " :value_runs_conceded, :value_decimal, :display_value, "
+        " :holder_name, :team_name, :opponent_name, :venue_name, :match_date, :notes)"
+    )
+    rec_defaults = {
+        'value_runs': None, 'value_wickets': None, 'value_runs_conceded': None,
+        'value_decimal': None, 'holder_name': None, 'team_name': None,
+        'opponent_name': None, 'venue_name': None, 'match_date': None, 'notes': None,
+    }
+    for r in hundred_records:
+        db.execute(insert_sql, {**rec_defaults, **r})
+
+    db.commit()

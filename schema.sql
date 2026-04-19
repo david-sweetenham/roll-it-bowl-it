@@ -455,3 +455,22 @@ JOIN players b2 ON p.batter2_id = b2.id
 JOIN innings i ON p.innings_id = i.id
 JOIN matches m ON i.match_id = m.id
 WHERE COALESCE(m.canon_status, 'canon') = 'canon';
+
+-- REAL WORLD RECORDS
+CREATE TABLE IF NOT EXISTS real_world_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_key TEXT NOT NULL,
+    format TEXT NOT NULL,
+    record_type TEXT NOT NULL,
+    value_runs INTEGER,
+    value_wickets INTEGER,
+    value_runs_conceded INTEGER,
+    value_decimal REAL,
+    display_value TEXT NOT NULL,
+    holder_name TEXT,
+    team_name TEXT,
+    opponent_name TEXT,
+    venue_name TEXT,
+    match_date TEXT,
+    notes TEXT
+);

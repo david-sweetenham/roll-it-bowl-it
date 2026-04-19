@@ -1,3 +1,7 @@
+import sys
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+
 from flask import Flask, jsonify, request, render_template, Response, stream_with_context
 from flask_cors import CORS
 import json
@@ -79,7 +83,7 @@ def _determine_next_innings(match, all_innings, fmt):
     """Return (batting_team_id, bowling_team_id, innings_number) or None if match over."""
     completed = [i for i in all_innings if i['status'] == 'complete']
     n = len(completed)
-    if fmt in ('ODI', 'T20'):
+    if fmt in ('ODI', 'T20', 'Hundred'):
         if n == 1:
             first = completed[0]
             return (first['bowling_team_id'], first['batting_team_id'], 2)
@@ -165,7 +169,7 @@ def _calculate_and_complete_match(db, match_id, match, all_innings):
     if not inn1 or not inn2:
         return
 
-    if fmt in ('ODI', 'T20'):
+    if fmt in ('ODI', 'T20', 'Hundred'):
         result = game_engine.calculate_result(
             inn1['total_runs'], inn1['total_wickets'],
             inn2['total_runs'], inn2['total_wickets'],
@@ -396,6 +400,12 @@ def get_teams():
     db = database.get_db()
     try:
         teams = database.get_teams(db)
+        # Optional filter: ?hundred=1 returns only Hundred teams; ?hundred=0 excludes them
+        hundred_filter = request.args.get('hundred')
+        if hundred_filter == '1':
+            teams = [t for t in teams if t.get('is_hundred_team')]
+        elif hundred_filter == '0':
+            teams = [t for t in teams if not t.get('is_hundred_team')]
         return jsonify({"teams": teams, "count": len(teams)})
     finally:
         database.close_db(db)
@@ -528,6 +538,12 @@ def get_venues():
     db = database.get_db()
     try:
         venues = database.get_venues(db)
+        # Optional filter: ?hundred=1 returns only Hundred venues
+        hundred_filter = request.args.get('hundred')
+        if hundred_filter == '1':
+            venues = [v for v in venues if v.get('is_hundred_venue')]
+        elif hundred_filter == '0':
+            venues = [v for v in venues if not v.get('is_hundred_venue')]
         return jsonify({"venues": venues, "count": len(venues)})
     finally:
         database.close_db(db)
@@ -567,8 +583,8 @@ def start_match():
     for field in ('team1_id', 'team2_id', 'format', 'venue_id', 'match_date'):
         if not data.get(field):
             return err(f'{field} is required')
-    if data['format'] not in ('Test', 'ODI', 'T20'):
-        return err('format must be Test, ODI or T20')
+    if data['format'] not in ('Test', 'ODI', 'T20', 'Hundred'):
+        return err('format must be Test, ODI, T20 or Hundred')
     scoring_mode = data.get('scoring_mode', 'modern')
     if scoring_mode not in ('classic', 'modern'):
         scoring_mode = 'modern'
@@ -806,23 +822,40 @@ def bowl_ball_route(id):
                 }
                 for b in state['bowler_innings']
             ]
-            cap_map = {'T20': 4, 'ODI': 10, 'Test': None}
+            cap_map = {'T20': 4, 'ODI': 10, 'Test': None, 'Hundred': None}
             cap = cap_map.get(fmt)
             if human_bowling and not requested_bowler:
                 return err('bowler_id required for human-controlled bowling changes')
             if requested_bowler:
                 rb = next((b for b in bowler_list if b['player_id'] == requested_bowler), None)
-                valid = (rb is not None
-                         and rb['player_id'] != state['last_bowler_id']
-                         and (cap is None or rb['overs_bowled'] < cap))
+                if fmt == 'Hundred':
+                    import hundred_engine as _he
+                    balls_this_bowler = (rb['overs_bowled'] * 6 + rb['balls_bowled']) if rb else 0
+                    valid = (rb is not None and balls_this_bowler < _he.HUNDRED_BOWLER_MAX)
+                else:
+                    valid = (rb is not None
+                             and rb['player_id'] != state['last_bowler_id']
+                             and (cap is None or rb['overs_bowled'] < cap))
                 if valid:
                     bowler_id = requested_bowler
                 elif human_bowling:
                     return err('Invalid bowler selection for this over')
             if bowler_id is None:
-                bowler_id = game_engine.select_bowler(
-                    bowler_list, over_number, fmt, state['last_bowler_id']
-                )
+                if fmt == 'Hundred':
+                    import hundred_engine as _he
+                    _b100_list = [
+                        {**b, 'balls_bowled': b['overs_bowled'] * 6 + b['balls_bowled']}
+                        for b in bowler_list
+                    ]
+                    sel = _he.select_hundred_bowler(
+                        _b100_list, state['last_bowler_id'],
+                        'pavilion', 1,
+                    )
+                    bowler_id = sel['player_id']
+                else:
+                    bowler_id = game_engine.select_bowler(
+                        bowler_list, over_number, fmt, state['last_bowler_id']
+                    )
 
         # Look up current entities
         striker = next(
@@ -839,15 +872,29 @@ def bowl_ball_route(id):
             return err('Cannot find striker or bowler data')
 
         # ── Roll the ball ──────────────────────────────────────────────────────
-        ball_result = game_engine.bowl_ball(
-            batter_rating  = striker['batting_rating'],
-            bowler_rating  = bowler_row['bowling_rating'],
-            bowling_type   = bowler_row['bowling_type'],
-            is_free_hit    = is_free_hit,
-            partnership_balls = 0,
-            scoring_mode   = state['match'].get('scoring_mode', 'modern'),
-            format         = fmt,
-        )
+        if fmt == 'Hundred':
+            import hundred_engine as _he
+            # Count legal balls bowled so far this innings
+            _legal_so_far = over_number * 6 + ball_in_over
+            _is_pp = _legal_so_far < _he.HUNDRED_POWERPLAY
+            ball_result = _he.bowl_hundred_ball(
+                batter_rating  = striker['batting_rating'],
+                bowler_rating  = bowler_row['bowling_rating'],
+                bowling_type   = bowler_row['bowling_type'],
+                is_free_hit    = is_free_hit,
+                balls_faced    = 0,
+                is_powerplay   = _is_pp,
+            )
+        else:
+            ball_result = game_engine.bowl_ball(
+                batter_rating  = striker['batting_rating'],
+                bowler_rating  = bowler_row['bowling_rating'],
+                bowling_type   = bowler_row['bowling_type'],
+                is_free_hit    = is_free_hit,
+                partnership_balls = 0,
+                scoring_mode   = state['match'].get('scoring_mode', 'modern'),
+                format         = fmt,
+            )
 
         is_legal  = ball_result['outcome_type'] not in ('wide', 'no_ball')
         is_wicket = ball_result['outcome_type'] == 'wicket'
@@ -1188,6 +1235,26 @@ def bowl_ball_route(id):
             (innings_id,)
         ).fetchone()
 
+        # Hundred-specific state additions
+        hundred_state = None
+        if fmt == 'Hundred':
+            import hundred_engine as _he
+            _legal_total = legal_after
+            hundred_state = {
+                'balls_bowled':    _legal_total,
+                'balls_remaining': max(0, _he.HUNDRED_BALLS - _legal_total),
+                'is_powerplay':    _legal_total < _he.HUNDRED_POWERPLAY,
+                'powerplay_complete': _legal_total >= _he.HUNDRED_POWERPLAY,
+                'set_number':      (_legal_total // _he.HUNDRED_SET_SIZE) + 1,
+                'ball_in_set':     _legal_total % _he.HUNDRED_SET_SIZE,
+                'set_complete':    is_legal and (_legal_total % _he.HUNDRED_SET_SIZE == 0),
+                'final_ten':       _legal_total >= 90,
+                'final_five':      _legal_total >= 95,
+                'final_ball':      _legal_total == 99,
+                'progress_bar':    _he.render_hundred_progress_bar(_legal_total),
+                'progress_text':   _he.format_hundred_progress(_legal_total),
+            }
+
         return jsonify({
             'delivery':       database.dict_from_row(delivery_row),
             'innings_state':  _condense_state(fresh_state),
@@ -1196,6 +1263,7 @@ def bowl_ball_route(id):
             'records_broken': records_broken,
             'innings_complete': innings_complete,
             'match_complete':   match_complete,
+            'hundred_state':    hundred_state,
             'match_state':      {
                 'over_number':   fresh_state['over_number'],
                 'ball_in_over':  fresh_state['ball_in_over'],
@@ -1348,10 +1416,16 @@ def fast_sim(id):
                 for p in state['bowling_team_players'] if p['bowling_type'] != 'none'
             ]
 
-            result = game_engine.simulate_innings_fast(
-                batting_players, bowling_players, fmt, target,
-                scoring_mode=state['match'].get('scoring_mode', 'modern')
-            )
+            if fmt == 'Hundred':
+                import hundred_engine as _he
+                result = _he.simulate_hundred_innings_fast(
+                    batting_players, bowling_players, target
+                )
+            else:
+                result = game_engine.simulate_innings_fast(
+                    batting_players, bowling_players, fmt, target,
+                    scoring_mode=state['match'].get('scoring_mode', 'modern')
+                )
 
             # Persist batter scores
             for bs in result['batter_scores']:
@@ -1377,22 +1451,44 @@ def fast_sim(id):
                     None
                 )
                 if row:
-                    database.update_bowler_innings(db, row['id'], {
-                        'overs':        bf['overs'],
-                        'balls':        bf['balls'],
-                        'runs_conceded': bf['runs'],
-                        'wickets':      bf['wickets'],
-                        'maidens':      bf['maidens'],
-                    })
+                    if fmt == 'Hundred':
+                        # Hundred: track balls not overs; convert for DB storage
+                        total_balls = bf['balls']
+                        overs_full  = total_balls // 6
+                        balls_rem   = total_balls % 6
+                        database.update_bowler_innings(db, row['id'], {
+                            'overs':        overs_full,
+                            'balls':        balls_rem,
+                            'runs_conceded': bf['runs'],
+                            'wickets':      bf['wickets'],
+                            'maidens':      0,
+                        })
+                    else:
+                        database.update_bowler_innings(db, row['id'], {
+                            'overs':        bf['overs'],
+                            'balls':        bf['balls'],
+                            'runs_conceded': bf['runs'],
+                            'wickets':      bf['wickets'],
+                            'maidens':      bf['maidens'],
+                        })
 
             # Persist fall of wickets
             for fow in result.get('fall_of_wickets', []):
+                if fmt == 'Hundred':
+                    # Hundred uses balls, not overs
+                    fow_overs = round(fow['balls'] / 6, 2)
+                else:
+                    fow_overs = fow['overs']
                 database.insert_fall_of_wicket(
                     db, innings_id,
-                    fow['wicket'], fow['score'], fow['overs'], fow['player_id']
+                    fow['wicket'], fow['score'], fow_overs, fow['player_id']
                 )
 
-            overs_dec = result['overs_completed']
+            if fmt == 'Hundred':
+                balls_bowled = result.get('total_balls_bowled', 0)
+                overs_dec = round(balls_bowled / 6, 2)
+            else:
+                overs_dec = result['overs_completed']
             innings_update = {
                 'total_runs':     result['total_runs'],
                 'total_wickets':  result['total_wickets'],
@@ -1407,6 +1503,14 @@ def fast_sim(id):
                 'extras_legbyes': result['extras']['leg_byes'],
                 'status':         'complete',
             }
+            if fmt == 'Hundred':
+                innings_update['balls_used']        = result.get('total_balls_bowled', 0)
+                innings_update['powerplay_runs']    = result.get('powerplay_score', 0)
+                innings_update['powerplay_wickets'] = result.get('powerplay_wickets', 0)
+                innings_update['death_runs']        = result.get('death_score', 0)
+                innings_update['death_wickets']     = result.get('death_wickets', 0)
+                if result.get('strategic_timeout_at_ball') is not None:
+                    innings_update['strategic_timeout_ball'] = result['strategic_timeout_at_ball']
             database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(inn, innings_update))
 
             # Next innings or complete
@@ -1867,7 +1971,7 @@ def scorecard_response(match_id, db):
                        (inn.get('extras_wides', 0) or 0) + \
                        (inn.get('extras_noballs', 0) or 0)
 
-        innings_data.append({
+        inn_dict = {
             'innings_number':   inn['innings_number'],
             'batting_team_id':  inn['batting_team_id'],
             'batting_team_name': inn['batting_team_name'],
@@ -1887,7 +1991,23 @@ def scorecard_response(match_id, db):
                 'no_balls': inn.get('extras_noballs', 0) or 0,
                 'total':    extras_total,
             },
-        })
+        }
+        # Hundred-specific fields
+        if match.get('format') == 'Hundred':
+            balls_used = inn.get('balls_used') or 0
+            inn_dict['balls_used']        = balls_used
+            inn_dict['balls_remaining']   = max(0, 100 - balls_used)
+            inn_dict['powerplay_score']   = inn.get('powerplay_runs', 0) or 0
+            inn_dict['powerplay_wickets'] = inn.get('powerplay_wickets', 0) or 0
+            inn_dict['death_score']       = inn.get('death_runs', 0) or 0
+            inn_dict['death_wickets']     = inn.get('death_wickets', 0) or 0
+            inn_dict['strategic_timeout_ball'] = inn.get('strategic_timeout_ball')
+            # Per-bowler: convert to balls-only display
+            for bw in bowlers:
+                total_balls_bw = bw['overs'] * 6 + bw['balls']
+                bw['total_balls'] = total_balls_bw
+                bw['balls_remaining'] = max(0, 20 - total_balls_bw)
+        innings_data.append(inn_dict)
 
     return jsonify({
         'match':        match,
@@ -2013,8 +2133,8 @@ def create_series():
 
     if not name or not fmt or not team1_id or not team2_id:
         return err('name, format, team1_id and team2_id are required')
-    if fmt not in ('Test', 'ODI', 'T20'):
-        return err('format must be Test, ODI or T20')
+    if fmt not in ('Test', 'ODI', 'T20', 'Hundred'):
+        return err('format must be Test, ODI, T20 or Hundred')
     if num_matches not in (2, 3, 5, 7):
         return err('num_matches must be 2, 3, 5 or 7')
     if not venue_ids:
@@ -2224,9 +2344,9 @@ def create_tournament():
 
     if not name:
         return err('name is required')
-    if fmt not in ('Test', 'ODI', 'T20'):
-        return err('format must be Test, ODI or T20')
-    if ttype not in ('world_cup', 't20_world_cup', 'tri_series'):
+    if fmt not in ('Test', 'ODI', 'T20', 'Hundred'):
+        return err('format must be Test, ODI, T20 or Hundred')
+    if ttype not in ('world_cup', 't20_world_cup', 'tri_series', 'the_hundred'):
         return err('tournament_type must be world_cup, t20_world_cup or tri_series')
 
     expected = {'world_cup': 10, 't20_world_cup': 8, 'tri_series': 3}
@@ -5550,7 +5670,7 @@ def fixture_start_live(id, fid):
             venue_id = fb['id'] if fb else None
 
         fmt = fixture.get('format', 'T20')
-        if fmt not in ('Test', 'ODI', 'T20'):
+        if fmt not in ('Test', 'ODI', 'T20', 'Hundred'):
             fmt = 'T20'
 
         world_state = _build_world_state(db, id)
