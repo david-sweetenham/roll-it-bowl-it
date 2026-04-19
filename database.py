@@ -318,7 +318,10 @@ def update_innings(db, innings_id, data):
         'runs_at_100_overs', 'wickets_at_100_overs',
         'runs_at_110_overs', 'wickets_at_110_overs',
         'extras_byes', 'extras_legbyes', 'extras_wides', 'extras_noballs',
-        'declared', 'follow_on', 'status'
+        'declared', 'follow_on', 'status',
+        # The Hundred phase columns
+        'balls_used', 'powerplay_runs', 'powerplay_wickets',
+        'death_runs', 'death_wickets', 'strategic_timeout_ball',
     ]
     sets = ', '.join(f"{k} = :{k}" for k in allowed if k in data)
     if not sets:
@@ -1234,6 +1237,96 @@ def run_migrations(db):
         except Exception:
             pass  # column already exists
 
+    # The Hundred — widen format CHECK on matches and series to include 'Hundred'.
+    # SQLite can't ALTER a column constraint, so we do the rename→create→copy→drop dance.
+    # Wrapped in a savepoint so it's atomic and safe to re-run (idempotent via the sentinel).
+    _matches_sentinel = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches' "
+        "AND sql LIKE '%Hundred%'"
+    ).fetchone()
+    if not _matches_sentinel:
+        db.execute("PRAGMA foreign_keys = OFF")
+        db.execute("PRAGMA legacy_alter_table = ON")
+        db.execute("ALTER TABLE matches RENAME TO matches_old")
+        db.execute(
+            "CREATE TABLE matches ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  series_id INTEGER,"
+            "  tournament_id INTEGER,"
+            "  world_id INTEGER,"
+            "  format TEXT CHECK(format IN ('Test','ODI','T20','Hundred')),"
+            "  venue_id INTEGER NOT NULL,"
+            "  match_date TEXT NOT NULL,"
+            "  team1_id INTEGER NOT NULL,"
+            "  team2_id INTEGER NOT NULL,"
+            "  toss_winner_id INTEGER,"
+            "  toss_choice TEXT CHECK(toss_choice IN ('bat','field')),"
+            "  result_type TEXT CHECK(result_type IN ('runs','wickets','draw','tie','no_result')),"
+            "  winning_team_id INTEGER,"
+            "  margin_runs INTEGER,"
+            "  margin_wickets INTEGER,"
+            "  player_of_match_id INTEGER,"
+            "  status TEXT DEFAULT 'in_progress',"
+            "  scoring_mode TEXT DEFAULT 'modern',"
+            "  match_notes TEXT,"
+            "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+            "  deliveries_archive_json TEXT,"
+            "  canon_status TEXT DEFAULT 'canon',"
+            "  player_mode TEXT DEFAULT 'ai_vs_ai',"
+            "  human_team_id INTEGER DEFAULT NULL,"
+            "  FOREIGN KEY (series_id) REFERENCES series(id),"
+            "  FOREIGN KEY (tournament_id) REFERENCES tournaments(id),"
+            "  FOREIGN KEY (world_id) REFERENCES worlds(id),"
+            "  FOREIGN KEY (venue_id) REFERENCES venues(id),"
+            "  FOREIGN KEY (team1_id) REFERENCES teams(id),"
+            "  FOREIGN KEY (team2_id) REFERENCES teams(id)"
+            ")"
+        )
+        db.execute(
+            "INSERT INTO matches SELECT "
+            "  id, series_id, tournament_id, world_id, format, venue_id, match_date,"
+            "  team1_id, team2_id, toss_winner_id, toss_choice, result_type,"
+            "  winning_team_id, margin_runs, margin_wickets, player_of_match_id,"
+            "  status, scoring_mode, match_notes, created_at, deliveries_archive_json,"
+            "  canon_status, player_mode, human_team_id "
+            "FROM matches_old"
+        )
+        db.execute("DROP TABLE matches_old")
+        db.execute("PRAGMA legacy_alter_table = OFF")
+        db.execute("PRAGMA foreign_keys = ON")
+
+    _series_sentinel = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='series' "
+        "AND sql LIKE '%Hundred%'"
+    ).fetchone()
+    if not _series_sentinel:
+        db.execute("PRAGMA foreign_keys = OFF")
+        db.execute("PRAGMA legacy_alter_table = ON")
+        db.execute("ALTER TABLE series RENAME TO series_old")
+        db.execute(
+            "CREATE TABLE series ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  name TEXT NOT NULL,"
+            "  format TEXT CHECK(format IN ('Test','ODI','T20','Hundred')),"
+            "  series_type TEXT,"
+            "  world_id INTEGER,"
+            "  start_date TEXT,"
+            "  end_date TEXT,"
+            "  team1_id INTEGER,"
+            "  team2_id INTEGER,"
+            "  winner_team_id INTEGER,"
+            "  status TEXT DEFAULT 'scheduled',"
+            "  settings_json TEXT,"
+            "  FOREIGN KEY (world_id) REFERENCES worlds(id),"
+            "  FOREIGN KEY (team1_id) REFERENCES teams(id),"
+            "  FOREIGN KEY (team2_id) REFERENCES teams(id)"
+            ")"
+        )
+        db.execute("INSERT INTO series SELECT * FROM series_old")
+        db.execute("DROP TABLE series_old")
+        db.execute("PRAGMA legacy_alter_table = OFF")
+        db.execute("PRAGMA foreign_keys = ON")
+
     # The Hundred — set-by-set data table
     db.execute(
         "CREATE TABLE IF NOT EXISTS hundred_sets ("
@@ -1446,6 +1539,10 @@ def run_migrations(db):
         "  notes TEXT"
         ")"
     )
+
+    # The Hundred — seed franchise teams, venues, players, and records (idempotent)
+    import seed_data as _sd
+    _sd.seed_hundred_teams(db)
 
     db.commit()
 

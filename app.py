@@ -847,9 +847,15 @@ def bowl_ball_route(id):
                         {**b, 'balls_bowled': b['overs_bowled'] * 6 + b['balls_bowled']}
                         for b in bowler_list
                     ]
+                    # Derive bowling end from legal balls bowled (toggles every 2 sets of 5)
+                    _legal_bowled = over_number * 6 + ball_in_over
+                    _complete_sets = _legal_bowled // _he.HUNDRED_SET_SIZE
+                    _end_block = _complete_sets // _he.HUNDRED_MAX_SETS
+                    _hundred_end = 'pavilion' if _end_block % 2 == 0 else 'nursery'
+                    _sets_this_end = (_complete_sets % _he.HUNDRED_MAX_SETS) + 1
                     sel = _he.select_hundred_bowler(
                         _b100_list, state['last_bowler_id'],
-                        'pavilion', 1,
+                        _hundred_end, _sets_this_end,
                     )
                     bowler_id = sel['player_id']
                 else:
@@ -1511,7 +1517,7 @@ def fast_sim(id):
                 innings_update['death_wickets']     = result.get('death_wickets', 0)
                 if result.get('strategic_timeout_at_ball') is not None:
                     innings_update['strategic_timeout_ball'] = result['strategic_timeout_at_ball']
-            database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(inn, innings_update))
+            database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings, innings_update))
 
             # Next innings or complete
             all_innings_fresh = database.get_innings(db, id)

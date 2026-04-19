@@ -69,7 +69,7 @@ def select_hundred_bowler(bowlers, last_bowler_id, current_end,
     - After HUNDRED_MAX_SETS consecutive sets from same end, must change end
     - Captain can voluntarily switch end after just 1 set
     """
-    must_change_end = sets_from_current_end >= HUNDRED_MAX_SETS
+    must_change_end = sets_from_current_end > HUNDRED_MAX_SETS
     new_end = 'nursery' if current_end == 'pavilion' else 'pavilion'
 
     def eligible(b):
@@ -382,7 +382,7 @@ def calculate_hundred_result(innings1_runs, innings1_wickets,
         result['description']    = (
             f'Team 2 won by {wickets_remaining} wicket{"s" if wickets_remaining != 1 else ""}'
         )
-    elif innings2_runs == innings1_runs and innings2_wickets == 10:
+    elif innings2_runs == innings1_runs:
         result['result_type']  = 'tie'
         result['description']  = 'Match tied'
     else:
