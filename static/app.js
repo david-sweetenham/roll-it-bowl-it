@@ -1530,10 +1530,12 @@ function renderStoryStrip(state) {
   if (overBalls.length >= 3) {
     const recentRuns = overBalls.reduce((sum, d) => sum + (d.runs_scored || 0) + ((d.is_wide || d.is_no_ball) ? 1 : 0), 0);
     const wicketThisOver = overBalls.some(d => d.outcome_type === 'wicket');
+    const isHundredFmt = (state.format || match?.format) === 'Hundred';
+    const unitLabel = isHundredFmt ? 'this set' : 'this over';
     if (wicketThisOver) {
-      stories.push({ tone: 'danger', text: 'Wicket in the over - pressure on' });
+      stories.push({ tone: 'danger', text: `Wicket in ${unitLabel} - pressure on` });
     } else if (recentRuns >= 10) {
-      stories.push({ tone: 'hot', text: `${recentRuns} runs already in this over` });
+      stories.push({ tone: 'hot', text: `${recentRuns} runs already in ${unitLabel}` });
     } else if (recentRuns === 0 && overBalls.length >= 4) {
       stories.push({ tone: 'neutral', text: 'Dot-ball pressure building' });
     }

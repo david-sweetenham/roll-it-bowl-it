@@ -619,7 +619,7 @@ HUNDRED_VENUES = [
     ("Headingley",                 "Leeds",        "England"),
     ("Edgbaston",                  "Birmingham",   "England"),
     ("Old Trafford",               "Manchester",   "England"),
-    ("Ageas Bowl",                 "Southampton",  "England"),
+    ("Utilita Bowl",               "Southampton",  "England"),
     ("Trent Bridge",               "Nottingham",   "England"),
     ("Sophia Gardens",             "Cardiff",      "Wales"),
 ]
@@ -788,7 +788,7 @@ def seed_hundred_teams(db):
         ("London Spirit",          "SPR", "#003087", "Lord's Cricket Ground"),
         ("Manchester Super Giants","MSG", "#C41E3A", "Old Trafford"),
         ("MI London",              "MIL", "#004BA0", "The Oval"),
-        ("Southern Brave",         "BRV", "#E4002B", "Ageas Bowl"),
+        ("Southern Brave",         "BRV", "#E4002B", "Utilita Bowl"),
         ("Sunrisers Leeds",        "SRL", "#FF6600", "Headingley"),
         ("Trent Rockets",          "TRR", "#00205B", "Trent Bridge"),
         ("Welsh Fire",             "WLF", "#E4002B", "Sophia Gardens"),
