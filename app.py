@@ -76,6 +76,52 @@ def _apply_innings_cutoff_snapshots(existing_innings, innings_update):
     return updated
 
 
+def _pick_keeper_candidate(fielders, bowler_id):
+    candidates = [p for p in fielders if p.get('id') != bowler_id]
+    non_bowlers = [p for p in candidates if p.get('bowling_type') == 'none']
+    if non_bowlers:
+        return min(non_bowlers, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
+    if candidates:
+        return min(candidates, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
+    return None
+
+
+def _choose_fielder_for_wicket(fielders, bowler_id, dismissal_type, caught_type=None):
+    if dismissal_type not in ('caught', 'run_out', 'stumped'):
+        return None
+
+    if dismissal_type == 'stumped' or caught_type == 'caught_behind':
+        keeper = _pick_keeper_candidate(fielders, bowler_id)
+        return keeper.get('id') if keeper else None
+
+    non_bowler_fielders = [p for p in fielders if p.get('id') != bowler_id]
+    all_fielders = list(fielders)
+
+    if dismissal_type == 'run_out':
+        pool = non_bowler_fielders or all_fielders
+        if not pool:
+            return None
+        return random.choice(pool).get('id')
+
+    if dismissal_type == 'caught':
+        if caught_type in ('caught_slip', 'caught_boundary'):
+            pool = non_bowler_fielders or all_fielders
+            if not pool:
+                return None
+            return random.choice(pool).get('id')
+
+        caught_and_bowled_roll = random.random()
+        if bowler_id and caught_and_bowled_roll < 0.18:
+            return bowler_id
+
+        pool = non_bowler_fielders or all_fielders
+        if not pool:
+            return bowler_id
+        return random.choice(pool).get('id')
+
+    return None
+
+
 def _determine_next_innings(match, all_innings, fmt):
     """Return (batting_team_id, bowling_team_id, innings_number) or None if match over."""
     completed = [i for i in all_innings if i['status'] == 'complete']
@@ -1025,6 +1071,12 @@ def bowl_ball_route(id):
             'overs':  f'{over_number}.{ball_in_over}',
         }
         commentary = game_engine.generate_commentary(ball_result['commentary_key'], ctx, [])
+        fielder_id = _choose_fielder_for_wicket(
+            state['bowling_team_players'],
+            bowler_id,
+            ball_result.get('dismissal_type'),
+            ball_result.get('caught_type'),
+        ) if is_wicket else None
 
         # ── Persist delivery ───────────────────────────────────────────────────
         database.insert_delivery(db, {
@@ -1034,6 +1086,7 @@ def bowl_ball_route(id):
             'bowler_id':           bowler_id,
             'striker_id':          striker_id,
             'non_striker_id':      non_striker_id,
+            'fielder_id':          fielder_id,
             'stage1_roll':         ball_result['stage1'],
             'stage2_roll':         ball_result['stage2'],
             'stage3_roll':         ball_result['stage3'],
@@ -1061,6 +1114,8 @@ def bowl_ball_route(id):
             bi_update['status']         = 'dismissed'
             bi_update['dismissal_type'] = ball_result['dismissal_type']
             bi_update['runs']           = batter_innings_row['runs'] + runs_scored
+            if fielder_id:
+                bi_update['fielder_id'] = fielder_id
             # Bowler credited with wicket (not run-outs)
             if ball_result['dismissal_type'] not in ('run_out',):
                 bi_update['bowler_id'] = bowler_id

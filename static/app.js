@@ -133,6 +133,42 @@ function formatScore(runs, wickets) {
   return `${runs}/${wickets}`;
 }
 
+function formatDismissalCompact(batter, fielderName = '') {
+  if (!batter) return '—';
+  if (batter.not_out || batter.status === 'batting') return 'not out';
+
+  const dism = batter.dismissal_type || (batter.status === 'yet_to_bat' ? 'yet to bat' : 'out');
+  if (dism === 'caught' || dism === 'caught ') {
+    if (fielderName) return `c ${fielderName}`;
+    return 'caught';
+  }
+  if ((dism === 'run_out' || dism === 'run out') && fielderName) return `run out (${fielderName})`;
+  if (dism === 'stumped' && fielderName) return `st ${fielderName}`;
+  return dism;
+}
+
+function formatDismissal(batter, bowlerName = '', fielderName = '') {
+  const compact = formatDismissalCompact(batter, fielderName);
+  if (!batter) return compact;
+  if (compact === 'not out' || compact === 'yet to bat') return compact;
+
+  const dism = batter.dismissal_type || '';
+  if (dism === 'caught') {
+    if (bowlerName && fielderName && bowlerName === fielderName) return `c & b ${bowlerName}`;
+    if (bowlerName && fielderName) return `c ${fielderName} b ${bowlerName}`;
+    if (fielderName) return `c ${fielderName}`;
+  }
+  if (dism === 'run_out' || dism === 'run out') {
+    if (fielderName) return `run out (${fielderName})`;
+    return 'run out';
+  }
+  if (dism === 'stumped' && fielderName) {
+    return bowlerName ? `st ${fielderName} b ${bowlerName}` : `st ${fielderName}`;
+  }
+  if (bowlerName) return `${dism} b ${bowlerName}`;
+  return compact;
+}
+
 function _fmtAttendance(n) {
   if (!n) return '—';
   return Number(n).toLocaleString('en-GB');
@@ -4473,10 +4509,9 @@ function renderScorecardTab(state) {
       }
       for (const b of showBatters) {
         const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '—';
-        const howOut = b.status === 'dismissed'
-          ? (b.dismissal_type || 'out')
-          : b.status === 'batting' ? 'not out' : b.status;
-        const bowlerName = b.bowler_id ? (MatchUI.allPlayers[b.bowler_id]?.name || '') : '';
+        const bowlerName = b.bowler_name || '';
+        const fielderName = b.fielder_name || '';
+        const howOut = formatDismissalCompact(b, fielderName);
         const notOut = b.not_out || b.status === 'batting' ? '*' : '';
         html += `<tr>
           <td><strong>${escHtml(b.player_name || '')}</strong></td>
@@ -4669,10 +4704,9 @@ function _renderFullScorecardHtml(sc) {
     }
     for (const b of batters) {
       const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '—';
-      const howOut = b.not_out
-        ? 'not out'
-        : (b.dismissal_type || (b.status === 'yet_to_bat' ? 'yet to bat' : 'out'));
-      const bowlerName = b.bowler_id ? (bowlerMap[b.bowler_id] || '') : '';
+      const bowlerName = b.bowler_name || (b.bowler_id ? (bowlerMap[b.bowler_id] || '') : '');
+      const fielderName = b.fielder_name || '';
+      const howOut = formatDismissalCompact(b, fielderName);
       const notOut = b.not_out ? '*' : '';
       html += `<tr>
         <td><strong>${_playerLink(b.player_name, b.player_id)}</strong></td>
@@ -7803,7 +7837,7 @@ async function loadPlayerInnings(playerId, offset) {
     <td>${r.fours || 0}</td>
     <td>${r.sixes || 0}</td>
     <td>${r.strike_rate ?? '—'}</td>
-    <td class="text-muted">${r.not_out ? 'not out' : (r.dismissal_type || '—')}${r.bowler_name ? ' b. ' + r.bowler_name : ''}</td>
+    <td class="text-muted">${escHtml(formatDismissal(r, r.bowler_name || '', r.fielder_name || ''))}</td>
   </tr>`).join('')}</tbody></table>`;
 
   if (pageEl) {

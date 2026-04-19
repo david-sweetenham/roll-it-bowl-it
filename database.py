@@ -346,9 +346,13 @@ def create_batter_innings(db, innings_id, player_id, batting_position):
 
 def get_batter_innings(db, innings_id):
     rows = db.execute(
-        "SELECT bi.*, p.name, p.name as player_name, p.batting_hand "
+        "SELECT bi.*, p.name, p.name as player_name, p.batting_hand, "
+        " bowl.name as bowler_name, "
+        " fld.name as fielder_name "
         "FROM batter_innings bi "
         "JOIN players p ON bi.player_id = p.id "
+        "LEFT JOIN players bowl ON bi.bowler_id = bowl.id "
+        "LEFT JOIN players fld ON bi.fielder_id = fld.id "
         "WHERE bi.innings_id = ? ORDER BY bi.batting_position",
         (innings_id,)
     ).fetchall()
@@ -409,13 +413,13 @@ def update_bowler_innings(db, id, data):
 def insert_delivery(db, data):
     cur = db.execute(
         "INSERT INTO deliveries "
-        "(innings_id, over_number, ball_number, bowler_id, striker_id, non_striker_id, "
+        "(innings_id, over_number, ball_number, bowler_id, striker_id, non_striker_id, fielder_id, "
         " stage1_roll, stage2_roll, stage3_roll, stage4_roll, stage4b_roll, "
         " outcome_type, runs_scored, extras_type, extras_runs, "
         " dismissal_type, dismissed_batter_id, shot_angle, "
         " is_free_hit, is_wide, is_no_ball, commentary) "
         "VALUES "
-        "(:innings_id, :over_number, :ball_number, :bowler_id, :striker_id, :non_striker_id, "
+        "(:innings_id, :over_number, :ball_number, :bowler_id, :striker_id, :non_striker_id, :fielder_id, "
         " :stage1_roll, :stage2_roll, :stage3_roll, :stage4_roll, :stage4b_roll, "
         " :outcome_type, :runs_scored, :extras_type, :extras_runs, "
         " :dismissal_type, :dismissed_batter_id, :shot_angle, "
@@ -427,6 +431,7 @@ def insert_delivery(db, data):
             'bowler_id':           data['bowler_id'],
             'striker_id':          data['striker_id'],
             'non_striker_id':      data['non_striker_id'],
+            'fielder_id':          data.get('fielder_id'),
             'stage1_roll':         data.get('stage1_roll'),
             'stage2_roll':         data.get('stage2_roll'),
             'stage3_roll':         data.get('stage3_roll'),
@@ -454,11 +459,13 @@ def get_deliveries(db, innings_id):
         "SELECT d.*, "
         " b.name as bowler_name, "
         " s.name as striker_name, "
-        " ns.name as non_striker_name "
+        " ns.name as non_striker_name, "
+        " f.name as fielder_name "
         "FROM deliveries d "
         "JOIN players b  ON d.bowler_id      = b.id "
         "JOIN players s  ON d.striker_id     = s.id "
         "JOIN players ns ON d.non_striker_id = ns.id "
+        "LEFT JOIN players f ON d.fielder_id = f.id "
         "WHERE d.innings_id = ? "
         "ORDER BY d.over_number, d.ball_number",
         (innings_id,)
@@ -473,11 +480,13 @@ def get_all_deliveries_for_match(db, match_id):
     rows = db.execute(
         "SELECT d.*, i.innings_number, "
         " b.name as bowler_name, "
-        " s.name as striker_name "
+        " s.name as striker_name, "
+        " f.name as fielder_name "
         "FROM deliveries d "
         "JOIN innings i ON d.innings_id = i.id "
         "JOIN players b ON d.bowler_id  = b.id "
         "JOIN players s ON d.striker_id = s.id "
+        "LEFT JOIN players f ON d.fielder_id = f.id "
         "WHERE i.match_id = ? "
         "ORDER BY i.innings_number, d.over_number, d.ball_number",
         (match_id,)
@@ -1231,6 +1240,7 @@ def run_migrations(db):
         "ALTER TABLE innings ADD COLUMN death_wickets INTEGER DEFAULT 0",
         "ALTER TABLE innings ADD COLUMN balls_used INTEGER DEFAULT 0",
         "ALTER TABLE innings ADD COLUMN strategic_timeout_ball INTEGER DEFAULT NULL",
+        "ALTER TABLE deliveries ADD COLUMN fielder_id INTEGER",
     ]
     for sql in migrations:
         try:
@@ -2532,13 +2542,15 @@ def get_player_profile(db, player_id):
         " bi.batting_position, "
         " m.match_date, m.format, m.id as match_id, "
         " opp.name as opponent_name, v.name as venue_name, "
-        " bowl.name as bowler_name "
+        " bowl.name as bowler_name, "
+        " fld.name as fielder_name "
         "FROM batter_innings bi "
         "JOIN innings i ON bi.innings_id = i.id "
         "JOIN matches m ON i.match_id = m.id "
         "JOIN venues v ON m.venue_id = v.id "
         "JOIN teams opp ON (CASE WHEN i.batting_team_id = m.team1_id THEN m.team2_id ELSE m.team1_id END) = opp.id "
         "LEFT JOIN players bowl ON bi.bowler_id = bowl.id "
+        "LEFT JOIN players fld ON bi.fielder_id = fld.id "
         "WHERE bi.player_id = ? AND (bi.status = 'dismissed' OR bi.not_out = 1) "
         "ORDER BY m.match_date DESC, bi.id DESC LIMIT 10",
         (player_id,)
@@ -2585,7 +2597,8 @@ def get_player_innings_list(db, player_id, params):
         " m.match_date, m.format, m.id as match_id, "
         " opp.name as opponent_name, opp.id as opponent_id, "
         " v.name as venue_name, "
-        " bowl.name as bowler_name "
+        " bowl.name as bowler_name, "
+        " fld.name as fielder_name "
         "FROM batter_innings bi "
         "JOIN innings i ON bi.innings_id = i.id "
         "JOIN matches m ON i.match_id = m.id "
@@ -2593,6 +2606,7 @@ def get_player_innings_list(db, player_id, params):
         "JOIN teams opp ON (CASE WHEN i.batting_team_id = m.team1_id "
         "  THEN m.team2_id ELSE m.team1_id END) = opp.id "
         "LEFT JOIN players bowl ON bi.bowler_id = bowl.id "
+        "LEFT JOIN players fld ON bi.fielder_id = fld.id "
         "WHERE bi.player_id = ? AND (bi.status = 'dismissed' OR bi.not_out = 1)"
     )
     p = [player_id]

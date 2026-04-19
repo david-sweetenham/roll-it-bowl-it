@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
     bowler_id INTEGER NOT NULL,
     striker_id INTEGER NOT NULL,
     non_striker_id INTEGER NOT NULL,
+    fielder_id INTEGER,
     stage1_roll INTEGER,
     stage2_roll INTEGER,
     stage3_roll INTEGER,
@@ -263,7 +264,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     commentary TEXT,
     FOREIGN KEY (innings_id) REFERENCES innings(id),
     FOREIGN KEY (bowler_id) REFERENCES players(id),
-    FOREIGN KEY (striker_id) REFERENCES players(id)
+    FOREIGN KEY (striker_id) REFERENCES players(id),
+    FOREIGN KEY (fielder_id) REFERENCES players(id)
 );
 
 -- FALL OF WICKETS
