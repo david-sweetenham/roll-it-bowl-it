@@ -7305,12 +7305,17 @@ function _renderAlmTable(cols, rows, offset) {
                 onclick="almSort('${c.k}')">${c.label}${arrow}</th>`;
   }).join('');
 
+  const isMatchesTab = ALM.tab === 'matches';
   const tbody = rows.map((row, i) => {
+    const matchId = row.id || row.match_id;
     const cells = cols.map(c => {
       const numCls = ALMANACK_NUMERIC_KEYS.has(c.k) ? ' class="numeric"' : '';
       if (c.k === '#') return `<td>${offset + i + 1}</td>`;
       const v = row[c.k];
       if (v === null || v === undefined) return `<td${numCls}>—</td>`;
+      if (isMatchesTab && (c.k === 'team1_name' || c.k === 'team2_name' || c.k === 'result_string')) {
+        return `<td${numCls}><a class="alm-link" onclick="openPlayedMatch(${matchId})">${v}</a></td>`;
+      }
       if (c.k === 'name') return `<td><a class="alm-link" onclick="goToPlayer(${row.player_id})">${v}</a></td>`;
       if (c.k === 'team_name') return `<td><a class="alm-link" onclick="goToTeam(${row.team_id})">${v}</a></td>`;
       if (c.k === 'format') return `<td><span class="badge badge-${String(v).toLowerCase()}">${v}</span></td>`;
@@ -7326,7 +7331,9 @@ function _renderAlmTable(cols, rows, offset) {
         return `<td${numCls} class="alm-att-cell">${_fmtAttendance(v)}</td>`;
       return `<td${numCls}>${v}</td>`;
     }).join('');
-    return `<tr class="${i % 2 === 0 ? 'alm-row-even' : 'alm-row-odd'}">${cells}</tr>`;
+    const rowClasses = `${i % 2 === 0 ? 'alm-row-even' : 'alm-row-odd'}${isMatchesTab ? ' result-row-clickable' : ''}`;
+    const rowClick = isMatchesTab && matchId ? ` onclick="openPlayedMatch(${matchId})" title="View scorecard"` : '';
+    return `<tr class="${rowClasses}"${rowClick}>${cells}</tr>`;
   }).join('');
 
   area.innerHTML =
