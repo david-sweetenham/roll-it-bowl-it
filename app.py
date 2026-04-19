@@ -1,8 +1,5 @@
 import sys
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-
-from flask import Flask, jsonify, request, render_template, Response, stream_with_context
+from flask import Flask, jsonify, request, render_template, Response, stream_with_context, send_from_directory
 from flask_cors import CORS
 import json
 import os
@@ -374,6 +371,11 @@ def handle_unhandled_exception(exc):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(app.static_folder, 'ribi.svg', mimetype='image/svg+xml')
 
 
 def stub():

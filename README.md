@@ -180,22 +180,93 @@ pip install pyinstaller
 pyinstaller ribi.spec
 ```
 
-## Suggested GitHub Screenshots
+## Screenshots
 
-The existing screenshots should be refreshed. The best set for GitHub would be:
+### 1. Home Dashboard
 
-1. Home screen with recent results, quick stats, and quick actions
-2. Play screen showing the international/domestic split and scoring-mode choice
-3. Live match screen in Broadcast Mode with die, mini wagon wheel, commentary, and story strip visible
-4. A HOWZAT or wicket moment in Manual mode
-5. Innings-break screen with the new continue/countdown treatment
-6. Full match result screen with score summary and notes cards
-7. Almanack batting tab with visible filters and story desk
-8. World detail overview showing world rules, active series, and world desk cards
-9. World wizard showing lifecycle choice (`Ageless Players` vs `Retire & Regens`)
-10. Archive match view showing a full scorecard rather than live-match controls
+![Home Screen](screenshots/home-screen.png)
 
-If you want, I can also capture a recommended set directly from the running local app.
+### 2. Match Setup
+
+International match setup:
+
+![International Play Options](screenshots/PlayOptions.png)
+
+Domestic match setup:
+
+![Domestic Play Options](screenshots/playOptions-domestic.png)
+
+### 3. Match Day
+
+Toss presentation:
+
+![Toss Screen](screenshots/toss-screen.png)
+
+Appeal / HOWZAT moment:
+
+![Appeal Screen](screenshots/appeal.png)
+
+Wicket presentation:
+
+![Wicket Screen](screenshots/wicket.png)
+
+Duck dismissal:
+
+![Duck Screen](screenshots/duck.png)
+
+Hundred countdown / innings-break view:
+
+![Hundred Countdown](screenshots/hundred-countdown.png)
+
+### 4. Match Result And Archive
+
+Result screen:
+
+![Result Screen](screenshots/Result.png)
+
+Full scorecard:
+
+![Scorecard Screen 1](screenshots/scorecard1.png)
+
+Additional scorecard / archive view:
+
+![Scorecard Screen 2](screenshots/scorecard2.png)
+
+### 5. Long-Form Save And Management
+
+World overview:
+
+![World Screen](screenshots/world-screen.png)
+
+Series management:
+
+![Series Screen](screenshots/series-screen.png)
+
+Teams database:
+
+![Teams Screen](screenshots/teams-screen.png)
+
+Venues database:
+
+![Venues Screen](screenshots/venues-screen.png)
+
+Almanack / records:
+
+![Almanack Screen](screenshots/almanack-screen.png)
+
+Journal / story log:
+
+![Journal Screen](screenshots/journal-screen.png)
+
+Settings and options:
+
+![Settings Screen](screenshots/settings-screen.png)
+
+### Project Notes
+
+Disclaimer:
+
+![Disclaimer Screen](screenshots/disclaimer.png)
 
 ## Notes
 
