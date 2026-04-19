@@ -141,6 +141,97 @@ def format_overs(overs_decimal):
     return f"{complete_overs}.{balls}"
 
 
+def _calculate_attendance(match, team1, team2):
+    """
+    Generate a realistic randomised attendance figure for a completed match.
+    Based on venue capacity, format, team tiers, and competition type.
+    Returns an integer (or None if capacity unknown).
+    """
+    capacity = match.get('venue_capacity')
+    if not capacity:
+        return None
+
+    t1_type = team1.get('team_type', 'international')
+    t2_type = team2.get('team_type', 'international')
+    fmt     = match.get('format', 'T20')
+
+    # Tier classification — higher tier = bigger draw
+    _TIER1 = {'England', 'Australia', 'India', 'Pakistan',
+              'New Zealand', 'South Africa', 'West Indies', 'Sri Lanka', 'Bangladesh'}
+    _TIER2 = {'Zimbabwe', 'Ireland', 'Afghanistan'}
+
+    def _nation_tier(team):
+        if team.get('team_type') != 'international':
+            return 0  # domestic
+        n = team.get('name', '')
+        if n in _TIER1: return 3
+        if n in _TIER2: return 2
+        return 1  # associates
+
+    t1_tier = _nation_tier(team1)
+    t2_tier = _nation_tier(team2)
+    is_intl  = t1_tier > 0 and t2_tier > 0
+    avg_tier = (t1_tier + t2_tier) / 2  # 0–3
+
+    # Rivalry boost: two of the top-3 draws facing each other
+    _TOP3 = {'England', 'Australia', 'India'}
+    is_rivalry = (team1.get('name') in _TOP3 and team2.get('name') in _TOP3)
+
+    # ICC / World Cup event?
+    is_icc = bool(match.get('tournament_id'))
+
+    league = team1.get('league') or team2.get('league') or ''
+
+    # ── Base fill-rate ranges (lo, hi) ──────────────────────────────────────
+    if not is_intl:
+        # Domestic / franchise / county
+        if fmt == 'Hundred':
+            lo, hi = 0.42, 0.78
+        elif t1_type == 'county' or t2_type == 'county':
+            lo, hi = 0.05, 0.22   # County Championship: very low
+        elif league in ('IPL', 'PSL', 'Big Bash League', 'CPL'):
+            lo, hi = 0.45, 0.88
+        else:
+            lo, hi = 0.20, 0.55   # other domestic T20 / Sheffield Shield
+    else:
+        # International
+        if fmt == 'Test':
+            if avg_tier >= 2.8 or is_rivalry: lo, hi = 0.55, 0.92
+            elif avg_tier >= 2.0:             lo, hi = 0.28, 0.62
+            elif avg_tier >= 1.5:             lo, hi = 0.15, 0.42
+            else:                             lo, hi = 0.08, 0.28   # associates
+        elif fmt == 'ODI':
+            if avg_tier >= 2.8 or is_rivalry: lo, hi = 0.62, 0.95
+            elif avg_tier >= 2.0:             lo, hi = 0.38, 0.72
+            elif avg_tier >= 1.5:             lo, hi = 0.22, 0.50
+            else:                             lo, hi = 0.12, 0.35
+        elif fmt in ('T20', 'Hundred'):
+            if avg_tier >= 2.8 or is_rivalry: lo, hi = 0.65, 0.98
+            elif avg_tier >= 2.0:             lo, hi = 0.42, 0.78
+            elif avg_tier >= 1.5:             lo, hi = 0.25, 0.58
+            else:                             lo, hi = 0.15, 0.45
+        else:
+            lo, hi = 0.30, 0.65
+
+    # ICC event / tournament bonus
+    if is_icc:
+        lo = min(1.0, lo * 1.15)
+        hi = min(1.0, hi * 1.10)
+
+    # Large stadium penalty — big grounds are hard to fill except marquee games
+    if capacity > 60000 and not is_rivalry and not is_icc:
+        hi *= 0.78
+        lo *= 0.70
+
+    fill = random.uniform(lo, hi)
+    attendance = int(capacity * fill)
+
+    # Round to nearest 50 for realism
+    attendance = max(50, min(attendance, capacity))
+    attendance = round(attendance / 50) * 50
+    return attendance
+
+
 def _build_result_description(match, all_innings):
     """Build human-readable result string from match/innings data."""
     if match.get('status') not in (None, 'complete'):
@@ -1854,12 +1945,18 @@ def complete_match(id):
             if not post_calc.get('result_type'):
                 return err('Cannot complete match — result could not be determined. Ensure all innings are complete.', 400)
 
-        # Apply POM and notes
+        # Apply POM and notes, generate attendance if not already set
         updates = {'status': 'complete'}
         if data.get('player_of_match_id'):
             updates['player_of_match_id'] = int(data['player_of_match_id'])
         if data.get('match_notes'):
             updates['match_notes'] = data['match_notes']
+        if not match.get('attendance'):
+            team1 = database.get_team(db, match['team1_id']) or {}
+            team2 = database.get_team(db, match['team2_id']) or {}
+            att = _calculate_attendance(match, team1, team2)
+            if att:
+                updates['attendance'] = att
         database.update_match(db, id, updates)
 
         # Save journal entry if notes provided
@@ -1919,6 +2016,8 @@ def complete_match(id):
                 'margin_wickets':     updated.get('margin_wickets'),
                 'player_of_match_name': updated.get('player_of_match_name'),
                 'result_string':      result_string,
+                'attendance':         updated.get('attendance'),
+                'venue_capacity':     updated.get('venue_capacity'),
             },
             'series_won':     series_won,
             'tournament_won': tournament_won,

@@ -200,6 +200,7 @@ def get_match(db, id):
         " t1.name as team1_name, t1.short_code as team1_code, t1.badge_colour as team1_colour, "
         " t2.name as team2_name, t2.short_code as team2_code, t2.badge_colour as team2_colour, "
         " v.name as venue_name, v.city as venue_city, v.country as venue_country, "
+        " v.capacity as venue_capacity, "
         " tw.name as toss_winner_name, "
         " wt.name as winning_team_name, "
         " pom.name as player_of_match_name "
@@ -220,7 +221,7 @@ def update_match(db, id, data):
     allowed = [
         'toss_winner_id', 'toss_choice', 'result_type', 'winning_team_id',
         'margin_runs', 'margin_wickets', 'player_of_match_id', 'status', 'match_notes',
-        'player_mode', 'human_team_id', 'scoring_mode',
+        'player_mode', 'human_team_id', 'scoring_mode', 'attendance',
     ]
     sets = ', '.join(f"{k} = :{k}" for k in allowed if k in data)
     if not sets:
@@ -1544,6 +1545,18 @@ def run_migrations(db):
     import seed_data as _sd
     _sd.seed_hundred_teams(db)
 
+    # Venue capacity + match attendance columns
+    for col_sql in [
+        "ALTER TABLE venues ADD COLUMN capacity INTEGER",
+        "ALTER TABLE matches ADD COLUMN attendance INTEGER",
+    ]:
+        try:
+            db.execute(col_sql)
+        except Exception:
+            pass
+
+    _seed_venue_capacities(db)
+
     # Venue coordinates — add columns then seed known lat/lng (idempotent)
     for col_sql in [
         "ALTER TABLE venues ADD COLUMN latitude REAL",
@@ -1557,6 +1570,104 @@ def run_migrations(db):
     _seed_venue_coordinates(db)
 
     db.commit()
+
+
+def _seed_venue_capacities(db):
+    """Seed real-world capacity figures for known cricket venues (safe to re-run)."""
+    capacities = {
+        # Australia
+        'Adelaide Oval':                      53000,
+        'Blundstone Arena':                   19500,
+        'Manuka Oval':                        13550,
+        'Marvel Stadium':                     56347,
+        'Melbourne Cricket Ground':          100024,
+        'Optus Stadium':                      60000,
+        'Sydney Cricket Ground':              48000,
+        'The Gabba':                          41000,
+        # Bangladesh
+        'Shere Bangla National Stadium':      25000,
+        # Canada
+        'Maple Leaf North-West Ground':        7000,
+        # England
+        'Edgbaston':                          25000,
+        'Emirates Riverside':                 17000,
+        'Headingley':                         18350,
+        "Lord's Cricket Ground":              30000,
+        'New Road':                            4900,
+        'Old Trafford':                       26500,
+        'The 1st Central County Ground':       6500,
+        'The Cloud County Ground':             6500,
+        'The County Ground Bristol':           7000,
+        'The County Ground Derby':             5000,
+        'The County Ground Northampton':       7000,
+        'The County Ground Taunton':           7500,
+        'The Oval':                           27500,
+        'The Spitfire Ground St Lawrence':    15000,
+        'The Utilita Bowl':                   25000,
+        'Utilita Bowl':                       25000,
+        'Trent Bridge':                       17500,
+        'Uptonsteel County Ground':            5000,
+        # India
+        'Arun Jaitley Stadium':               35200,
+        'BRSABV Ekana Cricket Stadium':       50000,
+        'Eden Gardens':                       68000,
+        'M. Chinnaswamy Stadium':             40000,
+        'MA Chidambaram Stadium':             37505,
+        'Narendra Modi Stadium':             132000,
+        'Punjab Cricket Association Stadium': 26950,
+        'Rajiv Gandhi International Stadium': 39200,
+        'Sawai Mansingh Stadium':             24000,
+        'Wankhede Stadium':                   33100,
+        # Ireland
+        'Civil Service Cricket Club':          3000,
+        'Malahide Cricket Club Ground':        5000,
+        # Namibia
+        'Wanderers Cricket Ground':            7000,
+        # Nepal
+        'Tribhuvan University Ground':        10000,
+        # Netherlands
+        'VRA Ground':                          4500,
+        # New Zealand
+        'Eden Park':                          42000,
+        # Oman
+        'Al Amerat Cricket Ground':            4000,
+        # Pakistan
+        'Arbab Niaz Stadium':                 20000,
+        'Bugti Stadium':                      20000,
+        'Gaddafi Stadium':                    34000,
+        'Multan Cricket Stadium':             30000,
+        'National Stadium':                   30000,
+        'Rawalpindi Cricket Stadium':         15000,
+        # Scotland
+        'The Grange Club':                     4000,
+        # South Africa
+        'Newlands':                           25000,
+        'The Wanderers':                      34000,
+        # Sri Lanka
+        'R. Premadasa Stadium':               35000,
+        # UAE
+        'Dubai International Stadium':        25000,
+        'Sharjah Cricket Stadium':            27000,
+        # United States
+        'Grand Prairie Stadium':               7200,
+        # Wales
+        'Sophia Gardens':                     16000,
+        # West Indies
+        'Daren Sammy National Cricket Stadium': 15000,
+        'Kensington Oval':                    28000,
+        'National Cricket Stadium Grenada':   12000,
+        'Providence Stadium':                 15000,
+        "Queen's Park Oval":                  20000,
+        'Sabina Park':                        30000,
+        'Warner Park':                        18000,
+        # Zimbabwe
+        'Harare Sports Club':                 10000,
+        'Queens Sports Club':                 10000,
+    }
+    for name, cap in capacities.items():
+        existing = db.execute("SELECT capacity FROM venues WHERE name=?", (name,)).fetchone()
+        if existing and existing['capacity'] is None:
+            db.execute("UPDATE venues SET capacity=? WHERE name=?", (cap, name))
 
 
 def _seed_venue_coordinates(db):
@@ -1879,9 +1990,10 @@ def get_almanack_matches(db, params):
         " COALESCE(m.canon_status, 'canon') AS canon_status, "
         " m.team1_id, m.team2_id, m.venue_id, "
         " COALESCE(m.player_mode, 'ai_vs_ai') AS player_mode, "
+        " m.attendance, "
         " t1.name AS team1_name, t1.short_code AS team1_code, "
         " t2.name AS team2_name, t2.short_code AS team2_code, "
-        " v.name AS venue_name, v.city AS venue_city, "
+        " v.name AS venue_name, v.city AS venue_city, v.capacity AS venue_capacity, "
         " wt.name AS winning_team_name, "
         " pom.name AS player_of_match_name "
         "FROM matches m "
@@ -2686,7 +2798,7 @@ def get_venue_profile(db, venue_id):
     ).fetchone()
 
     recent_matches = db.execute(
-        "SELECT m.id, m.match_date, m.format, m.result_type, "
+        "SELECT m.id, m.match_date, m.format, m.result_type, m.attendance, "
         " COALESCE(m.player_mode, 'ai_vs_ai') as player_mode, "
         " COALESCE(m.canon_status, 'canon') as canon_status, "
         " t1.name as team1_name, t1.short_code as team1_code, t1.badge_colour as team1_colour, "
@@ -2701,6 +2813,16 @@ def get_venue_profile(db, venue_id):
         "ORDER BY m.match_date DESC LIMIT 10",
         (venue_id,)
     ).fetchall()
+
+    # Attendance aggregates
+    att_stats = db.execute(
+        "SELECT AVG(attendance) as avg_att, MAX(attendance) as max_att "
+        "FROM matches WHERE venue_id=? AND status='complete' AND attendance IS NOT NULL",
+        (venue_id,)
+    ).fetchone()
+    if att_stats:
+        stats['avg_attendance'] = att_stats['avg_att']
+        stats['max_attendance'] = att_stats['max_att']
 
     stats['avg_first_innings'] = dict_from_rows(avg_first)
     stats['team_counts']       = dict_from_rows(team_counts)

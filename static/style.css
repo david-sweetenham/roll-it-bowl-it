@@ -2846,6 +2846,25 @@ body.broadcast-mode .btn-howzat {
   border-bottom: 1px solid var(--border);
 }
 .sc-innings-header:first-child { margin-top: 0; }
+
+.sc-attendance {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  display: inline-block;
+}
+
+.alm-att-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.venue-att {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .sc-fow {
   font-size: var(--fs-xs);
   color: var(--text-muted);

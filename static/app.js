@@ -133,6 +133,18 @@ function formatScore(runs, wickets) {
   return `${runs}/${wickets}`;
 }
 
+function _fmtAttendance(n) {
+  if (!n) return '—';
+  return Number(n).toLocaleString('en-GB');
+}
+
+function _attendanceLine(attendance, capacity) {
+  if (!attendance) return '';
+  const pct = capacity ? Math.round(attendance / capacity * 100) : null;
+  const pctStr = pct ? ` (${pct}%)` : '';
+  return `${_fmtAttendance(attendance)}${pctStr}`;
+}
+
 /**
  * Convert a stored overs float to cricket display notation.
  * Handles two internal formats:
@@ -3931,8 +3943,10 @@ async function showResultScreen(matchId) {
   const kickerEl = document.getElementById('result-kicker');
   const verdictEl = document.getElementById('result-verdict');
   document.getElementById('result-headline').textContent = headline;
+  const attPart = match.attendance
+    ? ` · ${_fmtAttendance(match.attendance)} attendance` : '';
   document.getElementById('result-subline').textContent =
-    `${match.format} · ${match.venue_name || ''}${match.venue_city ? ', ' + match.venue_city : ''} · ${match.match_date || ''}`;
+    `${match.format} · ${match.venue_name || ''}${match.venue_city ? ', ' + match.venue_city : ''} · ${match.match_date || ''}${attPart}`;
   if (kickerEl) kickerEl.textContent = 'Full Time';
   if (verdictEl) {
     verdictEl.textContent = match.result_string || (
@@ -4623,6 +4637,10 @@ function _renderFullScorecardHtml(sc) {
   if (sc.result_string) {
     html += `<div class="sc-innings-header" style="margin-bottom:12px">${escHtml(sc.result_string)}</div>`;
   }
+  if (sc.match?.attendance) {
+    const attLine = _attendanceLine(sc.match.attendance, sc.match.venue_capacity);
+    html += `<div class="sc-attendance">Attendance: <strong>${attLine}</strong></div>`;
+  }
 
   for (const inn of innings) {
     const ord = ['1st','2nd','3rd','4th'][inn.innings_number - 1] || `${inn.innings_number}th`;
@@ -5165,9 +5183,19 @@ async function loadVenueDetail(id) {
   // Stat cards
   const cardsEl = document.getElementById('venue-stat-cards');
   if (cardsEl) {
-    cardsEl.innerHTML = [
+    const statCards = [
       { label: 'Matches', value: stats.match_count || 0 },
-    ].map(c => `<div class="stat-card"><div class="stat-card-val">${c.value}</div><div class="stat-card-lbl">${c.label}</div></div>`).join('');
+    ];
+    if (venue.capacity) {
+      statCards.push({ label: 'Capacity', value: _fmtAttendance(venue.capacity) });
+    }
+    if (stats.avg_attendance) {
+      statCards.push({ label: 'Avg Attendance', value: _fmtAttendance(Math.round(stats.avg_attendance)) });
+    }
+    if (stats.max_attendance) {
+      statCards.push({ label: 'Record Crowd', value: _fmtAttendance(stats.max_attendance) });
+    }
+    cardsEl.innerHTML = statCards.map(c => `<div class="stat-card"><div class="stat-card-val">${c.value}</div><div class="stat-card-lbl">${c.label}</div></div>`).join('');
   }
 
   // Avg first innings
@@ -5208,6 +5236,7 @@ async function loadVenueDetail(id) {
         ${_canonBadgeHtml(m.canon_status)}
         <span>${m.team1_name} vs ${m.team2_name}</span>
         <span class="text-muted">${m.winning_team_name ? m.winning_team_name + ' won' : 'Draw'}</span>
+        ${m.attendance ? `<span class="venue-att text-muted">${_fmtAttendance(m.attendance)}</span>` : ''}
         <span class="result-date text-muted">${m.match_date}</span>
       </div>`).join('') || '<p class="text-muted">No matches yet.</p>';
   }
@@ -6927,6 +6956,7 @@ const ALM_COLS = {
     {k:'team2_name',           label:'Team 2', nosort:true},
     {k:'venue_name',           label:'Venue',  nosort:true},
     {k:'result_string',        label:'Result', nosort:true},
+    {k:'attendance',           label:'Att.',   nosort:true},
     {k:'player_of_match_name', label:'PoM',    nosort:true},
   ],
   partnerships: [
@@ -7204,6 +7234,8 @@ function _renderAlmTable(cols, rows, offset) {
         return `<td${numCls}>${v != null ? Number(v).toFixed(1) : '—'}</td>`;
       if (c.k === 'ar_index')
         return `<td${numCls}>${v != null ? Number(v).toFixed(1) : '—'}</td>`;
+      if (c.k === 'attendance')
+        return `<td${numCls} class="alm-att-cell">${_fmtAttendance(v)}</td>`;
       return `<td${numCls}>${v}</td>`;
     }).join('');
     return `<tr class="${i % 2 === 0 ? 'alm-row-even' : 'alm-row-odd'}">${cells}</tr>`;
