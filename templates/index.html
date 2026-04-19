@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Roll It &amp; Bowl It — Dice Cricket</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
 
@@ -705,8 +706,20 @@
     <!-- VENUES -->
     <div id="screen-venues" class="screen">
       <div class="screen-inner">
-        <h2>Venues</h2>
-        <p class="screen-subtitle">Grounds around the world.</p>
+        <div class="venues-header">
+          <div>
+            <h2>Venues</h2>
+            <p class="screen-subtitle">Grounds around the world.</p>
+          </div>
+          <div class="venues-view-toggle" role="group" aria-label="View mode">
+            <button id="btn-venues-list" class="venues-toggle-btn venues-toggle-btn--active" onclick="setVenuesView('list')" title="List view">&#9776; List</button>
+            <button id="btn-venues-map"  class="venues-toggle-btn" onclick="setVenuesView('map')"  title="Map view">&#9654; Map</button>
+          </div>
+        </div>
+        <div id="venues-country-filter" class="venues-country-filter"></div>
+        <div id="venues-map-container" class="venues-map-container hidden">
+          <div id="venues-leaflet-map" class="venues-leaflet-map"></div>
+        </div>
         <div id="venues-list">Loading...</div>
       </div>
     </div>
@@ -1767,6 +1780,7 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/canvas.js"></script>
   <script src="/static/app.js"></script>
 </body>

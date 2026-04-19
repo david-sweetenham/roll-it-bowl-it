@@ -267,6 +267,77 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   margin-bottom: 24px;
 }
 
+/* ── Venues screen ───────────────────────────────────────── */
+
+.venues-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.venues-header h2 { margin-bottom: 4px; }
+.venues-header .screen-subtitle { margin-bottom: 0; }
+
+.venues-view-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+.venues-toggle-btn {
+  background: var(--surface2);
+  border: none;
+  color: var(--text-muted);
+  padding: 7px 14px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.venues-toggle-btn:hover { background: var(--surface3, var(--border)); color: var(--text); }
+.venues-toggle-btn--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.venues-country-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 12px;
+}
+.venues-country-pill {
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.venues-country-pill:hover { border-color: var(--accent); color: var(--text); }
+.venues-country-pill--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.venues-map-container { margin-bottom: 16px; }
+.venues-leaflet-map {
+  height: 400px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+@media (max-width: 600px) {
+  .venues-leaflet-map { height: 300px; }
+}
+
 /* ── Session Bar ─────────────────────────────────────────── */
 #session-bar {
   position: fixed;

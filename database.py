@@ -1544,7 +1544,122 @@ def run_migrations(db):
     import seed_data as _sd
     _sd.seed_hundred_teams(db)
 
+    # Venue coordinates — add columns then seed known lat/lng (idempotent)
+    for col_sql in [
+        "ALTER TABLE venues ADD COLUMN latitude REAL",
+        "ALTER TABLE venues ADD COLUMN longitude REAL",
+    ]:
+        try:
+            db.execute(col_sql)
+        except Exception:
+            pass  # already exists
+
+    _seed_venue_coordinates(db)
+
     db.commit()
+
+
+def _seed_venue_coordinates(db):
+    """Seed approximate lat/lng for known cricket venues (safe to re-run)."""
+    coords = {
+        # Australia
+        'Adelaide Oval':                   (-34.9155,  138.5963),
+        'Blundstone Arena':                (-42.8785,  147.3290),
+        'Manuka Oval':                     (-35.3224,  149.1396),
+        'Marvel Stadium':                  (-37.8165,  144.9475),
+        'Melbourne Cricket Ground':        (-37.8200,  144.9834),
+        'Optus Stadium':                   (-31.9509,  115.8894),
+        'Sydney Cricket Ground':           (-33.8916,  151.2246),
+        'The Gabba':                       (-27.4858,  153.0381),
+        # Bangladesh
+        'Shere Bangla National Stadium':   ( 23.7533,   90.3863),
+        # Canada
+        'Maple Leaf North-West Ground':    ( 43.9267,  -79.5320),
+        # England
+        'Edgbaston':                       ( 52.4560,   -1.9022),
+        'Emirates Riverside':              ( 54.7859,   -1.5719),
+        'Headingley':                      ( 53.8178,   -1.5817),
+        "Lord's Cricket Ground":           ( 51.5296,   -0.1728),
+        'New Road':                        ( 52.1972,   -2.2246),
+        'Old Trafford':                    ( 53.4567,   -2.2873),
+        'The 1st Central County Ground':   ( 50.8370,   -0.1682),
+        'The Cloud County Ground':         ( 51.7360,    0.4688),
+        'The County Ground Bristol':       ( 51.4569,   -2.5828),
+        'The County Ground Derby':         ( 52.9219,   -1.4809),
+        'The County Ground Northampton':   ( 52.2415,   -0.9039),
+        'The County Ground Taunton':       ( 51.0262,   -3.1093),
+        'The Oval':                        ( 51.4840,   -0.1153),
+        'The Spitfire Ground St Lawrence': ( 51.2866,    1.0738),
+        'The Utilita Bowl':                ( 50.9248,   -1.3215),
+        'Utilita Bowl':                    ( 50.9248,   -1.3215),
+        'Trent Bridge':                    ( 52.9336,   -1.1323),
+        'Uptonsteel County Ground':        ( 52.6255,   -1.1330),
+        # India
+        'Arun Jaitley Stadium':            ( 28.6435,   77.2014),
+        'BRSABV Ekana Cricket Stadium':    ( 26.8480,   80.9462),
+        'Eden Gardens':                    ( 22.5645,   88.3433),
+        'M. Chinnaswamy Stadium':          ( 12.9790,   77.5996),
+        'MA Chidambaram Stadium':          ( 13.0633,   80.2793),
+        'Narendra Modi Stadium':           ( 23.0902,   72.5952),
+        'Punjab Cricket Association Stadium': ( 30.6835, 76.7098),
+        'Rajiv Gandhi International Stadium': ( 17.4062, 78.5442),
+        'Sawai Mansingh Stadium':          ( 26.8973,   75.8212),
+        'Wankhede Stadium':                ( 18.9388,   72.8258),
+        # Ireland
+        'Civil Service Cricket Club':      ( 54.6277,   -5.9346),
+        'Malahide Cricket Club Ground':    ( 53.4512,   -6.1540),
+        # Namibia
+        'Wanderers Cricket Ground':        (-22.5597,   17.0832),
+        # Nepal
+        'Tribhuvan University Ground':     ( 27.6853,   85.2782),
+        # Netherlands
+        'VRA Ground':                      ( 52.3011,    4.8475),
+        # New Zealand
+        'Eden Park':                       (-36.8756,  174.7435),
+        # Oman
+        'Al Amerat Cricket Ground':        ( 23.5817,   58.5847),
+        # Pakistan
+        'Arbab Niaz Stadium':              ( 34.0050,   71.5249),
+        'Bugti Stadium':                   ( 30.1798,   67.0174),
+        'Gaddafi Stadium':                 ( 31.5196,   74.3366),
+        'Multan Cricket Stadium':          ( 30.1575,   71.5249),
+        'National Stadium':                ( 24.8922,   67.0545),
+        'Rawalpindi Cricket Stadium':      ( 33.6007,   73.0679),
+        # Scotland
+        'The Grange Club':                 ( 55.9436,   -3.2218),
+        # South Africa
+        'Newlands':                        (-33.9231,   18.4113),
+        'The Wanderers':                   (-26.1522,   28.0552),
+        # Sri Lanka
+        'R. Premadasa Stadium':            (  6.9168,   79.8674),
+        # UAE
+        'Dubai International Stadium':     ( 25.2048,   55.2708),
+        'Sharjah Cricket Stadium':         ( 25.3511,   55.4003),
+        # United States
+        'Grand Prairie Stadium':           ( 32.7767,  -96.8089),
+        # Wales
+        'Sophia Gardens':                  ( 51.4895,   -3.1907),
+        # West Indies
+        'Daren Sammy National Cricket Stadium': ( 14.0723, -60.9514),
+        'Kensington Oval':                 ( 13.1004,  -59.6148),
+        'National Cricket Stadium Grenada':( 12.0560,  -61.7480),
+        'Providence Stadium':              (  6.8007,  -58.1570),
+        "Queen's Park Oval":               ( 10.6596,  -61.5197),
+        'Sabina Park':                     ( 17.9988,  -76.7923),
+        'Warner Park':                     ( 17.3033,  -62.7180),
+        # Zimbabwe
+        'Harare Sports Club':              (-17.8300,   31.0500),
+        'Queens Sports Club':              (-20.1440,   28.5840),
+    }
+    for name, (lat, lng) in coords.items():
+        existing = db.execute(
+            "SELECT latitude FROM venues WHERE name=?", (name,)
+        ).fetchone()
+        if existing and existing['latitude'] is None:
+            db.execute(
+                "UPDATE venues SET latitude=?, longitude=? WHERE name=?",
+                (lat, lng, name)
+            )
 
 
 # ── Almanack helpers ──────────────────────────────────────────────────────────

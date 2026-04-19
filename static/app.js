@@ -4978,29 +4978,172 @@ async function loadH2H() {
 
 // ── Venues Screen ─────────────────────────────────────────────────────────────
 
+// ── Venues screen state ───────────────────────────────────────────────────────
+let _venuesAll         = [];
+let _venuesCountry     = null;  // null = all
+let _venuesViewMode    = 'list';
+let _venuesLeafletMap  = null;
+let _venuesMarkers     = [];
+
 async function loadVenuesScreen() {
   const container = document.getElementById('venues-list');
   if (!container) return;
   container.innerHTML = '<div class="spinner"></div>';
 
   const data = await api('GET', '/api/venues');
-  const venues = data && data.venues ? data.venues : [];
+  _venuesAll = data && data.venues ? data.venues : [];
 
+  _buildVenueCountryFilter();
+  _renderVenueList();
+
+  // Restore last view mode
+  setVenuesView(_venuesViewMode, true);
+}
+
+function _buildVenueCountryFilter() {
+  const bar = document.getElementById('venues-country-filter');
+  if (!bar) return;
+  const countries = [...new Set(_venuesAll.map(v => v.country).filter(Boolean))].sort();
+  bar.innerHTML = [
+    `<button class="venues-country-pill${!_venuesCountry ? ' venues-country-pill--active' : ''}" onclick="setVenueCountry(null)">All</button>`,
+    ...countries.map(c =>
+      `<button class="venues-country-pill${_venuesCountry === c ? ' venues-country-pill--active' : ''}" onclick="setVenueCountry(${JSON.stringify(c)})">${escHtml(c)}</button>`
+    ),
+  ].join('');
+}
+
+function _filteredVenues() {
+  return _venuesCountry
+    ? _venuesAll.filter(v => v.country === _venuesCountry)
+    : _venuesAll;
+}
+
+function _renderVenueList() {
+  const container = document.getElementById('venues-list');
+  if (!container) return;
+  const venues = _filteredVenues();
   if (!venues.length) {
-    container.innerHTML = `<div class="empty-state-card"><div class="empty-state-icon">🏟️</div><h3 class="empty-state-heading">No venues yet</h3><p class="empty-state-sub">Add a venue to host your matches.</p></div>`;
+    container.innerHTML = `<div class="empty-state-card"><div class="empty-state-icon">🏟️</div><h3 class="empty-state-heading">No venues</h3><p class="empty-state-sub">No grounds match the current filter.</p></div>`;
     return;
   }
-
   container.innerHTML = venues.map(v => `
     <div class="card" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer"
          onclick="loadVenueDetail(${v.id})">
       <div>
-        <strong>${v.name}</strong>
-        <div class="text-muted" style="font-size:13px">${[v.city, v.country].filter(Boolean).join(', ')}</div>
+        <strong>${escHtml(v.name)}</strong>
+        <div class="text-muted" style="font-size:13px">${escHtml([v.city, v.country].filter(Boolean).join(', '))}</div>
       </div>
       <span style="color:var(--text-muted);font-size:20px">›</span>
     </div>
   `).join('');
+}
+
+function setVenueCountry(country) {
+  _venuesCountry = country;
+  _buildVenueCountryFilter();
+  _renderVenueList();
+  if (_venuesViewMode === 'map') _updateVenueMapMarkers();
+}
+
+function setVenuesView(mode, force) {
+  if (!force && mode === _venuesViewMode) return;
+  _venuesViewMode = mode;
+
+  const listEl = document.getElementById('venues-list');
+  const mapEl  = document.getElementById('venues-map-container');
+  const btnList = document.getElementById('btn-venues-list');
+  const btnMap  = document.getElementById('btn-venues-map');
+
+  if (mode === 'map') {
+    if (listEl) listEl.style.display = 'none';
+    if (mapEl)  mapEl.classList.remove('hidden');
+    btnList && btnList.classList.remove('venues-toggle-btn--active');
+    btnMap  && btnMap.classList.add('venues-toggle-btn--active');
+    _initVenueMap();
+  } else {
+    if (listEl) listEl.style.display = '';
+    if (mapEl)  mapEl.classList.add('hidden');
+    btnList && btnList.classList.add('venues-toggle-btn--active');
+    btnMap  && btnMap.classList.remove('venues-toggle-btn--active');
+  }
+}
+
+function _initVenueMap() {
+  if (!window.L) return;
+  const mapDiv = document.getElementById('venues-leaflet-map');
+  if (!mapDiv) return;
+
+  if (!_venuesLeafletMap) {
+    _venuesLeafletMap = L.map('venues-leaflet-map', {
+      center: [20, 0],
+      zoom: 2,
+      zoomControl: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 18,
+    }).addTo(_venuesLeafletMap);
+  }
+
+  _updateVenueMapMarkers();
+}
+
+function _updateVenueMapMarkers() {
+  if (!_venuesLeafletMap) return;
+
+  // Remove existing markers
+  _venuesMarkers.forEach(m => _venuesLeafletMap.removeLayer(m));
+  _venuesMarkers = [];
+
+  const venues = _filteredVenues().filter(v => v.latitude != null && v.longitude != null);
+  if (!venues.length) return;
+
+  const accentColor = getComputedStyle(document.documentElement)
+    .getPropertyValue('--accent').trim() || '#2ecc71';
+
+  const markerIcon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:12px;height:12px;
+      background:${accentColor};
+      border:2px solid #fff;
+      border-radius:50%;
+      box-shadow:0 0 6px rgba(0,0,0,0.5)
+    "></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -8],
+  });
+
+  venues.forEach(v => {
+    const marker = L.marker([v.latitude, v.longitude], { icon: markerIcon })
+      .addTo(_venuesLeafletMap)
+      .bindPopup(
+        `<div style="font-family:sans-serif;font-size:13px;line-height:1.4">
+          <strong>${v.name}</strong><br>
+          <span style="color:#888">${[v.city, v.country].filter(Boolean).join(', ')}</span><br>
+          <a href="#" onclick="event.preventDefault();closedVenueMapPopup(${v.id})" style="color:${accentColor}">View stats →</a>
+        </div>`
+      );
+    _venuesMarkers.push(marker);
+  });
+
+  // Fit bounds to visible markers
+  if (venues.length === 1) {
+    _venuesLeafletMap.setView([venues[0].latitude, venues[0].longitude], 10);
+  } else {
+    const bounds = L.latLngBounds(venues.map(v => [v.latitude, v.longitude]));
+    _venuesLeafletMap.fitBounds(bounds, { padding: [40, 40] });
+  }
+
+  // Fix tile rendering after show
+  setTimeout(() => _venuesLeafletMap.invalidateSize(), 50);
+}
+
+function closedVenueMapPopup(id) {
+  if (_venuesLeafletMap) _venuesLeafletMap.closePopup();
+  loadVenueDetail(id);
 }
 
 async function loadVenueDetail(id) {
