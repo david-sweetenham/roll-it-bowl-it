@@ -17,7 +17,7 @@ No challenge to any trademark or other intellectual property right is intended.
 """
 
 import random
-from game_engine import bowl_ball, COMMENTARY
+from game_engine import bowl_ball, COMMENTARY, choose_fielder_for_wicket
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +152,8 @@ def simulate_hundred_innings_fast(batting_players, bowling_players,
             'fours': 0,
             'sixes': 0,
             'dismissal_type': None,
+            'bowler_id': None,
+            'fielder_id': None,
             'not_out': True,
             'batting': i < 2,
         })
@@ -246,9 +248,18 @@ def simulate_hundred_innings_fast(batting_players, bowling_players,
             extras['total']    += extras_scored
 
         if ball_result['outcome_type'] == 'wicket':
-            striker['dismissal_type'] = ball_result['dismissal_type']
+            dismissal_type = ball_result['dismissal_type']
+            striker['dismissal_type'] = dismissal_type
+            striker['fielder_id'] = choose_fielder_for_wicket(
+                bowling_players,
+                current_bowler_id,
+                dismissal_type,
+                ball_result.get('caught_type'),
+            )
             striker['not_out']        = False
-            bowler['wickets']        += 1
+            if dismissal_type != 'run_out':
+                striker['bowler_id'] = current_bowler_id
+                bowler['wickets'] += 1
             total_wickets            += 1
 
             if is_powerplay:
@@ -328,6 +339,8 @@ def simulate_hundred_innings_fast(batting_players, bowling_players,
             'fours':          b['fours'],
             'sixes':          b['sixes'],
             'dismissal_type': b['dismissal_type'],
+            'bowler_id':      b['bowler_id'],
+            'fielder_id':     b['fielder_id'],
             'not_out':        b['not_out'],
         }
         for b in active_batter_scores

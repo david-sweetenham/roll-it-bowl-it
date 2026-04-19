@@ -1564,6 +1564,7 @@ def fast_sim(id):
             bowling_players = [
                 {
                     'player_id':      p['id'],
+                    'batting_position': p.get('batting_position'),
                     'bowling_type':   p['bowling_type'],
                     'bowling_rating': p['bowling_rating'],
                 }
@@ -1594,6 +1595,8 @@ def fast_sim(id):
                         'fours':         bs['fours'],
                         'sixes':         bs['sixes'],
                         'dismissal_type': bs['dismissal_type'],
+                        'bowler_id':     bs.get('bowler_id'),
+                        'fielder_id':    bs.get('fielder_id'),
                         'not_out':       1 if bs['not_out'] else 0,
                         'status':        'not_out' if bs['not_out'] else 'dismissed',
                     })
@@ -1706,8 +1709,12 @@ def _build_sim_state(state):
             'player_id':     bi['player_id'],
             'name':          p.get('name', f'Player {bi["player_id"]}'),
             'batting_rating': p.get('batting_rating', 3),
+            'batting_position': bi.get('batting_position'),
             'runs':           bi.get('runs', 0) or 0,
             'balls':          bi.get('balls_faced', 0) or 0,
+            'dismissal_type': bi.get('dismissal_type'),
+            'bowler_id':      bi.get('bowler_id'),
+            'fielder_id':     bi.get('fielder_id'),
             'dismissed':      bi.get('status') == 'dismissed',
             'in':             bi.get('status') == 'batting',
         })
@@ -1730,6 +1737,7 @@ def _build_sim_state(state):
         bowling_players.append({
             'player_id':    bwi['player_id'],
             'name':         p.get('name', f'Player {bwi["player_id"]}'),
+            'batting_position': p.get('batting_position'),
             'bowling_type': bt,
             'bowling_rating': p.get('bowling_rating', 3),
             'overs_bowled': bwi.get('overs', 0) or 0,
@@ -1777,6 +1785,10 @@ def _persist_sim_result(db, match_id, match_state, sim_result):
         upd = {'runs': bp.get('runs', 0), 'balls_faced': bp.get('balls', 0)}
         if bp.get('dismissed') and row.get('status') != 'dismissed':
             upd['status'] = 'dismissed'
+        if bp.get('dismissal_type') is not None:
+            upd['dismissal_type'] = bp.get('dismissal_type')
+            upd['bowler_id'] = bp.get('bowler_id')
+            upd['fielder_id'] = bp.get('fielder_id')
         elif bp.get('in') and row.get('status') == 'yet_to_bat':
             upd['status'] = 'batting'
         database.update_batter_innings(db, row['id'], upd)

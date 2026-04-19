@@ -856,6 +856,51 @@ def calculate_result(innings1_runs, innings1_wickets, innings2_runs, innings2_wi
     return result
 
 
+def _pick_keeper_candidate(fielders, bowler_id):
+    candidates = [p for p in fielders if p.get('player_id') != bowler_id]
+    non_bowlers = [p for p in candidates if p.get('bowling_type') == 'none']
+    if non_bowlers:
+        return min(non_bowlers, key=lambda p: (p.get('batting_position') or 99, p.get('player_id') or 0))
+    if candidates:
+        return min(candidates, key=lambda p: (p.get('batting_position') or 99, p.get('player_id') or 0))
+    return None
+
+
+def choose_fielder_for_wicket(fielders, bowler_id, dismissal_type, caught_type=None):
+    if dismissal_type not in ('caught', 'run_out', 'stumped'):
+        return None
+
+    if dismissal_type == 'stumped' or caught_type == 'caught_behind':
+        keeper = _pick_keeper_candidate(fielders, bowler_id)
+        return keeper.get('player_id') if keeper else None
+
+    non_bowler_fielders = [p for p in fielders if p.get('player_id') != bowler_id]
+    all_fielders = list(fielders)
+
+    if dismissal_type == 'run_out':
+        pool = non_bowler_fielders or all_fielders
+        if not pool:
+            return None
+        return random.choice(pool).get('player_id')
+
+    if dismissal_type == 'caught':
+        if caught_type in ('caught_slip', 'caught_boundary'):
+            pool = non_bowler_fielders or all_fielders
+            if not pool:
+                return None
+            return random.choice(pool).get('player_id')
+
+        if bowler_id and random.random() < 0.18:
+            return bowler_id
+
+        pool = non_bowler_fielders or all_fielders
+        if not pool:
+            return bowler_id
+        return random.choice(pool).get('player_id')
+
+    return None
+
+
 def simulate_innings_fast(batting_players, bowling_players, format, target=None,
                           scoring_mode='modern') -> dict:
     """Simulate a complete innings using bowl_ball() in a loop."""
@@ -887,6 +932,8 @@ def simulate_innings_fast(batting_players, bowling_players, format, target=None,
             'fours': 0,
             'sixes': 0,
             'dismissal_type': None,
+            'bowler_id': None,
+            'fielder_id': None,
             'not_out': True,
             'batting': i < 2,  # first two are in
         })
@@ -975,9 +1022,19 @@ def simulate_innings_fast(batting_players, bowling_players, format, target=None,
 
         if ball_result['outcome_type'] == 'wicket':
             # Record dismissal
-            striker['dismissal_type'] = ball_result['dismissal_type']
+            dismissal_type = ball_result['dismissal_type']
+            striker['dismissal_type'] = dismissal_type
+            striker['fielder_id'] = choose_fielder_for_wicket(
+                bowling_players,
+                current_bowler_id,
+                dismissal_type,
+                ball_result.get('caught_type'),
+            )
+            if dismissal_type != 'run_out':
+                striker['bowler_id'] = current_bowler_id
             striker['not_out'] = False
-            bowler['wickets'] += 1
+            if dismissal_type != 'run_out':
+                bowler['wickets'] += 1
             total_wickets += 1
 
             fall_of_wickets.append({
@@ -1044,6 +1101,8 @@ def simulate_innings_fast(batting_players, bowling_players, format, target=None,
             'fours': b['fours'],
             'sixes': b['sixes'],
             'dismissal_type': b['dismissal_type'],
+            'bowler_id': b['bowler_id'],
+            'fielder_id': b['fielder_id'],
             'not_out': b['not_out'],
         })
 
@@ -1244,16 +1303,27 @@ def simulate_to(target: str, state: dict) -> dict:
             total_wickets += 1
             striker['dismissed'] = True
             striker['in']        = False
-            bowler['wickets']    = bowler.get('wickets', 0) + 1
 
             dism = ball.get('dismissal_type', 'out')
+            striker['dismissal_type'] = dism
+            striker['fielder_id'] = choose_fielder_for_wicket(
+                bowling_players,
+                current_bowler_id,
+                dism,
+                ball.get('caught_type'),
+            )
+            if dism != 'run_out':
+                striker['bowler_id'] = current_bowler_id
+                bowler['wickets'] = bowler.get('wickets', 0) + 1
             wicket_events.append({
                 'batter':         striker.get('name', str(striker['player_id'])),
                 'runs':           striker.get('runs', 0),
                 'dismissal_type': dism,
+                'bowler_id':      striker.get('bowler_id'),
+                'fielder_id':     striker.get('fielder_id'),
             })
 
-            if bowler['wickets'] == 5:
+            if dism != 'run_out' and bowler['wickets'] == 5:
                 key_events.append(
                     f"FIVE-FER! {bowler.get('name', 'Bowler')} takes 5th wicket"
                 )
