@@ -1872,13 +1872,42 @@ def complete_match(id):
             _check_world_records(db, updated['world_id'], id, updated)
 
         # Series tracking
+        series_won = None
         if updated.get('series_id'):
+            s_before = database.get_series(db, updated['series_id'])
+            was_complete = s_before and s_before['status'] == 'complete'
             _update_series_after_match(db, updated['series_id'])
-
+            if not was_complete:
+                s = database.get_series(db, updated['series_id'])
+                if s and s['status'] == 'complete' and s.get('winner_team_id'):
+                    series_won = {
+                        'name':        s['name'],
+                        'format':      s.get('format'),
+                        'winner_name': s.get('winner_name'),
+                        'start_date':  s.get('start_date'),
+                    }
 
         # Tournament NRR tracking
+        tournament_won = None
         if updated.get('tournament_id'):
+            t_before = db.execute(
+                "SELECT status FROM tournaments WHERE id=?", (updated['tournament_id'],)
+            ).fetchone()
+            t_was_complete = t_before and t_before['status'] == 'complete'
             _update_tournament_nrr(db, updated['tournament_id'], updated)
+            if not t_was_complete:
+                t = db.execute(
+                    "SELECT t.name, t.format, t.start_date, t.status, wt.name AS winner_name "
+                    "FROM tournaments t LEFT JOIN teams wt ON t.winner_team_id = wt.id "
+                    "WHERE t.id=?", (updated['tournament_id'],)
+                ).fetchone()
+                if t and t['status'] == 'complete' and t['winner_name']:
+                    tournament_won = {
+                        'name':        t['name'],
+                        'format':      t['format'],
+                        'winner_name': t['winner_name'],
+                        'start_date':  t['start_date'],
+                    }
 
         result_string = _build_result_description(updated, database.get_innings(db, id))
         return jsonify({
@@ -1891,6 +1920,8 @@ def complete_match(id):
                 'player_of_match_name': updated.get('player_of_match_name'),
                 'result_string':      result_string,
             },
+            'series_won':     series_won,
+            'tournament_won': tournament_won,
         })
     finally:
         database.close_db(db)

@@ -4138,10 +4138,128 @@ async function saveMatchToAlmanack() {
     AppState.sessionStats.matches++;
     updateSessionBar();
     try { localStorage.setItem('ribi_welcomed', 'true'); } catch (_) {}
+    if (res.series_won)     showTrophyModal(res.series_won,     'series');
+    if (res.tournament_won) showTrophyModal(res.tournament_won, 'tournament');
   } else {
     btn.disabled = false;
     btn.textContent = '📖 Save to The Almanack';
   }
+}
+
+// ── Trophy Modal ──────────────────────────────────────────────────────────────
+
+const _MAJOR_COMP_KEYWORDS = [
+  'ashes', 'world cup', 'world test championship', 'champions trophy',
+  'ipl', 'big bash', 'cpl', 'sa20', 'hundred', 'psl',
+];
+
+function _isMajorComp(name) {
+  const lower = (name || '').toLowerCase();
+  return _MAJOR_COMP_KEYWORDS.some(k => lower.includes(k));
+}
+
+function _trophySvg(tier) {
+  // tier: 'gold' | 'silver' | 'tournament'
+  const cup  = tier === 'gold'       ? '#ffd700'
+             : tier === 'tournament' ? '#7bb4ff'
+             :                         '#c0c0c0';
+  const glow = tier === 'gold'       ? 'rgba(255,215,0,0.35)'
+             : tier === 'tournament' ? 'rgba(120,180,255,0.35)'
+             :                         'rgba(192,192,192,0.25)';
+  return `<svg width="90" height="90" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <radialGradient id="tg${tier}" cx="50%" cy="30%" r="60%">
+        <stop offset="0%" stop-color="${cup}" stop-opacity="1"/>
+        <stop offset="100%" stop-color="${cup}" stop-opacity="0.55"/>
+      </radialGradient>
+      <filter id="tf${tier}">
+        <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="${glow}"/>
+      </filter>
+    </defs>
+    <g filter="url(#tf${tier})">
+      <!-- Cup body -->
+      <path d="M28 18 Q26 38 32 48 Q38 56 45 57 Q52 56 58 48 Q64 38 62 18 Z"
+            fill="url(#tg${tier})"/>
+      <!-- Handles -->
+      <path d="M28 24 Q18 24 18 34 Q18 44 28 42" stroke="${cup}" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M62 24 Q72 24 72 34 Q72 44 62 42" stroke="${cup}" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <!-- Stem -->
+      <rect x="41" y="57" width="8" height="12" rx="2" fill="${cup}" opacity="0.9"/>
+      <!-- Base -->
+      <rect x="31" y="69" width="28" height="5" rx="2.5" fill="${cup}"/>
+      <!-- Shine -->
+      <ellipse cx="38" cy="30" rx="4" ry="7" fill="white" opacity="0.18"/>
+    </g>
+  </svg>`;
+}
+
+function _trophyCabinetSvg(tier) {
+  const cup  = tier === 'gold'       ? '#ffd700'
+             : tier === 'tournament' ? '#7bb4ff'
+             :                         '#c0c0c0';
+  const glow = tier === 'gold'       ? 'rgba(255,215,0,0.4)'
+             : tier === 'tournament' ? 'rgba(120,180,255,0.4)'
+             :                         'rgba(192,192,192,0.3)';
+  return `<svg width="40" height="40" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <radialGradient id="tcg${tier}" cx="50%" cy="30%" r="60%">
+        <stop offset="0%" stop-color="${cup}"/>
+        <stop offset="100%" stop-color="${cup}" stop-opacity="0.55"/>
+      </radialGradient>
+      <filter id="tcf${tier}">
+        <feDropShadow dx="0" dy="1" stdDeviation="3" flood-color="${glow}"/>
+      </filter>
+    </defs>
+    <g filter="url(#tcf${tier})">
+      <path d="M28 18 Q26 38 32 48 Q38 56 45 57 Q52 56 58 48 Q64 38 62 18 Z" fill="url(#tcg${tier})"/>
+      <path d="M28 24 Q18 24 18 34 Q18 44 28 42" stroke="${cup}" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M62 24 Q72 24 72 34 Q72 44 62 42" stroke="${cup}" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <rect x="41" y="57" width="8" height="12" rx="2" fill="${cup}" opacity="0.9"/>
+      <rect x="31" y="69" width="28" height="5" rx="2.5" fill="${cup}"/>
+      <ellipse cx="38" cy="30" rx="4" ry="7" fill="white" opacity="0.18"/>
+    </g>
+  </svg>`;
+}
+
+function showTrophyModal(data, kind) {
+  const isMajor = _isMajorComp(data.name);
+  const tier    = kind === 'tournament' ? 'tournament'
+                : isMajor              ? 'gold'
+                :                        'silver';
+
+  const modal   = document.getElementById('trophy-modal');
+  const svgWrap = document.getElementById('trophy-svg-wrap');
+  const badge   = document.getElementById('trophy-modal-badge');
+  const title   = document.getElementById('trophy-modal-title');
+  const winner  = document.getElementById('trophy-modal-winner');
+  const meta    = document.getElementById('trophy-modal-meta');
+
+  svgWrap.innerHTML = _trophySvg(tier);
+
+  const badgeCls = tier === 'silver' ? 'trophy-modal-badge--silver'
+                 : tier === 'tournament' ? 'trophy-modal-badge--tournament'
+                 : '';
+  badge.className = `trophy-modal-badge ${badgeCls}`.trim();
+  badge.textContent = kind === 'tournament'
+    ? (data.format ? `${data.format} Tournament` : 'Tournament')
+    : (isMajor ? `Major ${data.format || ''} Series` : `${data.format || ''} Series`).trim();
+
+  const titleCls = tier === 'silver' ? 'trophy-modal-title--silver'
+                 : tier === 'tournament' ? 'trophy-modal-title--tournament'
+                 : '';
+  title.className = `trophy-modal-title ${titleCls}`.trim();
+  title.textContent = data.name;
+
+  winner.textContent = data.winner_name ? `${data.winner_name} are champions` : '';
+  meta.textContent   = data.start_date  ? `${data.start_date}` : '';
+
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeTrophyModal() {
+  document.getElementById('trophy-modal').classList.add('hidden');
+  document.body.style.overflow = '';
 }
 
 async function suggestJournalPrompt() {
@@ -7200,42 +7318,55 @@ async function loadAlmHonours() {
 
   let html = '';
 
-  // Series winners
-  html += `<h3 class="alm-section-heading">Series Winners</h3>`;
-  const series = honData.series || [];
-  html += series.length
-    ? `<div class="alm-table-wrap"><table class="alm-table almanack-table"><thead><tr>
-         <th>Series</th><th>Format</th><th>Teams</th><th>Winner</th><th>Date</th>
-       </tr></thead><tbody>
-         ${series.map((r,i) => `<tr class="${i%2===0?'alm-row-even':'alm-row-odd'}">
-           <td>${r.name}</td>
-           <td><span class="badge badge-${(r.format||'').toLowerCase()}">${r.format||'—'}</span></td>
-           <td>${r.team1_name} v ${r.team2_name}</td>
-           <td><strong>${r.winner_name || '—'}</strong></td>
-           <td>${r.start_date || '—'}</td>
-         </tr>`).join('')}
-       </tbody></table></div>`
-    : `<div class="alm-empty-state" style="margin:12px 0 24px;padding:24px">
-         <p class="alm-empty-state-heading">No completed series yet</p>
-       </div>`;
-
-  // Tournament winners
-  html += `<h3 class="alm-section-heading">Tournament Winners</h3>`;
+  // ── Trophy Cabinet ──
+  const series      = honData.series      || [];
   const tournaments = honData.tournaments || [];
-  html += tournaments.length
-    ? `<div class="alm-table-wrap"><table class="alm-table almanack-table"><thead><tr>
-         <th>Tournament</th><th>Format</th><th>Winner</th><th>Date</th>
-       </tr></thead><tbody>
-         ${tournaments.map((r,i) => `<tr class="${i%2===0?'alm-row-even':'alm-row-odd'}">
-           <td>${r.name}</td>
-           <td><span class="badge badge-${(r.format||'').toLowerCase()}">${r.format||'—'}</span></td>
-           <td><strong>${r.winner_name || '—'}</strong></td>
-           <td>${r.start_date || '—'}</td>
-         </tr>`).join('')}
-       </tbody></table></div>`
-    : `<div class="alm-empty-state" style="margin:12px 0 24px;padding:24px">
-         <p class="alm-empty-state-heading">No completed tournaments yet</p>
-       </div>`;
+  const allTrophies = [
+    ...series.map(r => ({ ...r, kind: 'series' })),
+    ...tournaments.map(r => ({ ...r, kind: 'tournament' })),
+  ];
+
+  if (allTrophies.length) {
+    // Sort: major first, then by date desc
+    allTrophies.sort((a, b) => {
+      const am = _isMajorComp(a.name) ? 0 : 1;
+      const bm = _isMajorComp(b.name) ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return (b.start_date || '').localeCompare(a.start_date || '');
+    });
+
+    html += `<h3 class="alm-section-heading">Trophy Cabinet</h3>`;
+    html += `<div class="trophy-cabinet-grid">`;
+    html += allTrophies.map(r => {
+      const isMajor = _isMajorComp(r.name);
+      const tier    = r.kind === 'tournament' ? 'tournament'
+                    : isMajor                 ? 'gold'
+                    :                           'silver';
+      const cardCls = r.kind === 'tournament' ? 'trophy-cabinet-card--tournament'
+                    : isMajor                 ? 'trophy-cabinet-card--major'
+                    :                           '';
+      const fmtBadge = r.format
+        ? `<span class="badge badge-${r.format.toLowerCase()}" style="font-size:9px">${r.format}</span>`
+        : '';
+      const vsLine = r.kind === 'series' && r.team1_name
+        ? `<div class="trophy-cabinet-meta">${escHtml(r.team1_name)} v ${escHtml(r.team2_name)}</div>`
+        : '';
+      return `<div class="trophy-cabinet-card ${cardCls}">
+        <div class="trophy-cabinet-icon">${_trophyCabinetSvg(tier)}</div>
+        <div class="trophy-cabinet-name">${escHtml(r.name)}</div>
+        <div class="trophy-cabinet-winner">${escHtml(r.winner_name || '—')}</div>
+        ${vsLine}
+        <div class="trophy-cabinet-meta">${fmtBadge}${r.start_date ? ` &nbsp;${escHtml(r.start_date)}` : ''}</div>
+      </div>`;
+    }).join('');
+    html += `</div>`;
+  } else {
+    html += `<h3 class="alm-section-heading">Trophy Cabinet</h3>`;
+    html += `<div class="alm-empty-state" style="margin:12px 0 24px;padding:32px">
+      <p class="alm-empty-state-heading">No trophies yet</p>
+      <p class="alm-empty-state-sub">Complete a series or tournament to fill the cabinet</p>
+    </div>`;
+  }
 
   // Enriched records vs real world
   if (wrData) {
