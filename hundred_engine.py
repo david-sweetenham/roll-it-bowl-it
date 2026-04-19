@@ -3,11 +3,17 @@ hundred_engine.py — The Hundred format engine for Roll It & Bowl It.
 100-ball cricket. Distinct rules from T20/ODI/Test.
 Imports game_engine for bowl_ball() and commentary only.
 
-"The Hundred" is a registered trademark of the England and Wales Cricket Board (ECB).
-The team names Birmingham Phoenix, London Spirit, Manchester Super Giants, MI London,
-Southern Brave, Sunrisers Leeds, Trent Rockets, and Welsh Fire are trademarks of their
-respective owners. This implementation is an independent fan recreation for personal
-entertainment and is not affiliated with, endorsed by, or connected to the ECB.
+TRADEMARK NOTICE
+"The Hundred" is a trademark of the England and Wales Cricket Board (ECB).
+The franchise team names Birmingham Phoenix, London Spirit, Manchester Super Giants,
+MI London, Southern Brave, Sunrisers Leeds, Trent Rockets, and Welsh Fire, together
+with their associated logos and branding, are trademarks of their respective owners.
+Player names are included for simulation realism and remain the identity of the
+individuals concerned.
+
+This file is part of an independent, non-commercial fan project and is not affiliated
+with, endorsed by, licensed by, or connected to the ECB or any franchise operator.
+No challenge to any trademark or other intellectual property right is intended.
 """
 
 import random
