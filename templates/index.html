@@ -1053,6 +1053,7 @@
         <button class="btn-back" onclick="showScreen('series')">← Back to Series</button>
         <h2 id="series-detail-name">Series Detail</h2>
         <div id="series-score-banner" class="series-score-banner hidden"></div>
+        <div id="series-h2h"></div>
         <div id="series-fixtures-list"></div>
       </div>
     </div>
@@ -1327,6 +1328,7 @@
         <!-- Tabs -->
         <div class="tab-bar" style="margin-top:14px">
           <button class="tab-btn active" onclick="switchWorldTab('overview',this)">Overview</button>
+          <button class="tab-btn" onclick="switchWorldTab('standings',this)">Standings</button>
           <button class="tab-btn" onclick="switchWorldTab('rankings',this)">Rankings</button>
           <button class="tab-btn" onclick="switchWorldTab('records',this)">Records</button>
         </div>
@@ -1368,6 +1370,11 @@
             <h3>World Records</h3>
             <div id="wd-records-overview"></div>
           </div>
+        </div>
+
+        <!-- STANDINGS TAB -->
+        <div id="wd-tab-standings" class="hidden">
+          <div id="wd-standings-content" style="margin-top:12px"></div>
         </div>
 
         <!-- RANKINGS TAB -->

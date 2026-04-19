@@ -3066,6 +3066,45 @@ body.broadcast-mode .btn-howzat {
 .score-lead { color: var(--gold); font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; }
 .score-played { font-size: var(--fs-xs); color: var(--text-muted); margin-left: auto; }
 
+/* H2H panel */
+.series-h2h-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; margin-bottom: 16px;
+}
+.series-h2h-title {
+  font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 10px;
+}
+.series-h2h-summary {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.h2h-side { display: flex; align-items: center; gap: 8px; flex: 1; }
+.h2h-side--right { flex-direction: row-reverse; }
+.h2h-team-name { font-weight: 700; font-size: var(--fs-sm); }
+.h2h-wins {
+  font-family: var(--font-score); font-size: 2em; font-weight: 900;
+  color: var(--text-muted); line-height: 1;
+}
+.h2h-wins--lead { color: var(--accent); }
+.h2h-centre { text-align: center; min-width: 60px; }
+.h2h-draws { display: block; font-size: var(--fs-xs); color: var(--text-muted); }
+.h2h-total { display: block; font-size: var(--fs-xs); color: var(--text-muted); }
+.h2h-fmt-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.h2h-fmt-table th, .h2h-fmt-table td { padding: 4px 8px; text-align: center; border-bottom: 1px solid var(--border); }
+.h2h-fmt-table th:first-child, .h2h-fmt-table td:first-child { text-align: left; }
+.h2h-leader { color: var(--accent); font-weight: 700; }
+
+/* World standings tab */
+.wstandings-comp-section { margin-bottom: 24px; }
+.wstandings-comp-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.wstandings-comp-name {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 1em; font-weight: 700; color: var(--accent); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wstandings-comp-name:hover { opacity: 0.8; }
+.wstandings-season { font-size: var(--fs-xs); color: var(--text-muted); }
+
 /* Fixture cards */
 .fixture-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);

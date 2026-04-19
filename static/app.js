@@ -6660,6 +6660,11 @@ async function loadSeriesDetail(id) {
   const s = data.series;
   if (nameEl) nameEl.textContent = s.name;
 
+  // Kick off H2H fetch in parallel with rendering
+  const h2hPromise = (s.team1_id && s.team2_id)
+    ? api('GET', `/api/teams/${s.team1_id}/head-to-head/${s.team2_id}`).catch(() => null)
+    : Promise.resolve(null);
+
   // Score banner
   const banner = document.getElementById('series-score-banner');
   if (banner) {
@@ -6679,7 +6684,7 @@ async function loadSeriesDetail(id) {
     `;
   }
 
-  // Fixtures
+  // Fixtures (render immediately — H2H fills in below once its fetch resolves)
   const container = document.getElementById('series-fixtures-list');
   if (!container) return;
   const fixtures = data.fixtures || [];
@@ -6703,6 +6708,55 @@ async function loadSeriesDetail(id) {
         ${result ? `<div class="fixture-result">${result}</div>` : ''}
       </div>`;
   }).join('');
+
+  // Head-to-head (fetch was kicked off earlier; await now that fixtures are shown)
+  const h2hEl = document.getElementById('series-h2h');
+  if (h2hEl && s.team1_id && s.team2_id) {
+    const h2h = await h2hPromise;
+    if (h2h && h2h.total > 0) {
+      const allMatches = h2h.matches || [];
+      const t1wins = allMatches.filter(m => m.winning_team_id === s.team1_id).length;
+      const t2wins = allMatches.filter(m => m.winning_team_id === s.team2_id).length;
+      const draws  = h2h.total - t1wins - t2wins;
+
+      const byFmt = h2h.by_format || {};
+      const fmtRows = Object.entries(byFmt).map(([fmt, d]) => {
+        const fw1 = d.team1_wins; const fw2 = d.team2_wins;
+        const fd  = d.matches.length - fw1 - fw2;
+        return `<tr>
+          <td>${escHtml(fmt)}</td>
+          <td class="${fw1 > fw2 ? 'h2h-leader' : ''}">${fw1}</td>
+          <td class="text-muted">${fd}</td>
+          <td class="${fw2 > fw1 ? 'h2h-leader' : ''}">${fw2}</td>
+          <td class="text-muted">${d.matches.length}</td>
+        </tr>`;
+      }).join('');
+
+      h2hEl.innerHTML = `
+        <div class="series-h2h-card">
+          <div class="series-h2h-title">Head to Head</div>
+          <div class="series-h2h-summary">
+            <div class="h2h-side">
+              <span class="h2h-team-name">${escHtml(s.team1_name)}</span>
+              <span class="h2h-wins ${t1wins >= t2wins ? 'h2h-wins--lead' : ''}">${t1wins}</span>
+            </div>
+            <div class="h2h-centre">
+              ${draws > 0 ? `<span class="h2h-draws">${draws}D</span>` : ''}
+              <span class="h2h-total">${h2h.total} matches</span>
+            </div>
+            <div class="h2h-side h2h-side--right">
+              <span class="h2h-wins ${t2wins > t1wins ? 'h2h-wins--lead' : ''}">${t2wins}</span>
+              <span class="h2h-team-name">${escHtml(s.team2_name)}</span>
+            </div>
+          </div>
+          ${fmtRows ? `
+          <table class="h2h-fmt-table">
+            <thead><tr><th>Format</th><th>${escHtml(s.team1_name)}</th><th>D</th><th>${escHtml(s.team2_name)}</th><th>Total</th></tr></thead>
+            <tbody>${fmtRows}</tbody>
+          </table>` : ''}
+        </div>`;
+    }
+  }
 }
 
 function _buildShortResult(match) {
@@ -9848,15 +9902,94 @@ function _renderRecordsSection(elId, records) {
 }
 
 function switchWorldTab(tab, btn) {
-  ['overview','rankings','records'].forEach(t => {
+  ['overview','standings','rankings','records'].forEach(t => {
     const el = document.getElementById(`wd-tab-${t}`);
     if (el) el.classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('#screen-world-detail .tab-btn').forEach(b =>
     b.classList.toggle('active', b === btn));
 
-  if (tab === 'rankings') loadWorldRankings();
-  if (tab === 'records')  loadWorldRecords();
+  if (tab === 'standings') _loadWorldStandings();
+  if (tab === 'rankings')  loadWorldRankings();
+  if (tab === 'records')   loadWorldRecords();
+}
+
+async function _loadWorldStandings() {
+  const el = document.getElementById('wd-standings-content');
+  if (!el) return;
+  el.innerHTML = '<div class="spinner"></div>';
+
+  const worldId = WorldUI.activeWorldId;
+  const comps = WorldUI._worldData?.available_competitions || [];
+
+  if (!comps.length) {
+    el.innerHTML = '<p class="text-muted">No competitions in this world yet.</p>';
+    return;
+  }
+
+  const results = await Promise.all(
+    comps.map(c => api('GET', `/api/worlds/${worldId}/competitions/${encodeURIComponent(c.key)}`).catch(() => null))
+  );
+
+  const sections = [];
+  results.forEach((data, i) => {
+    if (!data) return;
+    const comp = comps[i];
+    const standingsGroups = data.standings_groups?.length
+      ? data.standings_groups
+      : (data.standings?.length ? [{ group: 'Standings', rows: data.standings }] : []);
+    if (!standingsGroups.some(g => g.rows?.length)) return;
+
+    const tableHtml = standingsGroups.map(group => {
+      const rows = group.rows || [];
+      const hasNrr   = rows.some(r => Number(r.nrr || 0) !== 0);
+      const hasBonus  = rows.some(r => (r.batting_bonus || 0) || (r.bowling_bonus || 0));
+      const hasPct    = rows.some(r => r.pct != null && r.pct !== 0);
+      return `
+        <div class="wcomp-standings-group">
+          ${standingsGroups.length > 1 ? `<h4 class="wcomp-group-heading">${escHtml(group.group || 'Standings')}</h4>` : ''}
+          <table class="standings-table">
+            <thead><tr>
+              <th>Pos</th><th>Team</th><th>P</th><th>W</th><th>L</th><th>D</th>
+              ${hasNrr ? '<th>NRR</th>' : ''}
+              ${hasPct ? '<th>PCT%</th>' : ''}
+              ${hasBonus ? '<th>Bat</th><th>Bowl</th>' : ''}
+              <th>Pts</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td>${r.position}</td>
+                  <td><span class="team-dot" style="background:${r.badge_colour || '#888'}"></span>${escHtml(r.team_name || '?')}</td>
+                  <td>${r.played || 0}</td>
+                  <td>${r.won || 0}</td>
+                  <td>${r.lost || 0}</td>
+                  <td>${r.drawn || 0}</td>
+                  ${hasNrr ? `<td class="${Number(r.nrr || 0) >= 0 ? 'nrr-pos' : 'nrr-neg'}">${Number(r.nrr || 0).toFixed(3)}</td>` : ''}
+                  ${hasPct ? `<td>${Number(r.pct || 0).toFixed(2)}</td>` : ''}
+                  ${hasBonus ? `<td>${r.batting_bonus || 0}</td><td>${r.bowling_bonus || 0}</td>` : ''}
+                  <td><strong>${r.points || 0}</strong></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    const seasonLabel = data.selected_season
+      ? ` <span class="wstandings-season">${escHtml(data.selected_season)}</span>` : '';
+    sections.push(`
+      <div class="wstandings-comp-section">
+        <div class="wstandings-comp-header">
+          <button class="wstandings-comp-name btn-link" onclick="loadWorldCompetitionDetail('${escHtml(comp.key)}')">${escHtml(comp.name)}</button>
+          ${seasonLabel}
+        </div>
+        ${tableHtml}
+      </div>`);
+  });
+
+  el.innerHTML = sections.length
+    ? sections.join('')
+    : '<p class="text-muted">No standings available yet — play some matches first.</p>';
 }
 
 async function loadWorldRankings() {
