@@ -1389,8 +1389,8 @@ function updateLiveView(state) {
       const crr = legalBalls >= 5 ? (inn.total_runs / legalBalls * 100 / 5).toFixed(2) : '—';
       document.getElementById('sb-rr').textContent = `RR/5: ${crr}`;
     } else {
-      const overs = inn.overs_completed || 0;
-      document.getElementById('sb-overs').textContent = `${formatOvers(overs)} ov`;
+      const liveOvers = (state.over_number || 0) + ((state.ball_in_over || 0) / 10);
+      document.getElementById('sb-overs').textContent = `${formatOvers(liveOvers)} ov`;
       const crr = legalBalls >= 6
         ? (inn.total_runs / (legalBalls / 6)).toFixed(2)
         : '—';
