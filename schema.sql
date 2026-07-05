@@ -358,6 +358,19 @@ CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(team1_id, team2_id);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date);
 CREATE INDEX IF NOT EXISTS idx_ranking_history ON ranking_history(world_id, format, team_id);
 
+-- Performance Optimization Indexes
+CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);
+CREATE INDEX IF NOT EXISTS idx_innings_match ON innings(match_id);
+CREATE INDEX IF NOT EXISTS idx_batter_innings_innings ON batter_innings(innings_id);
+CREATE INDEX IF NOT EXISTS idx_bowler_innings_innings ON bowler_innings(innings_id);
+CREATE INDEX IF NOT EXISTS idx_matches_world ON matches(world_id);
+CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id);
+CREATE INDEX IF NOT EXISTS idx_matches_series ON matches(series_id);
+CREATE INDEX IF NOT EXISTS idx_partnerships_innings ON partnerships(innings_id);
+CREATE INDEX IF NOT EXISTS idx_fall_of_wickets_innings ON fall_of_wickets(innings_id);
+CREATE INDEX IF NOT EXISTS idx_fixtures_world_status ON fixtures(world_id, status);
+CREATE INDEX IF NOT EXISTS idx_fixtures_date ON fixtures(scheduled_date);
+
 -- VIEWS
 CREATE VIEW IF NOT EXISTS batting_averages AS
 SELECT
