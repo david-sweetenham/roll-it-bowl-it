@@ -5,6 +5,8 @@ No Flask imports. All functions accept a db (sqlite3.Connection) parameter.
 
 import sqlite3
 import config
+import threading
+from collections import OrderedDict
 
 DB_PATH = config.DB_PATH
 
@@ -41,27 +43,90 @@ def dict_from_rows(rows):
     return [dict(r) for r in rows]
 
 
+# ── Bounded LRU Cache Implementation ──────────────────────────────────────────
+
+_MISSING = object()
+
+class LRUCache:
+    def __init__(self, maxsize=512):
+        self.maxsize = maxsize
+        self.cache = OrderedDict()
+        self.lock = threading.Lock()
+
+    def get(self, key):
+        with self.lock:
+            if key not in self.cache:
+                return _MISSING
+            self.cache.move_to_end(key)
+            return self.cache[key]
+
+    def set(self, key, value):
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+            self.cache[key] = value
+            if len(self.cache) > self.maxsize:
+                self.cache.popitem(last=False)
+
+    def clear(self):
+        with self.lock:
+            self.cache.clear()
+
+
+# ── Static Data Caches ────────────────────────────────────────────────────────
+_TEAM_CACHE = LRUCache(maxsize=128)
+_PLAYER_CACHE = LRUCache(maxsize=1024)
+_VENUE_CACHE = LRUCache(maxsize=128)
+_TEAM_PLAYERS_CACHE = LRUCache(maxsize=128)
+_TEAMS_LIST_CACHE = LRUCache(maxsize=32)
+_VENUES_LIST_CACHE = LRUCache(maxsize=32)
+_RECORD_CACHE = LRUCache(maxsize=128)
+
+def clear_static_caches():
+    _TEAM_CACHE.clear()
+    _PLAYER_CACHE.clear()
+    _VENUE_CACHE.clear()
+    _TEAM_PLAYERS_CACHE.clear()
+    _TEAMS_LIST_CACHE.clear()
+    _VENUES_LIST_CACHE.clear()
+
+def clear_record_caches():
+    _RECORD_CACHE.clear()
+
+
 # ── Teams ─────────────────────────────────────────────────────────────────────
 
 def get_teams(db):
+    cache_key = "all_teams"
+    cached = _TEAMS_LIST_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
     rows = db.execute(
         "SELECT t.*, v.name as venue_name FROM teams t "
         "LEFT JOIN venues v ON t.home_venue_id = v.id "
         "ORDER BY t.name"
     ).fetchall()
-    return dict_from_rows(rows)
+    res = dict_from_rows(rows)
+    _TEAMS_LIST_CACHE.set(cache_key, res)
+    return res
 
 
 def get_team(db, id):
+    cached = _TEAM_CACHE.get(id)
+    if cached is not _MISSING:
+        return cached
     row = db.execute(
         "SELECT t.*, v.name as venue_name FROM teams t "
         "LEFT JOIN venues v ON t.home_venue_id = v.id "
         "WHERE t.id = ?", (id,)
     ).fetchone()
-    return dict_from_row(row)
+    res = dict_from_row(row)
+    _TEAM_CACHE.set(id, res)
+    return res
 
 
 def create_team(db, data):
+    clear_static_caches()
     cur = db.execute(
         "INSERT INTO teams (name, short_code, badge_colour, home_venue_id, is_real, is_custom) "
         "VALUES (:name, :short_code, :badge_colour, :home_venue_id, :is_real, :is_custom)",
@@ -74,21 +139,24 @@ def create_team(db, data):
             'is_custom': data.get('is_custom', 0),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
 def update_team(db, id, data):
+    clear_static_caches()
     allowed = ['name', 'short_code', 'badge_colour', 'home_venue_id']
     sets = ', '.join(f"{k} = :{k}" for k in allowed if k in data)
     if not sets:
         return
     data['_id'] = id
     db.execute(f"UPDATE teams SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 def get_players_for_team(db, team_id, world_id=None):
+    cache_key = (team_id, world_id)
+    cached = _TEAM_PLAYERS_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
     if world_id is None:
         rows = db.execute(
             "SELECT * FROM players "
@@ -103,21 +171,29 @@ def get_players_for_team(db, team_id, world_id=None):
             "ORDER BY batting_position, id",
             (team_id, world_id)
         ).fetchall()
-    return dict_from_rows(rows)
+    res = dict_from_rows(rows)
+    _TEAM_PLAYERS_CACHE.set(cache_key, res)
+    return res
 
 
 # ── Players ───────────────────────────────────────────────────────────────────
 
 def get_player(db, id):
+    cached = _PLAYER_CACHE.get(id)
+    if cached is not _MISSING:
+        return cached
     row = db.execute(
         "SELECT p.*, t.name as team_name, t.short_code as team_code, t.badge_colour "
         "FROM players p JOIN teams t ON p.team_id = t.id WHERE p.id = ?",
         (id,)
     ).fetchone()
-    return dict_from_row(row)
+    res = dict_from_row(row)
+    _PLAYER_CACHE.set(id, res)
+    return res
 
 
 def create_player(db, data):
+    clear_static_caches()
     cur = db.execute(
         "INSERT INTO players (team_id, name, batting_position, batting_rating, "
         "batting_hand, bowling_type, bowling_action, bowling_rating, source_world_id, is_regen) "
@@ -136,23 +212,34 @@ def create_player(db, data):
             'is_regen': data.get('is_regen', 0),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
 # ── Venues ────────────────────────────────────────────────────────────────────
 
 def get_venues(db):
+    cache_key = "all_venues"
+    cached = _VENUES_LIST_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
     rows = db.execute("SELECT * FROM venues ORDER BY name").fetchall()
-    return dict_from_rows(rows)
+    res = dict_from_rows(rows)
+    _VENUES_LIST_CACHE.set(cache_key, res)
+    return res
 
 
 def get_venue(db, id):
+    cached = _VENUE_CACHE.get(id)
+    if cached is not _MISSING:
+        return cached
     row = db.execute("SELECT * FROM venues WHERE id = ?", (id,)).fetchone()
-    return dict_from_row(row)
+    res = dict_from_row(row)
+    _VENUE_CACHE.set(id, res)
+    return res
 
 
 def create_venue(db, data):
+    clear_static_caches()
     cur = db.execute(
         "INSERT INTO venues (name, city, country, is_custom) VALUES (:name, :city, :country, :is_custom)",
         {
@@ -162,7 +249,6 @@ def create_venue(db, data):
             'is_custom': data.get('is_custom', 0),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -190,7 +276,6 @@ def create_match(db, data):
             'scoring_mode':  data.get('scoring_mode', 'modern'),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -218,6 +303,7 @@ def get_match(db, id):
 
 
 def update_match(db, id, data):
+    clear_record_caches()
     allowed = [
         'toss_winner_id', 'toss_choice', 'result_type', 'winning_team_id',
         'margin_runs', 'margin_wickets', 'player_of_match_id', 'status', 'match_notes',
@@ -228,7 +314,6 @@ def update_match(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE matches SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 def get_recent_world_matches(db, world_id, limit=8):
@@ -281,7 +366,6 @@ def create_innings(db, match_id, innings_number, batting_team_id, bowling_team_i
         "VALUES (?, ?, ?, ?, 'in_progress')",
         (match_id, innings_number, batting_team_id, bowling_team_id)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -329,7 +413,6 @@ def update_innings(db, innings_id, data):
         return
     data['_id'] = innings_id
     db.execute(f"UPDATE innings SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 # ── Batter Innings ────────────────────────────────────────────────────────────
@@ -340,7 +423,6 @@ def create_batter_innings(db, innings_id, player_id, batting_position):
         "VALUES (?, ?, ?, 'yet_to_bat')",
         (innings_id, player_id, batting_position)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -370,7 +452,6 @@ def update_batter_innings(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE batter_innings SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 # ── Bowler Innings ────────────────────────────────────────────────────────────
@@ -380,7 +461,6 @@ def create_bowler_innings(db, innings_id, player_id):
         "INSERT INTO bowler_innings (innings_id, player_id) VALUES (?, ?)",
         (innings_id, player_id)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -405,7 +485,6 @@ def update_bowler_innings(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE bowler_innings SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 # ── Deliveries ────────────────────────────────────────────────────────────────
@@ -450,7 +529,6 @@ def insert_delivery(db, data):
             'commentary':          data.get('commentary', ''),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -513,7 +591,6 @@ def create_partnership(db, innings_id, wicket_number, b1_id, b2_id):
         "VALUES (?, ?, ?, ?)",
         (innings_id, wicket_number, b1_id, b2_id)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -524,7 +601,6 @@ def update_partnership(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE partnerships SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 def get_partnership(db, innings_id, wicket_number):
@@ -562,7 +638,6 @@ def insert_fall_of_wicket(db, innings_id, wicket_number, score, overs, batter_id
         "VALUES (?, ?, ?, ?, ?)",
         (innings_id, wicket_number, score, overs, batter_id)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -584,7 +659,6 @@ def save_journal_entry(db, match_id, text, note_type='match_report'):
         "INSERT INTO match_journal (match_id, note_text, note_type) VALUES (?, ?, ?)",
         (match_id, text, note_type)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -657,7 +731,6 @@ def create_series(db, data):
             'settings_json': data.get('settings_json'),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -717,7 +790,6 @@ def update_series(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE series SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 # ── Tournaments ───────────────────────────────────────────────────────────────
@@ -735,7 +807,6 @@ def create_tournament(db, data):
             'settings_json': data.get('settings_json'),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -767,7 +838,6 @@ def update_tournament(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE tournaments SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 def update_tournament_team(db, id, data):
@@ -778,7 +848,6 @@ def update_tournament_team(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE tournament_teams SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 def get_tournament_team_row(db, tournament_id, team_id):
@@ -794,7 +863,6 @@ def create_tournament_team(db, tournament_id, team_id, group_name):
         "INSERT INTO tournament_teams (tournament_id, team_id, group_name) VALUES (?, ?, ?)",
         (tournament_id, team_id, group_name)
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -820,7 +888,6 @@ def create_fixture(db, data):
             'is_user_match':  data.get('is_user_match', 0),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -860,7 +927,6 @@ def bulk_create_fixtures(db, fixtures):
             'competition_order':       f.get('competition_order'),
         } for f in fixtures]
     )
-    db.commit()
 
 
 def create_world_series(db, data):
@@ -885,7 +951,6 @@ def create_world_series(db, data):
             'icc_event_name': data.get('icc_event_name'),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -947,7 +1012,6 @@ def update_fixture(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE fixtures SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 # ── Worlds ────────────────────────────────────────────────────────────────────
@@ -964,7 +1028,6 @@ def create_world(db, data):
             'settings_json':    data.get('settings_json'),
         }
     )
-    db.commit()
     return cur.lastrowid
 
 
@@ -985,7 +1048,6 @@ def update_world(db, id, data):
         return
     data['_id'] = id
     db.execute(f"UPDATE worlds SET {sets} WHERE id = :_id", data)
-    db.commit()
 
 
 def delete_world(db, world_id):
@@ -1038,7 +1100,6 @@ def delete_world(db, world_id):
     db.execute("DELETE FROM player_world_state WHERE world_id = ?", (world_id,))
     db.execute("DELETE FROM series WHERE world_id = ?", (world_id,))
     db.execute("DELETE FROM worlds WHERE id = ?", (world_id,))
-    db.commit()
     return True
 
 
@@ -1065,7 +1126,6 @@ def insert_ranking_history(db, world_id, team_id, format_, points, position, sna
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (world_id, team_id, format_, points, position, snapshot_date, after_match_id)
     )
-    db.commit()
 
 
 def get_ranking_history(db, world_id, team_id=None, format_=None, limit=10):
@@ -1104,7 +1164,6 @@ def upsert_world_ranking(db, world_id, team_id, format_, points, position, match
             "VALUES (?, ?, ?, ?, ?, ?, date('now'))",
             (world_id, team_id, format_, points, position, matches)
         )
-    db.commit()
 
 
 # ── World Records ─────────────────────────────────────────────────────────────
@@ -1134,7 +1193,6 @@ def upsert_world_record(db, world_id, record_key, record_value, context_json, fo
             "VALUES (?, ?, ?, ?, ?)",
             (world_id, record_key, record_value, context_json, format_)
         )
-    db.commit()
 
 
 # ── Player World State ────────────────────────────────────────────────────────
@@ -1188,7 +1246,6 @@ def upsert_player_world_state(db, world_id, player_id, data):
                 'retire_age':        data.get('retire_age'),
             }
         )
-    db.commit()
 
 
 # ── Schema Migrations ─────────────────────────────────────────────────────────
@@ -1241,6 +1298,18 @@ def run_migrations(db):
         "ALTER TABLE innings ADD COLUMN balls_used INTEGER DEFAULT 0",
         "ALTER TABLE innings ADD COLUMN strategic_timeout_ball INTEGER DEFAULT NULL",
         "ALTER TABLE deliveries ADD COLUMN fielder_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id)",
+        "CREATE INDEX IF NOT EXISTS idx_innings_match ON innings(match_id)",
+        "CREATE INDEX IF NOT EXISTS idx_batter_innings_innings ON batter_innings(innings_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bowler_innings_innings ON bowler_innings(innings_id)",
+        "CREATE INDEX IF NOT EXISTS idx_matches_world ON matches(world_id)",
+        "CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id)",
+        "CREATE INDEX IF NOT EXISTS idx_matches_series ON matches(series_id)",
+        "CREATE INDEX IF NOT EXISTS idx_matches_canon_status ON matches(canon_status)",
+        "CREATE INDEX IF NOT EXISTS idx_partnerships_innings ON partnerships(innings_id)",
+        "CREATE INDEX IF NOT EXISTS idx_fall_of_wickets_innings ON fall_of_wickets(innings_id)",
+        "CREATE INDEX IF NOT EXISTS idx_fixtures_world_status ON fixtures(world_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_fixtures_date ON fixtures(scheduled_date)",
     ]
     for sql in migrations:
         try:
@@ -1678,6 +1747,7 @@ def _seed_venue_capacities(db):
         existing = db.execute("SELECT capacity FROM venues WHERE name=?", (name,)).fetchone()
         if existing and existing['capacity'] is None:
             db.execute("UPDATE venues SET capacity=? WHERE name=?", (cap, name))
+    clear_static_caches()
 
 
 def _seed_venue_coordinates(db):
@@ -1781,6 +1851,7 @@ def _seed_venue_coordinates(db):
                 "UPDATE venues SET latitude=?, longitude=? WHERE name=?",
                 (lat, lng, name)
             )
+    clear_static_caches()
 
 
 # ── Almanack helpers ──────────────────────────────────────────────────────────
@@ -2054,6 +2125,7 @@ def get_almanack_matches(db, params):
 
 def set_match_canon_status(db, match_id, new_status, actor='user', note=None):
     """Update canon_status on a match and write an audit log entry."""
+    clear_record_caches()
     match = db.execute(
         "SELECT canon_status FROM matches WHERE id = ?", (match_id,)
     ).fetchone()
@@ -2070,12 +2142,12 @@ def set_match_canon_status(db, match_id, new_status, actor='user', note=None):
         "VALUES (?, ?, ?, ?, ?, ?)",
         (match_id, f'set_{new_status}', old_status, new_status, actor, note)
     )
-    db.commit()
     return True
 
 
 def edit_match_result(db, match_id, data):
     """Edit result fields on a complete match and write audit entry."""
+    clear_record_caches()
     match = db.execute("SELECT * FROM matches WHERE id = ?", (match_id,)).fetchone()
     if not match:
         return False
@@ -2097,7 +2169,6 @@ def edit_match_result(db, match_id, data):
         "VALUES (?, 'edit_result', ?, ?, 'user', ?)",
         (match_id, old_snap, new_snap, data.get('note', ''))
     )
-    db.commit()
     return True
 
 
@@ -2122,6 +2193,7 @@ def get_audit_log(db, params):
 
 def reset_world_stats(db, world_id):
     """Mark all canon matches in a world as exhibition, clearing their stats contribution."""
+    clear_record_caches()
     rows = db.execute(
         "SELECT id FROM matches WHERE world_id = ? AND status = 'complete' "
         "  AND COALESCE(canon_status, 'canon') = 'canon'",
@@ -2139,7 +2211,6 @@ def reset_world_stats(db, world_id):
             (row['id'],)
         )
         count += 1
-    db.commit()
     return count
 
 
@@ -2410,6 +2481,11 @@ def get_almanack_search(db, q):
 # ── Almanack records ──────────────────────────────────────────────────────────
 
 def get_almanack_batting_record(db, format_, record_type='highest_score'):
+    cache_key = (format_, f"batting_{record_type}")
+    cached = _RECORD_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
+
     for cs in ("= 'canon'", "!= 'deleted'"):
         if record_type == 'highest_score':
             row = db.execute(
@@ -2428,11 +2504,18 @@ def get_almanack_batting_record(db, format_, record_type='highest_score'):
         else:
             return None
         if row:
-            return dict_from_row(row)
+            res = dict_from_row(row)
+            _RECORD_CACHE.set(cache_key, res)
+            return res
     return None
 
 
 def get_almanack_bowling_record(db, format_, record_type='best_figures'):
+    cache_key = (format_, f"bowling_{record_type}")
+    cached = _RECORD_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
+
     if record_type == 'best_figures':
         # Best = most wickets, then fewest runs
         row = db.execute(
@@ -2449,7 +2532,83 @@ def get_almanack_bowling_record(db, format_, record_type='best_figures'):
         ).fetchone()
     else:
         return None
-    return dict_from_row(row)
+    res = dict_from_row(row)
+    _RECORD_CACHE.set(cache_key, res)
+    return res
+
+
+def get_almanack_highest_team_score(db, format_):
+    cache_key = (format_, "highest_team_score")
+    cached = _RECORD_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
+    row = db.execute(
+        "SELECT i.total_runs, t.name as team_name "
+        "FROM innings i JOIN matches m ON i.match_id=m.id "
+        "JOIN teams t ON i.batting_team_id=t.id "
+        "WHERE m.format=? AND m.status='complete' "
+        "ORDER BY i.total_runs DESC LIMIT 1",
+        (format_,)
+    ).fetchone()
+    res = dict_from_row(row) if row else None
+    _RECORD_CACHE.set(cache_key, res)
+    return res
+
+
+def get_almanack_highest_partnership(db, format_):
+    cache_key = (format_, "highest_partnership")
+    cached = _RECORD_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
+    row = db.execute(
+        "SELECT pr.runs, pr.batter1_name, pr.batter2_name "
+        "FROM partnership_records pr "
+        "JOIN innings i ON pr.innings_id=i.id "
+        "JOIN matches m ON i.match_id=m.id "
+        "WHERE m.format=? AND m.status='complete' "
+        "ORDER BY pr.runs DESC LIMIT 1",
+        (format_,)
+    ).fetchone()
+    res = dict_from_row(row) if row else None
+    _RECORD_CACHE.set(cache_key, res)
+    return res
+
+
+def get_almanack_most_sixes(db, format_):
+    cache_key = (format_, "most_sixes_innings")
+    cached = _RECORD_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
+    row = db.execute(
+        "SELECT MAX(bi.sixes) as mx, p.name "
+        "FROM batter_innings bi "
+        "JOIN innings i ON bi.innings_id=i.id "
+        "JOIN matches m ON i.match_id=m.id "
+        "JOIN players p ON bi.player_id=p.id "
+        "WHERE m.format=? AND m.status='complete'",
+        (format_,)
+    ).fetchone()
+    res = dict_from_row(row) if row else None
+    _RECORD_CACHE.set(cache_key, res)
+    return res
+
+
+def get_almanack_lowest_team_score(db, format_):
+    cache_key = (format_, "lowest_team_score")
+    cached = _RECORD_CACHE.get(cache_key)
+    if cached is not _MISSING:
+        return cached
+    row = db.execute(
+        "SELECT i.total_runs, t.name as team_name "
+        "FROM innings i JOIN matches m ON i.match_id=m.id "
+        "JOIN teams t ON i.batting_team_id=t.id "
+        "WHERE m.format=? AND m.status='complete' AND i.total_wickets=10 "
+        "ORDER BY i.total_runs ASC LIMIT 1",
+        (format_,)
+    ).fetchone()
+    res = dict_from_row(row) if row else None
+    _RECORD_CACHE.set(cache_key, res)
+    return res
 
 
 # ── Venue stats ───────────────────────────────────────────────────────────────
@@ -2933,6 +3092,21 @@ def get_match_state(db, match_id):
         (innings_id,)
     ).fetchone()['c']
 
+    # Handle simulation drift where aggregates are persisted but deliveries are not
+    total_legal_innings = 0
+    if current_innings:
+        if fmt == 'Hundred':
+            total_legal_innings = current_innings.get('balls_used') or 0
+        else:
+            overs_completed = current_innings.get('overs_completed') or 0.0
+            overs = int(overs_completed)
+            balls = int(round((overs_completed - overs) * 10))
+            total_legal_innings = overs * 6 + balls
+
+    is_simulation_drift = total_legal_innings > total_legal
+    if is_simulation_drift:
+        total_legal = total_legal_innings
+
     over_number  = total_legal // 6
     ball_in_over = total_legal % 6
 
@@ -2955,7 +3129,7 @@ def get_match_state(db, match_id):
     current_bowler_id = None
     last_bowler_id    = None
 
-    if last_del:
+    if last_del and not is_simulation_drift:
         is_legal_last = not bool(last_del['is_wide']) and not bool(last_del['is_no_ball'])
         if ball_in_over > 0:
             # Mid-over: last delivery's bowler is still bowling
@@ -2972,9 +3146,15 @@ def get_match_state(db, match_id):
             # ball_in_over == 0 and total_legal > 0 means we just completed an over
             last_bowler_id = last_del['bowler_id']
             current_bowler_id = None
+    elif is_simulation_drift:
+        if ball_in_over > 0:
+            # Find the bowler who is currently bowling (has matching fractional balls)
+            active_bowlers = [b for b in bowler_innings_list if b['balls'] == ball_in_over]
+            if len(active_bowlers) == 1:
+                current_bowler_id = active_bowlers[0]['player_id']
 
     # Reconstruct current striker / non-striker from last delivery
-    if not last_del:
+    if not last_del or is_simulation_drift:
         # Start of innings: first two 'batting' batters by position
         batting_now = sorted(
             [b for b in batter_innings_list if b['status'] == 'batting'],
@@ -3081,7 +3261,6 @@ def save_draw_outcome(db, world_id, competition_key, season_key, draw_type, outc
         "  created_at=datetime('now')",
         (world_id, competition_key, season_key, draw_type, outcome_json_str),
     )
-    db.commit()
 
 
 def get_draw_outcome(db, world_id, competition_key, season_key):

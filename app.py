@@ -13,385 +13,24 @@ import ai_captain
 import config
 
 
-# ── Match helpers ─────────────────────────────────────────────────────────────
+# ── Match helpers from match_service ──────────────────────────────────────────
 
-def _players_for_match_team(db, match_id, team_id):
-    match = database.get_match(db, match_id)
-    world_id = match.get('world_id') if match else None
-    players = database.get_players_for_team(db, team_id, world_id=world_id) if world_id else database.get_players_for_team(db, team_id)
-    if world_id:
-        states = database.get_player_world_states(db, world_id)
-        players = [p for p in players if int((states.get(p['id']) or {}).get('active', 1) or 0) == 1]
-    return sorted(players, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
-
-
-def _start_innings(db, match_id, innings_number, batting_team_id, bowling_team_id):
-    """Create innings, batter/bowler rows, and opening partnership."""
-    innings_id = database.create_innings(db, match_id, innings_number,
-                                         batting_team_id, bowling_team_id)
-    batting_players = _players_for_match_team(db, match_id, batting_team_id)
-    for p in batting_players:
-        database.create_batter_innings(db, innings_id, p['id'], p['batting_position'])
-
-    # First two batters are 'batting'
-    for p in batting_players[:2]:
-        row = db.execute(
-            "SELECT id FROM batter_innings WHERE innings_id=? AND player_id=?",
-            (innings_id, p['id'])
-        ).fetchone()
-        if row:
-            database.update_batter_innings(db, row['id'], {'status': 'batting'})
-
-    # Bowler innings for every player who can bowl
-    for p in _players_for_match_team(db, match_id, bowling_team_id):
-        if p['bowling_type'] != 'none':
-            database.create_bowler_innings(db, innings_id, p['id'])
-
-    # Opening partnership
-    if len(batting_players) >= 2:
-        database.create_partnership(
-            db, innings_id, 0,
-            batting_players[0]['id'], batting_players[1]['id']
-        )
-    return innings_id
-
-
-def _apply_innings_cutoff_snapshots(existing_innings, innings_update):
-    existing = existing_innings or {}
-    updated = dict(innings_update or {})
-    overs = updated.get('overs_completed')
-    if overs is None:
-        overs = existing.get('overs_completed')
-    if overs is None:
-        return updated
-
-    current_runs = updated.get('total_runs', existing.get('total_runs'))
-    current_wickets = updated.get('total_wickets', existing.get('total_wickets'))
-    if overs >= 100 and existing.get('runs_at_100_overs') is None and updated.get('runs_at_100_overs') is None:
-        updated['runs_at_100_overs'] = current_runs
-        updated['wickets_at_100_overs'] = current_wickets
-    if overs >= 110 and existing.get('runs_at_110_overs') is None and updated.get('runs_at_110_overs') is None:
-        updated['runs_at_110_overs'] = current_runs
-        updated['wickets_at_110_overs'] = current_wickets
-    return updated
-
-
-def _pick_keeper_candidate(fielders, bowler_id):
-    candidates = [p for p in fielders if p.get('id') != bowler_id]
-    non_bowlers = [p for p in candidates if p.get('bowling_type') == 'none']
-    if non_bowlers:
-        return min(non_bowlers, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
-    if candidates:
-        return min(candidates, key=lambda p: (p.get('batting_position') or 99, p.get('id') or 0))
-    return None
-
-
-def _choose_fielder_for_wicket(fielders, bowler_id, dismissal_type, caught_type=None):
-    if dismissal_type not in ('caught', 'run_out', 'stumped'):
-        return None
-
-    if dismissal_type == 'stumped' or caught_type == 'caught_behind':
-        keeper = _pick_keeper_candidate(fielders, bowler_id)
-        return keeper.get('id') if keeper else None
-
-    non_bowler_fielders = [p for p in fielders if p.get('id') != bowler_id]
-    all_fielders = list(fielders)
-
-    if dismissal_type == 'run_out':
-        pool = non_bowler_fielders or all_fielders
-        if not pool:
-            return None
-        return random.choice(pool).get('id')
-
-    if dismissal_type == 'caught':
-        if caught_type in ('caught_slip', 'caught_boundary'):
-            pool = non_bowler_fielders or all_fielders
-            if not pool:
-                return None
-            return random.choice(pool).get('id')
-
-        caught_and_bowled_roll = random.random()
-        if bowler_id and caught_and_bowled_roll < 0.18:
-            return bowler_id
-
-        pool = non_bowler_fielders or all_fielders
-        if not pool:
-            return bowler_id
-        return random.choice(pool).get('id')
-
-    return None
-
-
-def _determine_next_innings(match, all_innings, fmt):
-    """Return (batting_team_id, bowling_team_id, innings_number) or None if match over."""
-    completed = [i for i in all_innings if i['status'] == 'complete']
-    n = len(completed)
-    if fmt in ('ODI', 'T20', 'Hundred'):
-        if n == 1:
-            first = completed[0]
-            return (first['bowling_team_id'], first['batting_team_id'], 2)
-        return None
-    # Test
-    if n == 1:
-        first = completed[0]
-        return (first['bowling_team_id'], first['batting_team_id'], 2)
-    if n == 2:
-        first = all_innings[0]
-        return (first['batting_team_id'], first['bowling_team_id'], 3)
-    if n == 3:
-        first = all_innings[0]
-        return (first['bowling_team_id'], first['batting_team_id'], 4)
-    return None
-
-
-def _is_innings_complete(total_wickets, new_over, max_overs, total_runs, target):
-    if total_wickets >= 10:
-        return True
-    if max_overs is not None and new_over >= max_overs:
-        return True
-    if target is not None and total_runs >= target:
-        return True
-    return False
-
-
-def format_score(runs, wickets):
-    """Cricket score string: 179/10 → '179 all out', 147/4 → '147/4'."""
-    if wickets >= 10:
-        return f"{runs} all out"
-    return f"{runs}/{wickets}"
-
-
-def format_overs(overs_decimal):
-    """Convert decimal overs to cricket notation.
-    Internally overs are stored as true decimals where 0.5 = 3 balls (3/6).
-
-    Examples:
-        13.8333 -> "13.5"  (13 overs, 5 balls: 5/6 = 0.8333)
-        15.5    -> "15.3"  (15 overs, 3 balls: 3/6 = 0.5)
-        4.1667  -> "4.1"   (4 overs, 1 ball:  1/6 = 0.1667)
-        20.0    -> "20"
-    """
-    if overs_decimal is None:
-        return '0'
-    complete_overs = int(overs_decimal)
-    remainder = overs_decimal - complete_overs
-    balls = round(remainder * 6)
-    if balls >= 6:
-        complete_overs += 1
-        balls = 0
-    if balls == 0:
-        return str(complete_overs)
-    return f"{complete_overs}.{balls}"
-
-
-def _calculate_attendance(match, team1, team2):
-    """
-    Generate a realistic randomised attendance figure for a completed match.
-    Based on venue capacity, format, team tiers, and competition type.
-    Returns an integer (or None if capacity unknown).
-    """
-    capacity = match.get('venue_capacity')
-    if not capacity:
-        return None
-
-    t1_type = team1.get('team_type', 'international')
-    t2_type = team2.get('team_type', 'international')
-    fmt     = match.get('format', 'T20')
-
-    # Tier classification — higher tier = bigger draw
-    _TIER1 = {'England', 'Australia', 'India', 'Pakistan',
-              'New Zealand', 'South Africa', 'West Indies', 'Sri Lanka', 'Bangladesh'}
-    _TIER2 = {'Zimbabwe', 'Ireland', 'Afghanistan'}
-
-    def _nation_tier(team):
-        if team.get('team_type') != 'international':
-            return 0  # domestic
-        n = team.get('name', '')
-        if n in _TIER1: return 3
-        if n in _TIER2: return 2
-        return 1  # associates
-
-    t1_tier = _nation_tier(team1)
-    t2_tier = _nation_tier(team2)
-    is_intl  = t1_tier > 0 and t2_tier > 0
-    avg_tier = (t1_tier + t2_tier) / 2  # 0–3
-
-    # Rivalry boost: two of the top-3 draws facing each other
-    _TOP3 = {'England', 'Australia', 'India'}
-    is_rivalry = (team1.get('name') in _TOP3 and team2.get('name') in _TOP3)
-
-    # ICC / World Cup event?
-    is_icc = bool(match.get('tournament_id'))
-
-    league = team1.get('league') or team2.get('league') or ''
-
-    # ── Base fill-rate ranges (lo, hi) ──────────────────────────────────────
-    if not is_intl:
-        # Domestic / franchise / county
-        if fmt == 'Hundred':
-            lo, hi = 0.42, 0.78
-        elif t1_type == 'county' or t2_type == 'county':
-            lo, hi = 0.05, 0.22   # County Championship: very low
-        elif league in ('IPL', 'PSL', 'Big Bash League', 'CPL'):
-            lo, hi = 0.45, 0.88
-        else:
-            lo, hi = 0.20, 0.55   # other domestic T20 / Sheffield Shield
-    else:
-        # International
-        if fmt == 'Test':
-            if avg_tier >= 2.8 or is_rivalry: lo, hi = 0.55, 0.92
-            elif avg_tier >= 2.0:             lo, hi = 0.28, 0.62
-            elif avg_tier >= 1.5:             lo, hi = 0.15, 0.42
-            else:                             lo, hi = 0.08, 0.28   # associates
-        elif fmt == 'ODI':
-            if avg_tier >= 2.8 or is_rivalry: lo, hi = 0.62, 0.95
-            elif avg_tier >= 2.0:             lo, hi = 0.38, 0.72
-            elif avg_tier >= 1.5:             lo, hi = 0.22, 0.50
-            else:                             lo, hi = 0.12, 0.35
-        elif fmt in ('T20', 'Hundred'):
-            if avg_tier >= 2.8 or is_rivalry: lo, hi = 0.65, 0.98
-            elif avg_tier >= 2.0:             lo, hi = 0.42, 0.78
-            elif avg_tier >= 1.5:             lo, hi = 0.25, 0.58
-            else:                             lo, hi = 0.15, 0.45
-        else:
-            lo, hi = 0.30, 0.65
-
-    # ICC event / tournament bonus
-    if is_icc:
-        lo = min(1.0, lo * 1.15)
-        hi = min(1.0, hi * 1.10)
-
-    # Large stadium penalty — big grounds are hard to fill except marquee games
-    if capacity > 60000 and not is_rivalry and not is_icc:
-        hi *= 0.78
-        lo *= 0.70
-
-    fill = random.uniform(lo, hi)
-    attendance = int(capacity * fill)
-
-    # Round to nearest 50 for realism
-    attendance = max(50, min(attendance, capacity))
-    attendance = round(attendance / 50) * 50
-    return attendance
-
-
-def _build_result_description(match, all_innings):
-    """Build human-readable result string from match/innings data."""
-    if match.get('status') not in (None, 'complete'):
-        return 'Match in progress'
-    rt = match.get('result_type')
-    if rt == 'draw':
-        return 'Match drawn'
-    if rt == 'tie':
-        return 'Match tied'
-    if rt == 'no_result':
-        return 'No result'
-    wname = match.get('winning_team_name', 'Unknown')
-    if rt == 'runs':
-        return f"{wname} won by {match.get('margin_runs', 0)} run(s)"
-    if rt == 'wickets':
-        return f"{wname} won by {match.get('margin_wickets', 0)} wicket(s)"
-    return 'Result unknown'
-
-
-def _calculate_and_complete_match(db, match_id, match, all_innings):
-    """Run calculate_result() and stamp the match as complete."""
-    fmt = match['format']
-    inn1 = next((i for i in all_innings if i['innings_number'] == 1), None)
-    inn2 = next((i for i in all_innings if i['innings_number'] == 2), None)
-
-    if not inn1 or not inn2:
-        return
-
-    if fmt in ('ODI', 'T20', 'Hundred'):
-        result = game_engine.calculate_result(
-            inn1['total_runs'], inn1['total_wickets'],
-            inn2['total_runs'], inn2['total_wickets'],
-            fmt, inn2['status'] == 'complete'
-        )
-        winning_team_id = None
-        if result['winning_team'] == 1:
-            winning_team_id = inn1['batting_team_id']
-        elif result['winning_team'] == 2:
-            winning_team_id = inn2['batting_team_id']
-        database.update_match(db, match_id, {
-            'status': 'complete',
-            'result_type': result['result_type'],
-            'winning_team_id': winning_team_id,
-            'margin_runs': result['margin_runs'],
-            'margin_wickets': result['margin_wickets'],
-        })
-    else:
-        # Test: sum across all innings
-        inn3 = next((i for i in all_innings if i['innings_number'] == 3), None)
-        inn4 = next((i for i in all_innings if i['innings_number'] == 4), None)
-        team1_total = (inn1['total_runs'] if inn1 else 0) + (inn3['total_runs'] if inn3 else 0)
-        team2_total = (inn2['total_runs'] if inn2 else 0) + (inn4['total_runs'] if inn4 else 0)
-        team1_id = inn1['batting_team_id']
-        team2_id = inn2['batting_team_id']
-
-        last_inn = inn4 or inn3 or inn2
-        is_complete = last_inn['status'] == 'complete' if last_inn else False
-
-        if not is_complete:
-            database.update_match(db, match_id, {
-                'status': 'complete',
-                'result_type': 'draw',
-                'winning_team_id': None,
-                'margin_runs': None,
-                'margin_wickets': None,
-            })
-        elif team1_total > team2_total:
-            margin = team1_total - team2_total
-            database.update_match(db, match_id, {
-                'status': 'complete',
-                'result_type': 'runs',
-                'winning_team_id': team1_id,
-                'margin_runs': margin,
-                'margin_wickets': None,
-            })
-        elif team2_total > team1_total:
-            last_batting = last_inn['batting_team_id']
-            last_wickets = last_inn['total_wickets']
-            margin_w = 10 - last_wickets
-            database.update_match(db, match_id, {
-                'status': 'complete',
-                'result_type': 'wickets',
-                'winning_team_id': last_batting,
-                'margin_runs': None,
-                'margin_wickets': margin_w,
-            })
-        else:
-            database.update_match(db, match_id, {
-                'status': 'complete',
-                'result_type': 'tie',
-                'winning_team_id': None,
-                'margin_runs': None,
-                'margin_wickets': None,
-            })
-
-
-def _condense_state(state):
-    """Return a lightweight state dict for the /ball response."""
-    inn = state['current_innings']
-    if not inn:
-        return {}
-    runs  = inn['total_runs']
-    wkts  = inn['total_wickets']
-    overs = inn['overs_completed']
-    target = state['target']
-    legal  = state['over_number'] * 6 + state['ball_in_over']
-    crr    = round(runs / (legal / 6), 2) if legal >= 6 else None
-    rrr    = None
-    if target and state['max_overs']:
-        remaining_overs = state['max_overs'] - state['over_number'] - state['ball_in_over'] / 6
-        needed = target - runs
-        if remaining_overs > 0:
-            rrr = round(needed / remaining_overs, 2)
-    return {
-        'runs': runs, 'wickets': wkts, 'overs': overs,
-        'current_rr': crr, 'required_rr': rrr,
-    }
+import match_service
+from match_service import (
+    _players_for_match_team,
+    _start_innings,
+    _apply_innings_cutoff_snapshots,
+    _pick_keeper_candidate,
+    _choose_fielder_for_wicket,
+    _determine_next_innings,
+    _is_innings_complete,
+    format_score,
+    format_overs,
+    _calculate_attendance,
+    _build_result_description,
+    _calculate_and_complete_match,
+    _condense_state
+)
 
 app = Flask(__name__,
             template_folder=config.TEMPLATE_DIR,
@@ -570,7 +209,8 @@ def create_team():
         return err("name is required")
     db = database.get_db()
     try:
-        new_id = database.create_team(db, data)
+        with db:
+            new_id = database.create_team(db, data)
         team = database.get_team(db, new_id)
         return jsonify({"team": team}), 201
     finally:
@@ -582,7 +222,8 @@ def update_team(id):
     data = request.get_json() or {}
     db = database.get_db()
     try:
-        database.update_team(db, id, data)
+        with db:
+            database.update_team(db, id, data)
         team = database.get_team(db, id)
         return jsonify({"team": team})
     finally:
@@ -707,7 +348,8 @@ def create_venue():
         return err("name is required")
     db = database.get_db()
     try:
-        new_id = database.create_venue(db, data)
+        with db:
+            new_id = database.create_venue(db, data)
         venue = database.get_venue(db, new_id)
         return jsonify({"venue": venue}), 201
     finally:
@@ -748,7 +390,8 @@ def start_match():
 
     db = database.get_db()
     try:
-        match_id = database.create_match(db, data)
+        with db:
+            match_id = database.create_match(db, data)
         match = database.get_match(db, match_id)
         return jsonify({'match_id': match_id, 'match': match}), 201
     finally:
@@ -805,7 +448,8 @@ def delete_match_route(id):
     note = data.get('note', 'Soft deleted')
     db = database.get_db()
     try:
-        ok = database.set_match_canon_status(db, id, 'deleted', note=note)
+        with db:
+            ok = database.set_match_canon_status(db, id, 'deleted', note=note)
         if not ok:
             return err('Match not found', 404)
         return jsonify({'deleted': True, 'match_id': id})
@@ -823,7 +467,8 @@ def edit_match_result(id):
             return err('Match not found', 404)
         if match.get('status') != 'complete':
             return err('Match is not complete — cannot edit result')
-        ok = database.edit_match_result(db, id, data)
+        with db:
+            ok = database.edit_match_result(db, id, data)
         if not ok:
             return err('Failed to edit result')
         updated = database.get_match(db, id)
@@ -845,9 +490,10 @@ def bulk_canon_status():
     db = database.get_db()
     try:
         updated = 0
-        for mid in match_ids:
-            if database.set_match_canon_status(db, int(mid), new_status, note=note):
-                updated += 1
+        with db:
+            for mid in match_ids:
+                if database.set_match_canon_status(db, int(mid), new_status, note=note):
+                    updated += 1
         return jsonify({'updated': updated, 'canon_status': new_status})
     finally:
         database.close_db(db)
@@ -867,7 +513,8 @@ def audit_log():
 def reset_world_stats(id):
     db = database.get_db()
     try:
-        count = database.reset_world_stats(db, id)
+        with db:
+            count = database.reset_world_stats(db, id)
         return jsonify({'world_id': id, 'matches_reset': count})
     finally:
         database.close_db(db)
@@ -900,12 +547,12 @@ def match_toss(id):
             batting_team_id  = other_id
             bowling_team_id  = toss_winner_id
 
-        database.update_match(db, id, {
-            'toss_winner_id': toss_winner_id,
-            'toss_choice':    toss_choice,
-        })
-
-        _start_innings(db, id, 1, batting_team_id, bowling_team_id)
+        with db:
+            database.update_match(db, id, {
+                'toss_winner_id': toss_winner_id,
+                'toss_choice':    toss_choice,
+            })
+            _start_innings(db, id, 1, batting_team_id, bowling_team_id)
         state = database.get_match_state(db, id)
         return jsonify(state)
     finally:
@@ -916,518 +563,23 @@ def match_toss(id):
 def bowl_ball_route(id):
     db = database.get_db()
     try:
-        state = database.get_match_state(db, id)
-        if not state:
-            return err('Match not found', 404)
-        if state['match']['status'] != 'in_progress':
-            return err('Match is not in progress')
-        if not state['current_innings']:
-            return err('No active innings — toss not yet taken')
-
-        innings    = state['current_innings']
-        innings_id = state['current_innings_id']
-        fmt        = state['format']
-        over_number = state['over_number']
-        ball_in_over = state['ball_in_over']
-        is_free_hit  = state['is_free_hit']
-        max_overs    = state['max_overs']
-        target       = state['target']
-
-        striker_id     = state['current_striker_id']
-        non_striker_id = state['current_non_striker_id']
-        if not striker_id or not non_striker_id:
-            return err('Cannot determine current batters')
-
-        # Select bowler if start of over
-        bowler_id = state['current_bowler_id']
-        req_data  = request.get_json() or {}
-        if bowler_id is None:
-            match_rec = state.get('match', {})
-            player_mode = match_rec.get('player_mode', 'ai_vs_ai')
-            human_team_id = match_rec.get('human_team_id')
-            human_bowling = (
-                player_mode == 'human_vs_human' or
-                (player_mode == 'human_vs_ai' and human_team_id and innings.get('bowling_team_id') == human_team_id)
-            )
-            # Allow human to specify a bowler choice
-            requested_bowler = req_data.get('bowler_id')
-            bowler_list = [
-                {
-                    'player_id':     b['player_id'],
-                    'bowling_type':  b['bowling_type'],
-                    'bowling_rating': b['bowling_rating'],
-                    'overs_bowled':  b['overs'],
-                    'balls_bowled':  b['balls'],
-                }
-                for b in state['bowler_innings']
-            ]
-            cap_map = {'T20': 4, 'ODI': 10, 'Test': None, 'Hundred': None}
-            cap = cap_map.get(fmt)
-            if human_bowling and not requested_bowler:
-                return err('bowler_id required for human-controlled bowling changes')
-            if requested_bowler:
-                rb = next((b for b in bowler_list if b['player_id'] == requested_bowler), None)
-                if fmt == 'Hundred':
-                    import hundred_engine as _he
-                    balls_this_bowler = (rb['overs_bowled'] * 6 + rb['balls_bowled']) if rb else 0
-                    valid = (rb is not None and balls_this_bowler < _he.HUNDRED_BOWLER_MAX)
-                else:
-                    valid = (rb is not None
-                             and rb['player_id'] != state['last_bowler_id']
-                             and (cap is None or rb['overs_bowled'] < cap))
-                if valid:
-                    bowler_id = requested_bowler
-                elif human_bowling:
-                    return err('Invalid bowler selection for this over')
-            if bowler_id is None:
-                if fmt == 'Hundred':
-                    import hundred_engine as _he
-                    _b100_list = [
-                        {**b, 'balls_bowled': b['overs_bowled'] * 6 + b['balls_bowled']}
-                        for b in bowler_list
-                    ]
-                    # Derive bowling end from legal balls bowled (toggles every 2 sets of 5)
-                    _legal_bowled = over_number * 6 + ball_in_over
-                    _complete_sets = _legal_bowled // _he.HUNDRED_SET_SIZE
-                    _end_block = _complete_sets // _he.HUNDRED_MAX_SETS
-                    _hundred_end = 'pavilion' if _end_block % 2 == 0 else 'nursery'
-                    _sets_this_end = (_complete_sets % _he.HUNDRED_MAX_SETS) + 1
-                    sel = _he.select_hundred_bowler(
-                        _b100_list, state['last_bowler_id'],
-                        _hundred_end, _sets_this_end,
-                    )
-                    bowler_id = sel['player_id']
-                else:
-                    bowler_id = game_engine.select_bowler(
-                        bowler_list, over_number, fmt, state['last_bowler_id']
-                    )
-
-        # Look up current entities
-        striker = next(
-            (p for p in state['batting_team_players'] if p['id'] == striker_id), None
-        )
-        bowler_row = next(
-            (b for b in state['bowler_innings'] if b['player_id'] == bowler_id), None
-        )
-        batter_innings_row = next(
-            (b for b in state['batter_innings']
-             if b['player_id'] == striker_id and b['status'] == 'batting'), None
-        )
-        if not striker or not bowler_row or not batter_innings_row:
-            return err('Cannot find striker or bowler data')
-
-        # ── Roll the ball ──────────────────────────────────────────────────────
-        if fmt == 'Hundred':
-            import hundred_engine as _he
-            # Count legal balls bowled so far this innings
-            _legal_so_far = over_number * 6 + ball_in_over
-            _is_pp = _legal_so_far < _he.HUNDRED_POWERPLAY
-            ball_result = _he.bowl_hundred_ball(
-                batter_rating  = striker['batting_rating'],
-                bowler_rating  = bowler_row['bowling_rating'],
-                bowling_type   = bowler_row['bowling_type'],
-                is_free_hit    = is_free_hit,
-                balls_faced    = 0,
-                is_powerplay   = _is_pp,
-            )
-        else:
-            ball_result = game_engine.bowl_ball(
-                batter_rating  = striker['batting_rating'],
-                bowler_rating  = bowler_row['bowling_rating'],
-                bowling_type   = bowler_row['bowling_type'],
-                is_free_hit    = is_free_hit,
-                partnership_balls = 0,
-                scoring_mode   = state['match'].get('scoring_mode', 'modern'),
-                format         = fmt,
-            )
-
-        is_legal  = ball_result['outcome_type'] not in ('wide', 'no_ball')
-        is_wicket = ball_result['outcome_type'] == 'wicket'
-        runs_scored   = ball_result['runs']
-        extras_scored = ball_result['extras_runs']
-        total_added   = runs_scored + extras_scored
-
-        # Legal ball counter (before this ball)
-        legal_before = over_number * 6 + ball_in_over
-        legal_after  = legal_before + (1 if is_legal else 0)
-        new_over     = legal_after // 6
-        new_ball     = legal_after % 6
-
-        # Delivery sequence number in this over (for ball_number column)
-        del_in_over = db.execute(
-            "SELECT COUNT(*) AS c FROM deliveries WHERE innings_id=? AND over_number=?",
-            (innings_id, over_number)
-        ).fetchone()['c']
-
-        # Generate commentary
-        all_players = {p['id']: p['name']
-                       for p in state['batting_team_players'] + state['bowling_team_players']}
-        ctx = {
-            'batter': all_players.get(striker_id, ''),
-            'bowler': all_players.get(bowler_id, ''),
-            'runs':   runs_scored,
-            'score':  innings['total_runs'] + total_added,
-            'wickets': innings['total_wickets'] + (1 if is_wicket else 0),
-            'overs':  f'{over_number}.{ball_in_over}',
-        }
-        commentary = game_engine.generate_commentary(ball_result['commentary_key'], ctx, [])
-        fielder_id = _choose_fielder_for_wicket(
-            state['bowling_team_players'],
-            bowler_id,
-            ball_result.get('dismissal_type'),
-            ball_result.get('caught_type'),
-        ) if is_wicket else None
-
-        # ── Persist delivery ───────────────────────────────────────────────────
-        database.insert_delivery(db, {
-            'innings_id':          innings_id,
-            'over_number':         over_number,
-            'ball_number':         del_in_over + 1,
-            'bowler_id':           bowler_id,
-            'striker_id':          striker_id,
-            'non_striker_id':      non_striker_id,
-            'fielder_id':          fielder_id,
-            'stage1_roll':         ball_result['stage1'],
-            'stage2_roll':         ball_result['stage2'],
-            'stage3_roll':         ball_result['stage3'],
-            'stage4_roll':         ball_result['stage4'],
-            'stage4b_roll':        ball_result['stage4b'],
-            'outcome_type':        ball_result['outcome_type'],
-            'runs_scored':         runs_scored,
-            'extras_type':         ball_result['extras_type'],
-            'extras_runs':         extras_scored,
-            'dismissal_type':      ball_result['dismissal_type'],
-            'dismissed_batter_id': striker_id if is_wicket else None,
-            'shot_angle':          ball_result['shot_angle'],
-            'is_free_hit':         is_free_hit,
-            'is_wide':             ball_result['outcome_type'] == 'wide',
-            'is_no_ball':          ball_result['outcome_type'] == 'no_ball',
-            'commentary':          commentary,
-        })
-
-        # ── Update batter innings ─────────────────────────────────────────────
-        otype = ball_result['outcome_type']
-        bi_update = {}
-        if is_legal:
-            bi_update['balls_faced'] = batter_innings_row['balls_faced'] + 1
-        if is_wicket:
-            bi_update['status']         = 'dismissed'
-            bi_update['dismissal_type'] = ball_result['dismissal_type']
-            bi_update['runs']           = batter_innings_row['runs'] + runs_scored
-            if fielder_id:
-                bi_update['fielder_id'] = fielder_id
-            # Bowler credited with wicket (not run-outs)
-            if ball_result['dismissal_type'] not in ('run_out',):
-                bi_update['bowler_id'] = bowler_id
-        elif otype not in ('wide', 'no_ball', 'leg_bye', 'bye') and is_legal:
-            bi_update['runs']  = batter_innings_row['runs'] + runs_scored
-            bi_update['fours'] = batter_innings_row['fours'] + (1 if otype == 'four' else 0)
-            bi_update['sixes'] = batter_innings_row['sixes'] + (1 if otype == 'six' else 0)
-        if bi_update:
-            database.update_batter_innings(db, batter_innings_row['id'], bi_update)
-
-        # ── Update bowler innings ─────────────────────────────────────────────
-        bwi_update = {'runs_conceded': bowler_row['runs_conceded'] + total_added}
-        if otype == 'wide':
-            bwi_update['wides']    = bowler_row['wides'] + 1
-        elif otype == 'no_ball':
-            bwi_update['no_balls'] = bowler_row['no_balls'] + 1
-
-        is_bowler_wicket = is_wicket and ball_result['dismissal_type'] not in ('run_out',)
-        if is_bowler_wicket:
-            bwi_update['wickets'] = bowler_row['wickets'] + 1
-
-        if is_legal:
-            end_of_over = (new_ball == 0)
-            if end_of_over:
-                # Check maiden: sum all runs this over (including current)
-                over_runs_row = db.execute(
-                    "SELECT COALESCE(SUM(runs_scored + extras_runs), 0) AS s "
-                    "FROM deliveries WHERE innings_id=? AND over_number=?",
-                    (innings_id, over_number)
-                ).fetchone()
-                over_runs = (over_runs_row['s'] or 0) + total_added
-                bwi_update['overs'] = bowler_row['overs'] + 1
-                bwi_update['balls'] = 0
-                if over_runs == 0:
-                    bwi_update['maidens'] = bowler_row['maidens'] + 1
-            else:
-                bwi_update['balls'] = bowler_row['balls'] + 1
-
-        database.update_bowler_innings(db, bowler_row['id'], bwi_update)
-
-        # ── Update totals ─────────────────────────────────────────────────────
-        new_wickets = innings['total_wickets'] + (1 if is_wicket else 0)
-        new_runs    = innings['total_runs'] + total_added
-        inn_update  = {
-            'total_runs':     new_runs,
-            'total_wickets':  new_wickets,
-            'overs_completed': new_over + new_ball / 10,
-        }
-        if otype == 'wide':
-            inn_update['extras_wides']   = innings['extras_wides'] + extras_scored
-        elif otype == 'no_ball':
-            inn_update['extras_noballs'] = innings['extras_noballs'] + extras_scored
-        elif ball_result['extras_type'] == 'bye':
-            inn_update['extras_byes']    = innings['extras_byes'] + extras_scored
-        elif ball_result['extras_type'] == 'leg_bye':
-            inn_update['extras_legbyes'] = innings['extras_legbyes'] + extras_scored
-        inn_update = _apply_innings_cutoff_snapshots(innings, inn_update)
-
-        # ── Update current partnership ────────────────────────────────────────
-        current_partnership = state['partnerships'][-1] if state['partnerships'] else None
-        if current_partnership:
-            p_update = {'runs': current_partnership['runs'] + total_added}
-            if is_legal:
-                p_update['balls'] = current_partnership['balls'] + 1
-            database.update_partnership(db, current_partnership['id'], p_update)
-
-        # ── Wicket handling ───────────────────────────────────────────────────
-        if is_wicket:
-            overs_at_fall = over_number + ball_in_over / 10
-            database.insert_fall_of_wicket(
-                db, innings_id, new_wickets, new_runs, overs_at_fall, striker_id
-            )
-            next_batter = next(
-                (b for b in state['batter_innings'] if b['status'] == 'yet_to_bat'), None
-            )
-            if next_batter:
-                database.update_batter_innings(db, next_batter['id'], {'status': 'batting'})
-                database.create_partnership(
-                    db, innings_id, new_wickets,
-                    next_batter['player_id'], non_striker_id
-                )
-
-        # ── Milestone detection ───────────────────────────────────────────────
-        milestones = []
-        batter_runs_before = batter_innings_row['runs']
-        batter_runs_after  = batter_runs_before + runs_scored if not is_wicket and otype not in ('wide', 'no_ball', 'leg_bye', 'bye') else batter_runs_before
-        for thresh in (50, 100, 150, 200):
-            if batter_runs_before < thresh <= batter_runs_after:
-                milestones.append({'type': f'batter_{thresh}', 'player_id': striker_id})
-
-        if is_bowler_wicket:
-            bowler_wkts_after = bowler_row['wickets'] + 1
-            for thresh in (5, 10):
-                if bowler_row['wickets'] < thresh <= bowler_wkts_after:
-                    milestones.append({'type': f'bowler_{thresh}fer', 'player_id': bowler_id})
-
-        if current_partnership:
-            p_runs_before = current_partnership['runs']
-            p_runs_after  = p_runs_before + total_added
-            for thresh in (50, 100, 150, 200):
-                if p_runs_before < thresh <= p_runs_after:
-                    milestones.append({'type': f'partnership_{thresh}', 'runs': p_runs_after})
-
-        # ── Record detection ─────────────────────────────────────────────────
-        records_broken = []
-        fmt_for_record = fmt  # 'T20' | 'ODI' | 'Test'
-
-        # Previous records (from COMPLETED matches only — current match not yet complete)
-        def _prev_batting_record(record_type):
-            return database.get_almanack_batting_record(db, fmt_for_record, record_type)
-
-        def _prev_bowling_record(record_type):
-            return database.get_almanack_bowling_record(db, fmt_for_record, record_type)
-
-        # 1) Highest individual score
-        if is_legal and not is_wicket and runs_scored > 0:
-            batter_runs_now = batter_runs_after
-            prev = _prev_batting_record('highest_score')
-            prev_val = prev['value'] if prev else 0
-            if batter_runs_now > prev_val:
-                pname = (database.get_player(db, striker_id) or {}).get('name', '')
-                records_broken.append({
-                    'type':            'highest_individual_score',
-                    'format':          fmt_for_record,
-                    'player_name':     pname,
-                    'new_value':       batter_runs_now,
-                    'previous_value':  prev_val,
-                    'previous_holder': prev['name'] if prev else None,
-                })
-
-        # 2) Best bowling figures (after a wicket)
-        if is_bowler_wicket:
-            bowler_wkts_now = bowler_row['wickets'] + 1
-            bowler_runs_now = bowler_row['runs_conceded'] + total_added
-            prev = _prev_bowling_record('best_figures')
-            is_better = False
-            if prev is None:
-                is_better = True
-            else:
-                if bowler_wkts_now > prev['wickets']:
-                    is_better = True
-                elif bowler_wkts_now == prev['wickets'] and bowler_runs_now < prev['runs_conceded']:
-                    is_better = True
-            if is_better:
-                pname = (database.get_player(db, bowler_id) or {}).get('name', '')
-                records_broken.append({
-                    'type':            'best_bowling_figures',
-                    'format':          fmt_for_record,
-                    'player_name':     pname,
-                    'new_value':       f'{bowler_wkts_now}/{bowler_runs_now}',
-                    'previous_value':  f"{prev['wickets']}/{prev['runs_conceded']}" if prev else None,
-                    'previous_holder': prev['name'] if prev else None,
-                })
-
-        # 3) Highest team score (after runs added)
-        if total_added > 0:
-            prev_team = db.execute(
-                "SELECT i.total_runs, t.name as team_name "
-                "FROM innings i JOIN matches m ON i.match_id=m.id "
-                "JOIN teams t ON i.batting_team_id=t.id "
-                "WHERE m.format=? AND m.status='complete' "
-                "ORDER BY i.total_runs DESC LIMIT 1",
-                (fmt_for_record,)
-            ).fetchone()
-            prev_team_score = prev_team['total_runs'] if prev_team else 0
-            if new_runs > prev_team_score:
-                records_broken.append({
-                    'type':            'highest_team_score',
-                    'format':          fmt_for_record,
-                    'player_name':     innings.get('batting_team_name', ''),
-                    'new_value':       new_runs,
-                    'previous_value':  prev_team_score,
-                    'previous_holder': prev_team['team_name'] if prev_team else None,
-                })
-
-        # 4) Highest partnership
-        if current_partnership and total_added > 0:
-            p_runs_now = current_partnership['runs'] + total_added
-            prev_part = db.execute(
-                "SELECT pr.runs, pr.batter1_name, pr.batter2_name "
-                "FROM partnership_records pr "
-                "JOIN innings i ON pr.innings_id=i.id "
-                "JOIN matches m ON i.match_id=m.id "
-                "WHERE m.format=? AND m.status='complete' "
-                "ORDER BY pr.runs DESC LIMIT 1",
-                (fmt_for_record,)
-            ).fetchone()
-            prev_part_val = prev_part['runs'] if prev_part else 0
-            if p_runs_now > prev_part_val:
-                records_broken.append({
-                    'type':            'highest_partnership',
-                    'format':          fmt_for_record,
-                    'player_name':     f"{current_partnership.get('batter1_name','')} & {current_partnership.get('batter2_name','')}",
-                    'new_value':       p_runs_now,
-                    'previous_value':  prev_part_val,
-                    'previous_holder': f"{prev_part['batter1_name']} & {prev_part['batter2_name']}" if prev_part else None,
-                })
-
-        # 5) Most sixes in an innings
-        if otype == 'six':
-            sixes_now = batter_innings_row['sixes'] + 1
-            prev_six = db.execute(
-                "SELECT MAX(bi.sixes) as mx, p.name "
-                "FROM batter_innings bi "
-                "JOIN innings i ON bi.innings_id=i.id "
-                "JOIN matches m ON i.match_id=m.id "
-                "JOIN players p ON bi.player_id=p.id "
-                "WHERE m.format=? AND m.status='complete'",
-                (fmt_for_record,)
-            ).fetchone()
-            prev_six_val = prev_six['mx'] if prev_six and prev_six['mx'] else 0
-            if sixes_now > prev_six_val:
-                pname = (database.get_player(db, striker_id) or {}).get('name', '')
-                records_broken.append({
-                    'type':            'most_sixes_innings',
-                    'format':          fmt_for_record,
-                    'player_name':     pname,
-                    'new_value':       sixes_now,
-                    'previous_value':  prev_six_val,
-                    'previous_holder': prev_six['name'] if prev_six and prev_six['mx'] else None,
-                })
-
-        # ── Innings / match completion ────────────────────────────────────────
-        innings_complete = False
-        match_complete   = False
-
-        if _is_innings_complete(new_wickets, new_over, max_overs, new_runs, target):
-            innings_complete = True
-            inn_update['status'] = 'complete'
-            database.update_innings(db, innings_id, inn_update)
-
-            # Decide whether to start next innings or complete match
-            all_innings_fresh = database.get_innings(db, id)
-            nxt = _determine_next_innings(state['match'], all_innings_fresh, fmt)
-            if nxt:
-                batting_tid, bowling_tid, next_inn_num = nxt
-                _start_innings(db, id, next_inn_num, batting_tid, bowling_tid)
-            else:
-                match_complete = True
-                all_innings_fresh2 = database.get_innings(db, id)
-                match_fresh = database.get_match(db, id)
-                _calculate_and_complete_match(db, id, match_fresh, all_innings_fresh2)
-
-            # 6) Lowest team score (only on all-out — new_wickets==10)
-            if new_wickets >= 10 and new_runs > 0:
-                prev_low = db.execute(
-                    "SELECT i.total_runs, t.name as team_name "
-                    "FROM innings i JOIN matches m ON i.match_id=m.id "
-                    "JOIN teams t ON i.batting_team_id=t.id "
-                    "WHERE m.format=? AND m.status='complete' AND i.total_wickets=10 "
-                    "ORDER BY i.total_runs ASC LIMIT 1",
-                    (fmt_for_record,)
-                ).fetchone()
-                prev_low_val = prev_low['total_runs'] if prev_low else None
-                if prev_low_val is None or new_runs < prev_low_val:
-                    records_broken.append({
-                        'type':            'lowest_team_score',
-                        'format':          fmt_for_record,
-                        'player_name':     innings.get('batting_team_name', ''),
-                        'new_value':       new_runs,
-                        'previous_value':  prev_low_val,
-                        'previous_holder': prev_low['team_name'] if prev_low else None,
-                    })
-        else:
-            database.update_innings(db, innings_id, inn_update)
-
-        # ── Build response ────────────────────────────────────────────────────
-        fresh_state = database.get_match_state(db, id)
-        delivery_row = db.execute(
-            "SELECT * FROM deliveries WHERE innings_id=? ORDER BY id DESC LIMIT 1",
-            (innings_id,)
-        ).fetchone()
-
-        # Hundred-specific state additions
-        hundred_state = None
-        if fmt == 'Hundred':
-            import hundred_engine as _he
-            _legal_total = legal_after
-            hundred_state = {
-                'balls_bowled':    _legal_total,
-                'balls_remaining': max(0, _he.HUNDRED_BALLS - _legal_total),
-                'is_powerplay':    _legal_total < _he.HUNDRED_POWERPLAY,
-                'powerplay_complete': _legal_total >= _he.HUNDRED_POWERPLAY,
-                'set_number':      (_legal_total // _he.HUNDRED_SET_SIZE) + 1,
-                'ball_in_set':     _legal_total % _he.HUNDRED_SET_SIZE,
-                'set_complete':    is_legal and (_legal_total % _he.HUNDRED_SET_SIZE == 0),
-                'final_ten':       _legal_total >= 90,
-                'final_five':      _legal_total >= 95,
-                'final_ball':      _legal_total == 99,
-                'progress_bar':    _he.render_hundred_progress_bar(_legal_total),
-                'progress_text':   _he.format_hundred_progress(_legal_total),
-            }
-
-        return jsonify({
-            'delivery':       database.dict_from_row(delivery_row),
-            'innings_state':  _condense_state(fresh_state),
-            'commentary':     commentary,
-            'milestones':     milestones,
-            'records_broken': records_broken,
-            'innings_complete': innings_complete,
-            'match_complete':   match_complete,
-            'hundred_state':    hundred_state,
-            'match_state':      {
-                'over_number':   fresh_state['over_number'],
-                'ball_in_over':  fresh_state['ball_in_over'],
-                'is_free_hit':   fresh_state['is_free_hit'],
-                'striker_id':    fresh_state['current_striker_id'],
-                'non_striker_id': fresh_state['current_non_striker_id'],
-                'bowler_id':     fresh_state['current_bowler_id'],
-                'innings_number': fresh_state['current_innings']['innings_number'] if fresh_state['current_innings'] else None,
-            },
-        })
+        db.execute("BEGIN TRANSACTION")
+        req_data = request.get_json() or {}
+        res = match_service.bowl_ball(db, id, req_data)
+        db.commit()
+        return jsonify(res)
+    except ValueError as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return err(str(e))
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise e
     finally:
         database.close_db(db)
 
@@ -1545,143 +697,144 @@ def fast_sim(id):
         fmt = state['format']
 
         # Sim all remaining innings (including current)
-        while state['current_innings']:
-            innings    = state['current_innings']
-            innings_id = state['current_innings_id']
-            max_overs  = state['max_overs']
-            target     = state['target']
+        with db:
+            while state['current_innings']:
+                innings    = state['current_innings']
+                innings_id = state['current_innings_id']
+                max_overs  = state['max_overs']
+                target     = state['target']
 
-            batting_players = [
-                {
-                    'player_id':       p['id'],
-                    'batting_rating':  p['batting_rating'],
-                    'batting_hand':    p['batting_hand'],
-                    'batting_position': p['batting_position'],
-                }
-                for p in sorted(state['batting_team_players'],
-                                key=lambda x: x['batting_position'] or 99)
-            ]
-            bowling_players = [
-                {
-                    'player_id':      p['id'],
-                    'batting_position': p.get('batting_position'),
-                    'bowling_type':   p['bowling_type'],
-                    'bowling_rating': p['bowling_rating'],
-                }
-                for p in state['bowling_team_players'] if p['bowling_type'] != 'none'
-            ]
+                batting_players = [
+                    {
+                        'player_id':       p['id'],
+                        'batting_rating':  p['batting_rating'],
+                        'batting_hand':    p['batting_hand'],
+                        'batting_position': p['batting_position'],
+                    }
+                    for p in sorted(state['batting_team_players'],
+                                    key=lambda x: x['batting_position'] or 99)
+                ]
+                bowling_players = [
+                    {
+                        'player_id':      p['id'],
+                        'batting_position': p.get('batting_position'),
+                        'bowling_type':   p['bowling_type'],
+                        'bowling_rating': p['bowling_rating'],
+                    }
+                    for p in state['bowling_team_players'] if p['bowling_type'] != 'none'
+                ]
 
-            if fmt == 'Hundred':
-                import hundred_engine as _he
-                result = _he.simulate_hundred_innings_fast(
-                    batting_players, bowling_players, target
-                )
-            else:
-                result = game_engine.simulate_innings_fast(
-                    batting_players, bowling_players, fmt, target,
-                    scoring_mode=state['match'].get('scoring_mode', 'modern')
-                )
-
-            # Persist batter scores
-            for bs in result['batter_scores']:
-                row = next(
-                    (b for b in state['batter_innings'] if b['player_id'] == bs['player_id']),
-                    None
-                )
-                if row:
-                    database.update_batter_innings(db, row['id'], {
-                        'runs':          bs['runs'],
-                        'balls_faced':   bs['balls'],
-                        'fours':         bs['fours'],
-                        'sixes':         bs['sixes'],
-                        'dismissal_type': bs['dismissal_type'],
-                        'bowler_id':     bs.get('bowler_id'),
-                        'fielder_id':    bs.get('fielder_id'),
-                        'not_out':       1 if bs['not_out'] else 0,
-                        'status':        'not_out' if bs['not_out'] else 'dismissed',
-                    })
-
-            # Persist bowler figures
-            for bf in result['bowler_figures']:
-                row = next(
-                    (b for b in state['bowler_innings'] if b['player_id'] == bf['player_id']),
-                    None
-                )
-                if row:
-                    if fmt == 'Hundred':
-                        # Hundred: track balls not overs; convert for DB storage
-                        total_balls = bf['balls']
-                        overs_full  = total_balls // 6
-                        balls_rem   = total_balls % 6
-                        database.update_bowler_innings(db, row['id'], {
-                            'overs':        overs_full,
-                            'balls':        balls_rem,
-                            'runs_conceded': bf['runs'],
-                            'wickets':      bf['wickets'],
-                            'maidens':      0,
-                        })
-                    else:
-                        database.update_bowler_innings(db, row['id'], {
-                            'overs':        bf['overs'],
-                            'balls':        bf['balls'],
-                            'runs_conceded': bf['runs'],
-                            'wickets':      bf['wickets'],
-                            'maidens':      bf['maidens'],
-                        })
-
-            # Persist fall of wickets
-            for fow in result.get('fall_of_wickets', []):
                 if fmt == 'Hundred':
-                    # Hundred uses balls, not overs
-                    fow_overs = round(fow['balls'] / 6, 2)
+                    import hundred_engine as _he
+                    result = _he.simulate_hundred_innings_fast(
+                        batting_players, bowling_players, target
+                    )
                 else:
-                    fow_overs = fow['overs']
-                database.insert_fall_of_wicket(
-                    db, innings_id,
-                    fow['wicket'], fow['score'], fow_overs, fow['player_id']
-                )
+                    result = game_engine.simulate_innings_fast(
+                        batting_players, bowling_players, fmt, target,
+                        scoring_mode=state['match'].get('scoring_mode', 'modern')
+                    )
 
-            if fmt == 'Hundred':
-                balls_bowled = result.get('total_balls_bowled', 0)
-                overs_dec = round(balls_bowled / 6, 2)
-            else:
-                overs_dec = result['overs_completed']
-            innings_update = {
-                'total_runs':     result['total_runs'],
-                'total_wickets':  result['total_wickets'],
-                'overs_completed': overs_dec,
-                'runs_at_100_overs': result.get('runs_at_100_overs'),
-                'wickets_at_100_overs': result.get('wickets_at_100_overs'),
-                'runs_at_110_overs': result.get('runs_at_110_overs'),
-                'wickets_at_110_overs': result.get('wickets_at_110_overs'),
-                'extras_wides':   result['extras']['wides'],
-                'extras_noballs': result['extras']['no_balls'],
-                'extras_byes':    result['extras']['byes'],
-                'extras_legbyes': result['extras']['leg_byes'],
-                'status':         'complete',
-            }
-            if fmt == 'Hundred':
-                innings_update['balls_used']        = result.get('total_balls_bowled', 0)
-                innings_update['powerplay_runs']    = result.get('powerplay_score', 0)
-                innings_update['powerplay_wickets'] = result.get('powerplay_wickets', 0)
-                innings_update['death_runs']        = result.get('death_score', 0)
-                innings_update['death_wickets']     = result.get('death_wickets', 0)
-                if result.get('strategic_timeout_at_ball') is not None:
-                    innings_update['strategic_timeout_ball'] = result['strategic_timeout_at_ball']
-            database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings, innings_update))
+                # Persist batter scores
+                for bs in result['batter_scores']:
+                    row = next(
+                        (b for b in state['batter_innings'] if b['player_id'] == bs['player_id']),
+                        None
+                    )
+                    if row:
+                        database.update_batter_innings(db, row['id'], {
+                            'runs':          bs['runs'],
+                            'balls_faced':   bs['balls'],
+                            'fours':         bs['fours'],
+                            'sixes':         bs['sixes'],
+                            'dismissal_type': bs['dismissal_type'],
+                            'bowler_id':     bs.get('bowler_id'),
+                            'fielder_id':    bs.get('fielder_id'),
+                            'not_out':       1 if bs['not_out'] else 0,
+                            'status':        'not_out' if bs['not_out'] else 'dismissed',
+                        })
 
-            # Next innings or complete
-            all_innings_fresh = database.get_innings(db, id)
-            nxt = _determine_next_innings(state['match'], all_innings_fresh, fmt)
-            if nxt:
-                batting_tid, bowling_tid, next_inn_num = nxt
-                _start_innings(db, id, next_inn_num, batting_tid, bowling_tid)
-                state = database.get_match_state(db, id)
-            else:
-                all_innings_fresh2 = database.get_innings(db, id)
-                match_fresh = database.get_match(db, id)
-                _calculate_and_complete_match(db, id, match_fresh, all_innings_fresh2)
-                break
+                # Persist bowler figures
+                for bf in result['bowler_figures']:
+                    row = next(
+                        (b for b in state['bowler_innings'] if b['player_id'] == bf['player_id']),
+                        None
+                    )
+                    if row:
+                        if fmt == 'Hundred':
+                            # Hundred: track balls not overs; convert for DB storage
+                            total_balls = bf['balls']
+                            overs_full  = total_balls // 6
+                            balls_rem   = total_balls % 6
+                            database.update_bowler_innings(db, row['id'], {
+                                'overs':        overs_full,
+                                'balls':        balls_rem,
+                                'runs_conceded': bf['runs'],
+                                'wickets':      bf['wickets'],
+                                'maidens':      0,
+                            })
+                        else:
+                            database.update_bowler_innings(db, row['id'], {
+                                'overs':        bf['overs'],
+                                'balls':        bf['balls'],
+                                'runs_conceded': bf['runs'],
+                                'wickets':      bf['wickets'],
+                                'maidens':      bf['maidens'],
+                            })
+
+                # Persist fall of wickets
+                for fow in result.get('fall_of_wickets', []):
+                    if fmt == 'Hundred':
+                        # Hundred uses balls, not overs
+                        fow_overs = round(fow['balls'] / 6, 2)
+                    else:
+                        fow_overs = fow['overs']
+                    database.insert_fall_of_wicket(
+                        db, innings_id,
+                        fow['wicket'], fow['score'], fow_overs, fow['player_id']
+                    )
+
+                if fmt == 'Hundred':
+                    balls_bowled = result.get('total_balls_bowled', 0)
+                    overs_dec = round(balls_bowled / 6, 2)
+                else:
+                    overs_dec = result['overs_completed']
+                innings_update = {
+                    'total_runs':     result['total_runs'],
+                    'total_wickets':  result['total_wickets'],
+                    'overs_completed': overs_dec,
+                    'runs_at_100_overs': result.get('runs_at_100_overs'),
+                    'wickets_at_100_overs': result.get('wickets_at_100_overs'),
+                    'runs_at_110_overs': result.get('runs_at_110_overs'),
+                    'wickets_at_110_overs': result.get('wickets_at_110_overs'),
+                    'extras_wides':   result['extras']['wides'],
+                    'extras_noballs': result['extras']['no_balls'],
+                    'extras_byes':    result['extras']['byes'],
+                    'extras_legbyes': result['extras']['leg_byes'],
+                    'status':         'complete',
+                }
+                if fmt == 'Hundred':
+                    innings_update['balls_used']        = result.get('total_balls_bowled', 0)
+                    innings_update['powerplay_runs']    = result.get('powerplay_score', 0)
+                    innings_update['powerplay_wickets'] = result.get('powerplay_wickets', 0)
+                    innings_update['death_runs']        = result.get('death_score', 0)
+                    innings_update['death_wickets']     = result.get('death_wickets', 0)
+                    if result.get('strategic_timeout_at_ball') is not None:
+                        innings_update['strategic_timeout_ball'] = result['strategic_timeout_at_ball']
+                database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings, innings_update))
+
+                # Next innings or complete
+                all_innings_fresh = database.get_innings(db, id)
+                nxt = _determine_next_innings(state['match'], all_innings_fresh, fmt)
+                if nxt:
+                    batting_tid, bowling_tid, next_inn_num = nxt
+                    _start_innings(db, id, next_inn_num, batting_tid, bowling_tid)
+                    state = database.get_match_state(db, id)
+                else:
+                    all_innings_fresh2 = database.get_innings(db, id)
+                    match_fresh = database.get_match(db, id)
+                    _calculate_and_complete_match(db, id, match_fresh, all_innings_fresh2)
+                    break
 
         return scorecard_response(id, db)
     finally:
@@ -1776,72 +929,73 @@ def _persist_sim_result(db, match_id, match_state, sim_result):
     updated_state = sim_result['state']
     fmt           = match_state['format']
 
-    # Batter innings
-    bi_by_pid = {b['player_id']: b for b in match_state['batter_innings']}
-    for bp in updated_state['batting_players']:
-        row = bi_by_pid.get(bp['player_id'])
-        if not row:
-            continue
-        upd = {'runs': bp.get('runs', 0), 'balls_faced': bp.get('balls', 0)}
-        if bp.get('dismissed') and row.get('status') != 'dismissed':
-            upd['status'] = 'dismissed'
-        if bp.get('dismissal_type') is not None:
-            upd['dismissal_type'] = bp.get('dismissal_type')
-            upd['bowler_id'] = bp.get('bowler_id')
-            upd['fielder_id'] = bp.get('fielder_id')
-        elif bp.get('in') and row.get('status') == 'yet_to_bat':
-            upd['status'] = 'batting'
-        database.update_batter_innings(db, row['id'], upd)
+    with db:
+        # Batter innings
+        bi_by_pid = {b['player_id']: b for b in match_state['batter_innings']}
+        for bp in updated_state['batting_players']:
+            row = bi_by_pid.get(bp['player_id'])
+            if not row:
+                continue
+            upd = {'runs': bp.get('runs', 0), 'balls_faced': bp.get('balls', 0)}
+            if bp.get('dismissed') and row.get('status') != 'dismissed':
+                upd['status'] = 'dismissed'
+            if bp.get('dismissal_type') is not None:
+                upd['dismissal_type'] = bp.get('dismissal_type')
+                upd['bowler_id'] = bp.get('bowler_id')
+                upd['fielder_id'] = bp.get('fielder_id')
+            elif bp.get('in') and row.get('status') == 'yet_to_bat':
+                upd['status'] = 'batting'
+            database.update_batter_innings(db, row['id'], upd)
 
-    # Bowler innings
-    bwi_by_pid = {b['player_id']: b for b in match_state['bowler_innings']}
-    for bw in updated_state['bowler_map'].values():
-        row = bwi_by_pid.get(bw['player_id'])
-        if not row:
-            continue
-        total_b = bw.get('balls_bowled', 0)
-        overs_b = bw.get('overs_bowled', 0)
-        database.update_bowler_innings(db, row['id'], {
-            'overs':        overs_b,
-            'balls':        total_b % 6,
-            'runs_conceded': bw.get('runs', 0),
-            'wickets':      bw.get('wickets', 0),
-            'maidens':      bw.get('maidens', 0),
-        })
+        # Bowler innings
+        bwi_by_pid = {b['player_id']: b for b in match_state['bowler_innings']}
+        for bw in updated_state['bowler_map'].values():
+            row = bwi_by_pid.get(bw['player_id'])
+            if not row:
+                continue
+            total_b = bw.get('balls_bowled', 0)
+            overs_b = bw.get('overs_bowled', 0)
+            database.update_bowler_innings(db, row['id'], {
+                'overs':        overs_b,
+                'balls':        total_b % 6,
+                'runs_conceded': bw.get('runs', 0),
+                'wickets':      bw.get('wickets', 0),
+                'maidens':      bw.get('maidens', 0),
+            })
 
-    # Innings totals
-    new_over = updated_state['over_number']
-    new_ball = updated_state['ball_in_over']
-    inn_upd  = {
-        'total_runs':      updated_state['total_runs'],
-        'total_wickets':   updated_state['total_wickets'],
-        'overs_completed': new_over + new_ball / 10,
-        'runs_at_100_overs': updated_state.get('runs_at_100_overs'),
-        'wickets_at_100_overs': updated_state.get('wickets_at_100_overs'),
-        'runs_at_110_overs': updated_state.get('runs_at_110_overs'),
-        'wickets_at_110_overs': updated_state.get('wickets_at_110_overs'),
-    }
-    if sim_result['innings_complete']:
-        inn_upd['status'] = 'complete'
-    database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings, inn_upd))
+        # Innings totals
+        new_over = updated_state['over_number']
+        new_ball = updated_state['ball_in_over']
+        inn_upd  = {
+            'total_runs':      updated_state['total_runs'],
+            'total_wickets':   updated_state['total_wickets'],
+            'overs_completed': new_over + new_ball / 10,
+            'runs_at_100_overs': updated_state.get('runs_at_100_overs'),
+            'wickets_at_100_overs': updated_state.get('wickets_at_100_overs'),
+            'runs_at_110_overs': updated_state.get('runs_at_110_overs'),
+            'wickets_at_110_overs': updated_state.get('wickets_at_110_overs'),
+        }
+        if sim_result['innings_complete']:
+            inn_upd['status'] = 'complete'
+        database.update_innings(db, innings_id, _apply_innings_cutoff_snapshots(innings, inn_upd))
 
-    # Handle innings → match completion
-    match_complete = False
-    if sim_result['innings_complete']:
-        all_innings_fresh = database.get_innings(db, match_id)
-        nxt = _determine_next_innings(match_state['match'], all_innings_fresh, fmt)
-        if nxt:
-            batting_tid, bowling_tid, next_inn_num = nxt
-            _start_innings(db, match_id, next_inn_num, batting_tid, bowling_tid)
-        else:
-            match_complete = True
-            all_innings_fresh2 = database.get_innings(db, match_id)
-            match_fresh = database.get_match(db, match_id)
-            _calculate_and_complete_match(db, match_id, match_fresh, all_innings_fresh2)
-            if match_fresh.get('series_id'):
-                _update_series_after_match(db, match_fresh['series_id'])
-            if match_fresh.get('tournament_id'):
-                _update_tournament_nrr(db, match_fresh['tournament_id'], match_fresh)
+        # Handle innings → match completion
+        match_complete = False
+        if sim_result['innings_complete']:
+            all_innings_fresh = database.get_innings(db, match_id)
+            nxt = _determine_next_innings(match_state['match'], all_innings_fresh, fmt)
+            if nxt:
+                batting_tid, bowling_tid, next_inn_num = nxt
+                _start_innings(db, match_id, next_inn_num, batting_tid, bowling_tid)
+            else:
+                match_complete = True
+                all_innings_fresh2 = database.get_innings(db, match_id)
+                match_fresh = database.get_match(db, match_id)
+                _calculate_and_complete_match(db, match_id, match_fresh, all_innings_fresh2)
+                if match_fresh.get('series_id'):
+                    _update_series_after_match(db, match_fresh['series_id'])
+                if match_fresh.get('tournament_id'):
+                    _update_tournament_nrr(db, match_fresh['tournament_id'], match_fresh)
 
     return match_complete
 
@@ -1943,13 +1097,14 @@ def declare(id):
             return err('No active innings')
 
         innings_id = state['current_innings_id']
-        database.update_innings(db, innings_id, {'status': 'complete', 'declared': 1})
+        with db:
+            database.update_innings(db, innings_id, {'status': 'complete', 'declared': 1})
 
-        all_innings_fresh = database.get_innings(db, id)
-        nxt = _determine_next_innings(state['match'], all_innings_fresh, 'Test')
-        if nxt:
-            batting_tid, bowling_tid, next_inn_num = nxt
-            _start_innings(db, id, next_inn_num, batting_tid, bowling_tid)
+            all_innings_fresh = database.get_innings(db, id)
+            nxt = _determine_next_innings(state['match'], all_innings_fresh, 'Test')
+            if nxt:
+                batting_tid, bowling_tid, next_inn_num = nxt
+                _start_innings(db, id, next_inn_num, batting_tid, bowling_tid)
 
         fresh_state = database.get_match_state(db, id)
         return jsonify(fresh_state)
@@ -2005,76 +1160,82 @@ def complete_match(id):
         if not match:
             return err('Match not found', 404)
 
-        # Only run result calculation if not already complete
-        if match['status'] != 'complete':
-            all_innings = database.get_innings(db, id)
-            _calculate_and_complete_match(db, id, match, all_innings)
-            # Guard: verify result_type was determined before proceeding
-            post_calc = database.get_match(db, id)
-            if not post_calc.get('result_type'):
-                return err('Cannot complete match — result could not be determined. Ensure all innings are complete.', 400)
+        try:
+            with db:
+                # Only run result calculation if not already complete
+                if match['status'] != 'complete':
+                    all_innings = database.get_innings(db, id)
+                    _calculate_and_complete_match(db, id, match, all_innings)
+                    # Guard: verify result_type was determined before proceeding
+                    post_calc = database.get_match(db, id)
+                    if not post_calc.get('result_type'):
+                        raise ValueError('Cannot complete match — result could not be determined. Ensure all innings are complete.')
 
-        # Apply POM and notes, generate attendance if not already set
-        updates = {'status': 'complete'}
-        if data.get('player_of_match_id'):
-            updates['player_of_match_id'] = int(data['player_of_match_id'])
-        if data.get('match_notes'):
-            updates['match_notes'] = data['match_notes']
-        if not match.get('attendance'):
-            team1 = database.get_team(db, match['team1_id']) or {}
-            team2 = database.get_team(db, match['team2_id']) or {}
-            att = _calculate_attendance(match, team1, team2)
-            if att:
-                updates['attendance'] = att
-        database.update_match(db, id, updates)
+                # Apply POM and notes, generate attendance if not already set
+                updates = {'status': 'complete'}
+                if data.get('player_of_match_id'):
+                    updates['player_of_match_id'] = int(data['player_of_match_id'])
+                if data.get('match_notes'):
+                    updates['match_notes'] = data['match_notes']
+                if not match.get('attendance'):
+                    team1 = database.get_team(db, match['team1_id']) or {}
+                    team2 = database.get_team(db, match['team2_id']) or {}
+                    att = _calculate_attendance(match, team1, team2)
+                    if att:
+                        updates['attendance'] = att
+                database.update_match(db, id, updates)
 
-        # Save journal entry if notes provided
-        if data.get('match_notes'):
-            database.save_journal_entry(db, id, data['match_notes'], 'match_report')
+                # Save journal entry if notes provided
+                if data.get('match_notes'):
+                    database.save_journal_entry(db, id, data['match_notes'], 'match_report')
 
-        # World records
+                # World records
+                updated = database.get_match(db, id)
+                if updated.get('world_id'):
+                    _check_world_records(db, updated['world_id'], id, updated)
+
+                # Series tracking
+                series_won = None
+                if updated.get('series_id'):
+                    s_before = database.get_series(db, updated['series_id'])
+                    was_complete = s_before and s_before['status'] == 'complete'
+                    _update_series_after_match(db, updated['series_id'])
+                    if not was_complete:
+                        s = database.get_series(db, updated['series_id'])
+                        if s and s['status'] == 'complete' and s.get('winner_team_id'):
+                            series_won = {
+                                'name':        s['name'],
+                                'format':      s.get('format'),
+                                'winner_name': s.get('winner_name'),
+                                'start_date':  s.get('start_date'),
+                            }
+
+                # Tournament NRR tracking
+                tournament_won = None
+                if updated.get('tournament_id'):
+                    t_before = db.execute(
+                        "SELECT status FROM tournaments WHERE id=?", (updated['tournament_id'],)
+                    ).fetchone()
+                    t_was_complete = t_before and t_before['status'] == 'complete'
+                    _update_tournament_nrr(db, updated['tournament_id'], updated)
+                    if not t_was_complete:
+                        t = db.execute(
+                            "SELECT t.name, t.format, t.start_date, t.status, wt.name AS winner_name "
+                            "FROM tournaments t LEFT JOIN teams wt ON t.winner_team_id = wt.id "
+                            "WHERE t.id=?", (updated['tournament_id'],)
+                        ).fetchone()
+                        if t and t['status'] == 'complete' and t['winner_name']:
+                            tournament_won = {
+                                'name':        t['name'],
+                                'format':      t['format'],
+                                'winner_name': t['winner_name'],
+                                'start_date':  t['start_date'],
+                            }
+        except ValueError as ve:
+            return err(str(ve), 400)
+
+        # Reload updated match details for response built outside transaction
         updated = database.get_match(db, id)
-        if updated.get('world_id'):
-            _check_world_records(db, updated['world_id'], id, updated)
-
-        # Series tracking
-        series_won = None
-        if updated.get('series_id'):
-            s_before = database.get_series(db, updated['series_id'])
-            was_complete = s_before and s_before['status'] == 'complete'
-            _update_series_after_match(db, updated['series_id'])
-            if not was_complete:
-                s = database.get_series(db, updated['series_id'])
-                if s and s['status'] == 'complete' and s.get('winner_team_id'):
-                    series_won = {
-                        'name':        s['name'],
-                        'format':      s.get('format'),
-                        'winner_name': s.get('winner_name'),
-                        'start_date':  s.get('start_date'),
-                    }
-
-        # Tournament NRR tracking
-        tournament_won = None
-        if updated.get('tournament_id'):
-            t_before = db.execute(
-                "SELECT status FROM tournaments WHERE id=?", (updated['tournament_id'],)
-            ).fetchone()
-            t_was_complete = t_before and t_before['status'] == 'complete'
-            _update_tournament_nrr(db, updated['tournament_id'], updated)
-            if not t_was_complete:
-                t = db.execute(
-                    "SELECT t.name, t.format, t.start_date, t.status, wt.name AS winner_name "
-                    "FROM tournaments t LEFT JOIN teams wt ON t.winner_team_id = wt.id "
-                    "WHERE t.id=?", (updated['tournament_id'],)
-                ).fetchone()
-                if t and t['status'] == 'complete' and t['winner_name']:
-                    tournament_won = {
-                        'name':        t['name'],
-                        'format':      t['format'],
-                        'winner_name': t['winner_name'],
-                        'start_date':  t['start_date'],
-                    }
-
         result_string = _build_result_description(updated, database.get_innings(db, id))
         return jsonify({
             'success': True,
@@ -2347,30 +1508,31 @@ def create_series():
 
     db = database.get_db()
     try:
-        series_id = database.create_series(db, {
-            'name': name,
-            'format': fmt,
-            'team1_id': team1_id,
-            'team2_id': team2_id,
-            'world_id': world_id,
-            'start_date': start_date,
-            'series_type': 'bilateral',
-            'settings_json': _json.dumps({'total_matches': num_matches}),
-        })
-        rows = []
-        for i in range(num_matches):
-            venue_id = venue_ids[i % len(venue_ids)]
-            rows.append({
-                'tournament_id': None,
-                'series_id': series_id,
-                'world_id': world_id,
-                'scheduled_date': start_date,
-                'venue_id': venue_id,
+        with db:
+            series_id = database.create_series(db, {
+                'name': name,
+                'format': fmt,
                 'team1_id': team1_id,
                 'team2_id': team2_id,
-                'fixture_type': 'league',
+                'world_id': world_id,
+                'start_date': start_date,
+                'series_type': 'bilateral',
+                'settings_json': _json.dumps({'total_matches': num_matches}),
             })
-        database.bulk_create_fixtures(db, rows)
+            rows = []
+            for i in range(num_matches):
+                venue_id = venue_ids[i % len(venue_ids)]
+                rows.append({
+                    'tournament_id': None,
+                    'series_id': series_id,
+                    'world_id': world_id,
+                    'scheduled_date': start_date,
+                    'venue_id': venue_id,
+                    'team1_id': team1_id,
+                    'team2_id': team2_id,
+                    'fixture_type': 'league',
+                })
+            database.bulk_create_fixtures(db, rows)
         fixtures = database.get_fixtures(db, series_id=series_id)
         return jsonify({'series_id': series_id, 'fixtures': fixtures})
     finally:
@@ -2560,50 +1722,51 @@ def create_tournament():
 
     db = database.get_db()
     try:
-        t_id = database.create_tournament(db, {
-            'name': name, 'format': fmt, 'tournament_type': ttype,
-            'world_id': world_id, 'start_date': start_date,
-            'settings_json': _json.dumps({'venue_ids': venue_ids}),
-        })
+        with db:
+            t_id = database.create_tournament(db, {
+                'name': name, 'format': fmt, 'tournament_type': ttype,
+                'world_id': world_id, 'start_date': start_date,
+                'settings_json': _json.dumps({'venue_ids': venue_ids}),
+            })
 
-        fixtures = []
-        def _venue(i):
-            return venue_ids[i % len(venue_ids)] if venue_ids else None
+            fixtures = []
+            def _venue(i):
+                return venue_ids[i % len(venue_ids)] if venue_ids else None
 
-        if ttype == 'tri_series':
-            for team_id in team_ids:
-                database.create_tournament_team(db, t_id, team_id, 'A')
-            pairs = _round_robin_pairs(team_ids)
-            for rep in range(2):
-                for i, (t1, t2) in enumerate(pairs):
+            if ttype == 'tri_series':
+                for team_id in team_ids:
+                    database.create_tournament_team(db, t_id, team_id, 'A')
+                pairs = _round_robin_pairs(team_ids)
+                for rep in range(2):
+                    for i, (t1, t2) in enumerate(pairs):
+                        fixtures.append({
+                            'tournament_id': t_id, 'series_id': None, 'world_id': world_id,
+                            'scheduled_date': start_date, 'venue_id': _venue(len(fixtures)),
+                            'team1_id': t1, 'team2_id': t2, 'fixture_type': 'league',
+                        })
+            else:
+                # world_cup: 2 groups of 5; t20_world_cup: 2 groups of 4
+                group_size = 5 if ttype == 'world_cup' else 4
+                group_a = team_ids[:group_size]
+                group_b = team_ids[group_size:]
+                for tid in group_a:
+                    database.create_tournament_team(db, t_id, tid, 'A')
+                for tid in group_b:
+                    database.create_tournament_team(db, t_id, tid, 'B')
+                for t1, t2 in _round_robin_pairs(group_a):
                     fixtures.append({
                         'tournament_id': t_id, 'series_id': None, 'world_id': world_id,
                         'scheduled_date': start_date, 'venue_id': _venue(len(fixtures)),
                         'team1_id': t1, 'team2_id': t2, 'fixture_type': 'league',
                     })
-        else:
-            # world_cup: 2 groups of 5; t20_world_cup: 2 groups of 4
-            group_size = 5 if ttype == 'world_cup' else 4
-            group_a = team_ids[:group_size]
-            group_b = team_ids[group_size:]
-            for tid in group_a:
-                database.create_tournament_team(db, t_id, tid, 'A')
-            for tid in group_b:
-                database.create_tournament_team(db, t_id, tid, 'B')
-            for t1, t2 in _round_robin_pairs(group_a):
-                fixtures.append({
-                    'tournament_id': t_id, 'series_id': None, 'world_id': world_id,
-                    'scheduled_date': start_date, 'venue_id': _venue(len(fixtures)),
-                    'team1_id': t1, 'team2_id': t2, 'fixture_type': 'league',
-                })
-            for t1, t2 in _round_robin_pairs(group_b):
-                fixtures.append({
-                    'tournament_id': t_id, 'series_id': None, 'world_id': world_id,
-                    'scheduled_date': start_date, 'venue_id': _venue(len(fixtures)),
-                    'team1_id': t1, 'team2_id': t2, 'fixture_type': 'league',
-                })
+                for t1, t2 in _round_robin_pairs(group_b):
+                    fixtures.append({
+                        'tournament_id': t_id, 'series_id': None, 'world_id': world_id,
+                        'scheduled_date': start_date, 'venue_id': _venue(len(fixtures)),
+                        'team1_id': t1, 'team2_id': t2, 'fixture_type': 'league',
+                    })
 
-        database.bulk_create_fixtures(db, fixtures)
+            database.bulk_create_fixtures(db, fixtures)
         all_fixtures = database.get_fixtures(db, tournament_id=t_id)
         return jsonify({'tournament_id': t_id, 'fixtures': all_fixtures})
     finally:
@@ -2700,12 +1863,13 @@ def advance_tournament(id):
                 top2 = [r['team_id'] for r in groups.get('A', [])[:2]]
                 if len(top2) < 2:
                     return err('Not enough teams for final')
-                database.bulk_create_fixtures(db, [{
-                    'tournament_id': id, 'series_id': None, 'world_id': world_id,
-                    'scheduled_date': start_date, 'venue_id': _venue(0),
-                    'team1_id': top2[0], 'team2_id': top2[1], 'fixture_type': 'final',
-                }])
-                database.update_tournament(db, id, {'status': 'knockout'})
+                with db:
+                    database.bulk_create_fixtures(db, [{
+                        'tournament_id': id, 'series_id': None, 'world_id': world_id,
+                        'scheduled_date': start_date, 'venue_id': _venue(0),
+                        'team1_id': top2[0], 'team2_id': top2[1], 'fixture_type': 'final',
+                    }])
+                    database.update_tournament(db, id, {'status': 'knockout'})
             else:
                 # 1A vs 2B, 1B vs 2A
                 top_a = [r['team_id'] for r in groups.get('A', [])]
@@ -2729,8 +1893,9 @@ def advance_tournament(id):
                         'team1_id': sf['team1_id'], 'team2_id': sf['team2_id'],
                         'fixture_type': 'semi',
                     })
-                database.bulk_create_fixtures(db, rows)
-                database.update_tournament(db, id, {'status': 'knockout'})
+                with db:
+                    database.bulk_create_fixtures(db, rows)
+                    database.update_tournament(db, id, {'status': 'knockout'})
 
             new_fixtures = database.get_fixtures(db, tournament_id=id)
             return jsonify({'success': True, 'fixtures': new_fixtures})
@@ -2748,11 +1913,12 @@ def advance_tournament(id):
                     finalists.append(m['winning_team_id'])
             if len(finalists) < 2:
                 return err('Semi-final results incomplete')
-            database.bulk_create_fixtures(db, [{
-                'tournament_id': id, 'series_id': None, 'world_id': world_id,
-                'scheduled_date': start_date, 'venue_id': _venue(0),
-                'team1_id': finalists[0], 'team2_id': finalists[1], 'fixture_type': 'final',
-            }])
+            with db:
+                database.bulk_create_fixtures(db, [{
+                    'tournament_id': id, 'series_id': None, 'world_id': world_id,
+                    'scheduled_date': start_date, 'venue_id': _venue(0),
+                    'team1_id': finalists[0], 'team2_id': finalists[1], 'fixture_type': 'final',
+                }])
             new_fixtures = database.get_fixtures(db, tournament_id=id)
             return jsonify({'success': True, 'fixtures': new_fixtures})
 
@@ -2763,7 +1929,8 @@ def advance_tournament(id):
                 m = database.get_match(db, finals_f[0]['match_id'])
                 if m:
                     winner_id = m.get('winning_team_id')
-            database.update_tournament(db, id, {'status': 'complete', 'winner_team_id': winner_id})
+            with db:
+                database.update_tournament(db, id, {'status': 'complete', 'winner_team_id': winner_id})
             return jsonify({'success': True, 'winner_team_id': winner_id})
 
         return err('No advancement action available at this stage')
@@ -3800,127 +2967,128 @@ def _persist_world_sim(db, world_id, results, new_current_date, updated_player_s
             return top_bowl.get('player_id')
         return top_bat.get('player_id') or None
 
-    # Default venue fallback
-    venues = database.get_venues(db)
-    fallback_venue_id = venues[0]['id'] if venues else 1
+    with db:
+        # Default venue fallback
+        venues = database.get_venues(db)
+        fallback_venue_id = venues[0]['id'] if venues else 1
 
-    # Load current rankings
-    all_ranking_rows  = database.get_world_rankings(db, world_id)
-    rankings_by_fmt   = {}
-    matches_by_fmt_team = {}  # {fmt: {tid: count}} — for incrementing matches_counted
-    for r in all_ranking_rows:
-        fmt = r['format']
-        rankings_by_fmt.setdefault(fmt, {})[r['team_id']] = r['points']
-        matches_by_fmt_team.setdefault(fmt, {})[r['team_id']] = r['matches_counted']
+        # Load current rankings
+        all_ranking_rows  = database.get_world_rankings(db, world_id)
+        rankings_by_fmt   = {}
+        matches_by_fmt_team = {}  # {fmt: {tid: count}} — for incrementing matches_counted
+        for r in all_ranking_rows:
+            fmt = r['format']
+            rankings_by_fmt.setdefault(fmt, {})[r['team_id']] = r['points']
+            matches_by_fmt_team.setdefault(fmt, {})[r['team_id']] = r['matches_counted']
 
-    for res in results:
-        fixture_id = res.get('fixture_id')
-        fmt        = res.get('format', 'T20')
-        team1_id   = res.get('team1_id')
-        team2_id   = res.get('team2_id')
-        winner_id  = res.get('winner_id')
-        top_scorer = res.get('top_scorer') or {}
-        top_bowler = res.get('top_bowler') or {}
-        team1_player_ids = {p['id'] for p in (world_state.get('teams', {}).get(team1_id) or {}).get('players', [])} if world_state else set()
-        team2_player_ids = {p['id'] for p in (world_state.get('teams', {}).get(team2_id) or {}).get('players', [])} if world_state else set()
+        for res in results:
+            fixture_id = res.get('fixture_id')
+            fmt        = res.get('format', 'T20')
+            team1_id   = res.get('team1_id')
+            team2_id   = res.get('team2_id')
+            winner_id  = res.get('winner_id')
+            top_scorer = res.get('top_scorer') or {}
+            top_bowler = res.get('top_bowler') or {}
+            team1_player_ids = {p['id'] for p in (world_state.get('teams', {}).get(team1_id) or {}).get('players', [])} if world_state else set()
+            team2_player_ids = {p['id'] for p in (world_state.get('teams', {}).get(team2_id) or {}).get('players', [])} if world_state else set()
 
-        # Determine venue from fixture if possible
-        venue_id = fallback_venue_id
-        if fixture_id:
-            row = db.execute("SELECT venue_id FROM fixtures WHERE id=?", (fixture_id,)).fetchone()
-            if row and row['venue_id']:
-                venue_id = row['venue_id']
+            # Determine venue from fixture if possible
+            venue_id = fallback_venue_id
+            if fixture_id:
+                row = db.execute("SELECT venue_id FROM fixtures WHERE id=?", (fixture_id,)).fetchone()
+                if row and row['venue_id']:
+                    venue_id = row['venue_id']
 
-        # Create a completed match record
-        match_id = database.create_match(db, {
-            'world_id':   world_id,
-            'format':     fmt,
-            'venue_id':   venue_id,
-            'match_date': res.get('scheduled_date', new_current_date),
-            'team1_id':   team1_id,
-            'team2_id':   team2_id,
-        })
-        database.update_match(db, match_id, {
-            'result_type':      res.get('result_type'),
-            'winning_team_id':  winner_id,
-            'margin_runs':      res.get('margin_runs'),
-            'margin_wickets':   res.get('margin_wickets'),
-            'player_of_match_id': _pick_quick_sim_pom_id(res),
-            'status':           'complete',
-            'match_notes':      json.dumps({
-                'quick_sim':   True,
-                'team1_score': res.get('team1_score'),
-                'team2_score': res.get('team2_score'),
-                'top_scorer':  res.get('top_scorer'),
-                'top_bowler':  res.get('top_bowler'),
-            }),
-        })
+            # Create a completed match record
+            match_id = database.create_match(db, {
+                'world_id':   world_id,
+                'format':     fmt,
+                'venue_id':   venue_id,
+                'match_date': res.get('scheduled_date', new_current_date),
+                'team1_id':   team1_id,
+                'team2_id':   team2_id,
+            })
+            database.update_match(db, match_id, {
+                'result_type':      res.get('result_type'),
+                'winning_team_id':  winner_id,
+                'margin_runs':      res.get('margin_runs'),
+                'margin_wickets':   res.get('margin_wickets'),
+                'player_of_match_id': _pick_quick_sim_pom_id(res),
+                'status':           'complete',
+                'match_notes':      json.dumps({
+                    'quick_sim':   True,
+                    'team1_score': res.get('team1_score'),
+                    'team2_score': res.get('team2_score'),
+                    'top_scorer':  res.get('top_scorer'),
+                    'top_bowler':  res.get('top_bowler'),
+                }),
+            })
 
-        t1_runs, t1_wkts, t1_overs = _parse_quick_scoreline(res.get('team1_score'))
-        t2_runs, t2_wkts, t2_overs = _parse_quick_scoreline(res.get('team2_score'))
-        _persist_quick_sim_innings(
-            db, match_id, 1, team1_id, team2_id,
-            t1_runs, t1_wkts, t1_overs, fmt,
-            top_scorer=top_scorer if top_scorer.get('player_id') in team1_player_ids else None,
-            top_bowler=top_bowler if top_bowler.get('player_id') in team2_player_ids else None,
-        )
-        _persist_quick_sim_innings(
-            db, match_id, 2, team2_id, team1_id,
-            t2_runs, t2_wkts, t2_overs, fmt,
-            top_scorer=top_scorer if top_scorer.get('player_id') in team2_player_ids else None,
-            top_bowler=top_bowler if top_bowler.get('player_id') in team1_player_ids else None,
-        )
+            t1_runs, t1_wkts, t1_overs = _parse_quick_scoreline(res.get('team1_score'))
+            t2_runs, t2_wkts, t2_overs = _parse_quick_scoreline(res.get('team2_score'))
+            _persist_quick_sim_innings(
+                db, match_id, 1, team1_id, team2_id,
+                t1_runs, t1_wkts, t1_overs, fmt,
+                top_scorer=top_scorer if top_scorer.get('player_id') in team1_player_ids else None,
+                top_bowler=top_bowler if top_bowler.get('player_id') in team2_player_ids else None,
+            )
+            _persist_quick_sim_innings(
+                db, match_id, 2, team2_id, team1_id,
+                t2_runs, t2_wkts, t2_overs, fmt,
+                top_scorer=top_scorer if top_scorer.get('player_id') in team2_player_ids else None,
+                top_bowler=top_bowler if top_bowler.get('player_id') in team1_player_ids else None,
+            )
 
-        if fixture_id:
-            database.update_fixture(db, fixture_id, {'match_id': match_id, 'status': 'complete'})
+            if fixture_id:
+                database.update_fixture(db, fixture_id, {'match_id': match_id, 'status': 'complete'})
 
-        # Update world records
-        _teams_map = world_state.get('teams', {}) if world_state else {}
-        _check_quick_sim_world_records(db, world_id, res, match_id, _teams_map)
+            # Update world records
+            _teams_map = world_state.get('teams', {}) if world_state else {}
+            _check_quick_sim_world_records(db, world_id, res, match_id, _teams_map)
 
-        # Snapshot rankings history (once per match per team per format)
-        for tid in [team1_id, team2_id]:
-            if tid:
-                cur_pts = rankings_by_fmt.setdefault(fmt, {}).get(tid, 0)
-                cur_pos = matches_by_fmt_team.setdefault(fmt, {}).get(tid, 0)
-                database.insert_ranking_history(
-                    db, world_id, tid, fmt, cur_pts,
-                    cur_pos, res.get('scheduled_date', new_current_date), match_id)
+            # Snapshot rankings history (once per match per team per format)
+            for tid in [team1_id, team2_id]:
+                if tid:
+                    cur_pts = rankings_by_fmt.setdefault(fmt, {}).get(tid, 0)
+                    cur_pos = matches_by_fmt_team.setdefault(fmt, {}).get(tid, 0)
+                    database.insert_ranking_history(
+                        db, world_id, tid, fmt, cur_pts,
+                        cur_pos, res.get('scheduled_date', new_current_date), match_id)
 
-        # Update rankings
-        cur_pts = rankings_by_fmt.setdefault(fmt, {})
-        updated = game_engine.update_rankings(cur_pts, {
-            'winning_team_id': winner_id,
-            'losing_team_id':  res.get('loser_id'),
-            'team1_id':        team1_id,
-            'team2_id':        team2_id,
-            'is_draw':         res.get('result_type') == 'draw',
-        }, home_team_id=res.get('home_team_id'))
-        rankings_by_fmt[fmt] = updated
+            # Update rankings
+            cur_pts = rankings_by_fmt.setdefault(fmt, {})
+            updated = game_engine.update_rankings(cur_pts, {
+                'winning_team_id': winner_id,
+                'losing_team_id':  res.get('loser_id'),
+                'team1_id':        team1_id,
+                'team2_id':        team2_id,
+                'is_draw':         res.get('result_type') == 'draw',
+            }, home_team_id=res.get('home_team_id'))
+            rankings_by_fmt[fmt] = updated
 
-        for tid in [team1_id, team2_id]:
-            if tid:
-                matches_by_fmt_team.setdefault(fmt, {})[tid] = \
-                    matches_by_fmt_team.get(fmt, {}).get(tid, 0) + 1
+            for tid in [team1_id, team2_id]:
+                if tid:
+                    matches_by_fmt_team.setdefault(fmt, {})[tid] = \
+                        matches_by_fmt_team.get(fmt, {}).get(tid, 0) + 1
 
-    # Persist rankings
-    for fmt, team_pts in rankings_by_fmt.items():
-        sorted_teams = sorted(team_pts.items(), key=lambda x: -x[1])
-        for pos, (tid, pts) in enumerate(sorted_teams, 1):
-            mc = matches_by_fmt_team.get(fmt, {}).get(tid, 0)
-            database.upsert_world_ranking(db, world_id, tid, fmt, pts, pos, mc)
+        # Persist rankings
+        for fmt, team_pts in rankings_by_fmt.items():
+            sorted_teams = sorted(team_pts.items(), key=lambda x: -x[1])
+            for pos, (tid, pts) in enumerate(sorted_teams, 1):
+                mc = matches_by_fmt_team.get(fmt, {}).get(tid, 0)
+                database.upsert_world_ranking(db, world_id, tid, fmt, pts, pos, mc)
 
-    # Persist player states
-    for pid, state in updated_player_states.items():
-        ps = dict(state)
-        if isinstance(ps.get('last_match_dates'), list):
-            ps['last_match_dates'] = json.dumps(ps['last_match_dates'])
-        ps['fatigue'] = 1 if ps.get('fatigue') else 0
-        database.upsert_player_world_state(db, world_id, pid, ps)
+        # Persist player states
+        for pid, state in updated_player_states.items():
+            ps = dict(state)
+            if isinstance(ps.get('last_match_dates'), list):
+                ps['last_match_dates'] = json.dumps(ps['last_match_dates'])
+            ps['fatigue'] = 1 if ps.get('fatigue') else 0
+            database.upsert_player_world_state(db, world_id, pid, ps)
 
-    # Advance world current date
-    database.update_world(db, world_id, {'current_date': new_current_date})
-    _advance_world_competitions(db, world_id)
+        # Advance world current date
+        database.update_world(db, world_id, {'current_date': new_current_date})
+        _advance_world_competitions(db, world_id)
 
 
 def _user_team_ids(settings):
@@ -4602,223 +3770,222 @@ def create_world():
                     'domestic_leagues': domestic_leagues,
                     'domestic_team_mode': domestic_team_mode,
                     'world_scope': world_scope}
-        world_id = database.create_world(db, {
-            'name':             name,
-            'created_date':     start_date,
-            'current_date':     start_date,
-            'calendar_density': density,
-            'settings_json':    json.dumps(settings),
-        })
-
-        # Store calendar_style on the world row (via migration column)
-        try:
-            db.execute("UPDATE worlds SET calendar_style = ? WHERE id = ?",
-                       (cal_style, world_id))
-            db.commit()
-        except Exception:
-            pass  # column may not exist on older DBs
-
-        # Build team name + venue lookups
-        team_name_map  = {}   # team_id  -> name
-        venue_name_map = {}   # team_name -> [venue_id]
-        team_venues    = {}   # team_id  -> primary venue_id  (for random fallback)
-        for tid in team_ids:
-            t = database.get_team(db, tid)
-            if t:
-                tname = t.get('name', f'Team{tid}')
-                team_name_map[tid] = tname
-                vid = t.get('home_venue_id')
-                if vid:
-                    team_venues[tid] = vid
-                    venue_name_map[tname] = [vid]
-
-        venues         = database.get_venues(db)
-        fallback_venue = venues[0]['id'] if venues else None
-
-        # ── Build domestic team lookup (for leagues opted in) ─────────────────
-        selected_team_ids = set(team_ids)
-        domestic_team_list = []
-        if domestic_leagues and cal_style == 'realistic':
-            all_leagues_needed = set()
-            for comp_key in domestic_leagues:
-                comp = cricket_calendar.DOMESTIC_COMPETITIONS.get(comp_key)
-                if comp:
-                    all_leagues_needed.add(comp['league'])
-            if all_leagues_needed:
-                dom_rows = db.execute(
-                    "SELECT t.id as team_id, t.name, t.league, t.home_venue_id "
-                    "FROM teams t WHERE t.league IN ({})".format(
-                        ','.join('?' * len(all_leagues_needed))
-                    ),
-                    list(all_leagues_needed)
-                ).fetchall()
-                domestic_team_list = [dict(r) for r in dom_rows]
-                if world_scope == 'domestic' and domestic_team_mode != 'full_league':
-                    domestic_team_list = [
-                        dt for dt in domestic_team_list
-                        if dt.get('team_id') in selected_team_ids
-                    ]
-                # Also add their home venues to the fallback map
-                for dt in domestic_team_list:
-                    if dt.get('home_venue_id'):
-                        team_venues.setdefault(dt['team_id'], dt['home_venue_id'])
-
-        # ── Generate fixture calendar ─────────────────────────────────────────
-        effective_team_ids = list(team_ids)
-        if world_scope == 'domestic' and cal_style == 'realistic' and domestic_team_mode == 'full_league':
-            effective_team_ids = sorted({dt['team_id'] for dt in domestic_team_list if dt.get('team_id')})
-            settings['team_ids'] = effective_team_ids
-            db.execute("UPDATE worlds SET settings_json = ? WHERE id = ?", (json.dumps(settings), world_id))
-            db.commit()
-
-        calendar_team_ids = effective_team_ids if world_scope != 'domestic' else []
-
-        if cal_style == 'realistic':
-            raw_fixtures = cricket_calendar.generate_realistic_calendar(
-                team_ids         = calendar_team_ids,
-                team_names       = team_name_map,
-                venue_ids        = venue_name_map,
-                start_date_str   = start_date,
-                density          = density,
-                years            = cal_years,
-                domestic_leagues = domestic_leagues or None,
-                domestic_teams   = domestic_team_list or None,
-            )
-        else:
-            raw_fixtures = game_engine.generate_fixture_calendar(
-                team_ids, start_date, density, months=cal_years * 12)
-
-        # ── Convert to DB-ready rows ──────────────────────────────────────────
-        fixtures_to_insert = []
-        series_dates       = {}   # series_key -> {min_date, max_date, t1, t2, fmt}
-
-        for fx in raw_fixtures:
-            t1       = fx['team1_id']
-            t2       = fx['team2_id']
-            venue_id = (fx.get('venue_id')
-                        or team_venues.get(t1)
-                        or team_venues.get(t2)
-                        or fallback_venue)
-            _utids   = _user_team_ids(settings)
-            is_user  = 1 if _utids and (t1 in _utids or t2 in _utids) else 0
-            sdate    = fx.get('scheduled_date', start_date)
-
-            # Track series date ranges for world_series creation
-            sk = fx.get('series_key')
-            if sk:
-                if sk not in series_dates:
-                    series_dates[sk] = {
-                        'min': sdate, 'max': sdate,
-                        't1': t1, 't2': t2,
-                        'fmt': fx.get('format'),
-                        'name': fx.get('series_name', ''),
-                        'is_icc': bool(fx.get('is_icc_event')),
-                        'icc_name': fx.get('icc_event_name'),
-                        'tmpl': fx.get('tour_template'),
-                        'count': 0,
-                    }
-                entry = series_dates[sk]
-                if sdate < entry['min']:
-                    entry['min'] = sdate
-                if sdate > entry['max']:
-                    entry['max'] = sdate
-                entry['count'] += 1
-
-            year = int(sdate[:4]) if sdate else None
-            fixtures_to_insert.append({
-                'world_id':                world_id,
-                'tournament_id':           None,
-                'series_id':               None,
-                'scheduled_date':          sdate,
-                'venue_id':                venue_id,
-                'team1_id':                t1,
-                'team2_id':                t2,
-                'fixture_type':            fx.get('fixture_type', 'world'),
-                'format':                  fx.get('format'),
-                'is_user_match':           is_user,
-                'series_name':             fx.get('series_name'),
-                'match_number_in_series':  fx.get('match_number_in_series', 1),
-                'series_length':           fx.get('series_length', 1),
-                'is_icc_event':            fx.get('is_icc_event', False),
-                'icc_event_name':          fx.get('icc_event_name'),
-                'is_home_for_team1':       fx.get('is_home_for_team1', True),
-                'tour_template':           fx.get('tour_template'),
-                'season_year':             year,
-                'competition_key':         fx.get('competition_key'),
-                'competition_name':        fx.get('competition_name'),
-                'competition_stage':       fx.get('competition_stage'),
-                'competition_group':       fx.get('competition_group'),
-                'competition_round':       fx.get('competition_round'),
-                'competition_order':       fx.get('competition_order'),
+        with db:
+            world_id = database.create_world(db, {
+                'name':             name,
+                'created_date':     start_date,
+                'current_date':     start_date,
+                'calendar_density': density,
+                'settings_json':    json.dumps(settings),
             })
 
-        database.bulk_create_fixtures(db, fixtures_to_insert)
-
-        # ── Persist draw outcomes for seeded ICC competitions ─────────────────
-        if cal_style == 'realistic' and calendar_team_ids:
+            # Store calendar_style on the world row (via migration column)
             try:
-                team_colours_map = {}
-                for tid in calendar_team_ids:
-                    t = database.get_team(db, tid)
-                    if t:
-                        team_colours_map[tid] = t.get('badge_colour', '#888888')
-                draw_outcomes = competition_rules.compute_icc_draw_outcomes(
-                    calendar_team_ids, team_name_map, start_date, end_date, team_colours_map
+                db.execute("UPDATE worlds SET calendar_style = ? WHERE id = ?",
+                           (cal_style, world_id))
+            except Exception:
+                pass  # column may not exist on older DBs
+
+            # Build team name + venue lookups
+            team_name_map  = {}   # team_id  -> name
+            venue_name_map = {}   # team_name -> [venue_id]
+            team_venues    = {}   # team_id  -> primary venue_id  (for random fallback)
+            for tid in team_ids:
+                t = database.get_team(db, tid)
+                if t:
+                    tname = t.get('name', f'Team{tid}')
+                    team_name_map[tid] = tname
+                    vid = t.get('home_venue_id')
+                    if vid:
+                        team_venues[tid] = vid
+                        venue_name_map[tname] = [vid]
+
+            venues         = database.get_venues(db)
+            fallback_venue = venues[0]['id'] if venues else None
+
+            # ── Build domestic team lookup (for leagues opted in) ─────────────────
+            selected_team_ids = set(team_ids)
+            domestic_team_list = []
+            if domestic_leagues and cal_style == 'realistic':
+                all_leagues_needed = set()
+                for comp_key in domestic_leagues:
+                    comp = cricket_calendar.DOMESTIC_COMPETITIONS.get(comp_key)
+                    if comp:
+                        all_leagues_needed.add(comp['league'])
+                if all_leagues_needed:
+                    dom_rows = db.execute(
+                        "SELECT t.id as team_id, t.name, t.league, t.home_venue_id "
+                        "FROM teams t WHERE t.league IN ({})".format(
+                            ','.join('?' * len(all_leagues_needed))
+                        ),
+                        list(all_leagues_needed)
+                    ).fetchall()
+                    domestic_team_list = [dict(r) for r in dom_rows]
+                    if world_scope == 'domestic' and domestic_team_mode != 'full_league':
+                        domestic_team_list = [
+                            dt for dt in domestic_team_list
+                            if dt.get('team_id') in selected_team_ids
+                        ]
+                    # Also add their home venues to the fallback map
+                    for dt in domestic_team_list:
+                        if dt.get('home_venue_id'):
+                            team_venues.setdefault(dt['team_id'], dt['home_venue_id'])
+
+            # ── Generate fixture calendar ─────────────────────────────────────────
+            effective_team_ids = list(team_ids)
+            if world_scope == 'domestic' and cal_style == 'realistic' and domestic_team_mode == 'full_league':
+                effective_team_ids = sorted({dt['team_id'] for dt in domestic_team_list if dt.get('team_id')})
+                settings['team_ids'] = effective_team_ids
+                db.execute("UPDATE worlds SET settings_json = ? WHERE id = ?", (json.dumps(settings), world_id))
+
+            calendar_team_ids = effective_team_ids if world_scope != 'domestic' else []
+
+            if cal_style == 'realistic':
+                raw_fixtures = cricket_calendar.generate_realistic_calendar(
+                    team_ids         = calendar_team_ids,
+                    team_names       = team_name_map,
+                    venue_ids        = venue_name_map,
+                    start_date_str   = start_date,
+                    density          = density,
+                    years            = cal_years,
+                    domestic_leagues = domestic_leagues or None,
+                    domestic_teams   = domestic_team_list or None,
                 )
-                for outcome in draw_outcomes:
-                    database.save_draw_outcome(
-                        db,
-                        world_id,
-                        outcome['competition_key'],
-                        outcome['season_key'],
-                        outcome['draw_type'],
-                        json.dumps(outcome),
-                    )
-            except Exception:
-                pass  # non-fatal
-
-        # ── Create world_series records ───────────────────────────────────────
-        for sk, sd in series_dates.items():
-            try:
-                database.create_world_series(db, {
-                    'world_id':       world_id,
-                    'series_name':    sd['name'],
-                    'format':         sd['fmt'],
-                    'team1_id':       sd['t1'],
-                    'team2_id':       sd['t2'],
-                    'host_team_id':   sd['t1'],
-                    'start_date':     sd['min'],
-                    'end_date':       sd['max'],
-                    'total_matches':  sd['count'],
-                    'is_icc_event':   sd['is_icc'],
-                    'icc_event_name': sd['icc_name'],
-                })
-            except Exception:
-                pass
-
-        # ── Initialise rankings (international teams only) ────────────────────
-        ranking_seed_ids = set(team_ids)
-        if world_scope == 'domestic' and domestic_team_list:
-            ranking_seed_ids.update(dt['team_id'] for dt in domestic_team_list if dt.get('team_id'))
-
-        intl_team_ids = []
-        domestic_rank_ids = []
-        for tid in ranking_seed_ids:
-            t = database.get_team(db, tid)
-            if not t:
-                continue
-            if t.get('team_type', 'international') == 'international':
-                intl_team_ids.append(tid)
             else:
-                domestic_rank_ids.append(tid)
-        for pos, tid in enumerate(sorted(intl_team_ids), 1):
-            for fmt in ('Test', 'ODI', 'T20'):
-                database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
-        for pos, tid in enumerate(sorted(domestic_rank_ids), 1):
-            for fmt in ('Test', 'ODI', 'T20'):
-                database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
+                raw_fixtures = game_engine.generate_fixture_calendar(
+                    team_ids, start_date, density, months=cal_years * 12)
 
-        world = database.get_world(db, world_id)
+            # ── Convert to DB-ready rows ──────────────────────────────────────────
+            fixtures_to_insert = []
+            series_dates       = {}   # series_key -> {min_date, max_date, t1, t2, fmt}
+
+            for fx in raw_fixtures:
+                t1       = fx['team1_id']
+                t2       = fx['team2_id']
+                venue_id = (fx.get('venue_id')
+                            or team_venues.get(t1)
+                            or team_venues.get(t2)
+                            or fallback_venue)
+                _utids   = _user_team_ids(settings)
+                is_user  = 1 if _utids and (t1 in _utids or t2 in _utids) else 0
+                sdate    = fx.get('scheduled_date', start_date)
+
+                # Track series date ranges for world_series creation
+                sk = fx.get('series_key')
+                if sk:
+                    if sk not in series_dates:
+                        series_dates[sk] = {
+                            'min': sdate, 'max': sdate,
+                            't1': t1, 't2': t2,
+                            'fmt': fx.get('format'),
+                            'name': fx.get('series_name', ''),
+                            'is_icc': bool(fx.get('is_icc_event')),
+                            'icc_name': fx.get('icc_event_name'),
+                            'tmpl': fx.get('tour_template'),
+                            'count': 0,
+                        }
+                    entry = series_dates[sk]
+                    if sdate < entry['min']:
+                        entry['min'] = sdate
+                    if sdate > entry['max']:
+                        entry['max'] = sdate
+                    entry['count'] += 1
+
+                year = int(sdate[:4]) if sdate else None
+                fixtures_to_insert.append({
+                    'world_id':                world_id,
+                    'tournament_id':           None,
+                    'series_id':               None,
+                    'scheduled_date':          sdate,
+                    'venue_id':                venue_id,
+                    'team1_id':                t1,
+                    'team2_id':                t2,
+                    'fixture_type':            fx.get('fixture_type', 'world'),
+                    'format':                  fx.get('format'),
+                    'is_user_match':           is_user,
+                    'series_name':             fx.get('series_name'),
+                    'match_number_in_series':  fx.get('match_number_in_series', 1),
+                    'series_length':           fx.get('series_length', 1),
+                    'is_icc_event':            fx.get('is_icc_event', False),
+                    'icc_event_name':          fx.get('icc_event_name'),
+                    'is_home_for_team1':       fx.get('is_home_for_team1', True),
+                    'tour_template':           fx.get('tour_template'),
+                    'season_year':             year,
+                    'competition_key':         fx.get('competition_key'),
+                    'competition_name':        fx.get('competition_name'),
+                    'competition_stage':       fx.get('competition_stage'),
+                    'competition_group':       fx.get('competition_group'),
+                    'competition_round':       fx.get('competition_round'),
+                    'competition_order':       fx.get('competition_order'),
+                })
+
+            database.bulk_create_fixtures(db, fixtures_to_insert)
+
+            # ── Persist draw outcomes for seeded ICC competitions ─────────────────
+            if cal_style == 'realistic' and calendar_team_ids:
+                try:
+                    team_colours_map = {}
+                    for tid in calendar_team_ids:
+                        t = database.get_team(db, tid)
+                        if t:
+                            team_colours_map[tid] = t.get('badge_colour', '#888888')
+                    draw_outcomes = competition_rules.compute_icc_draw_outcomes(
+                        calendar_team_ids, team_name_map, start_date, end_date, team_colours_map
+                    )
+                    for outcome in draw_outcomes:
+                        database.save_draw_outcome(
+                            db,
+                            world_id,
+                            outcome['competition_key'],
+                            outcome['season_key'],
+                            outcome['draw_type'],
+                            json.dumps(outcome),
+                        )
+                except Exception:
+                    pass  # non-fatal
+
+            # ── Create world_series records ───────────────────────────────────────
+            for sk, sd in series_dates.items():
+                try:
+                    database.create_world_series(db, {
+                        'world_id':       world_id,
+                        'series_name':    sd['name'],
+                        'format':         sd['fmt'],
+                        'team1_id':       sd['t1'],
+                        'team2_id':       sd['t2'],
+                        'host_team_id':   sd['t1'],
+                        'start_date':     sd['min'],
+                        'end_date':       sd['max'],
+                        'total_matches':  sd['count'],
+                        'is_icc_event':   sd['is_icc'],
+                        'icc_event_name': sd['icc_name'],
+                    })
+                except Exception:
+                    pass
+
+            # ── Initialise rankings (international teams only) ────────────────────
+            ranking_seed_ids = set(team_ids)
+            if world_scope == 'domestic' and domestic_team_list:
+                ranking_seed_ids.update(dt['team_id'] for dt in domestic_team_list if dt.get('team_id'))
+
+            intl_team_ids = []
+            domestic_rank_ids = []
+            for tid in ranking_seed_ids:
+                t = database.get_team(db, tid)
+                if not t:
+                    continue
+                if t.get('team_type', 'international') == 'international':
+                    intl_team_ids.append(tid)
+                else:
+                    domestic_rank_ids.append(tid)
+            for pos, tid in enumerate(sorted(intl_team_ids), 1):
+                for fmt in ('Test', 'ODI', 'T20'):
+                    database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
+            for pos, tid in enumerate(sorted(domestic_rank_ids), 1):
+                for fmt in ('Test', 'ODI', 'T20'):
+                    database.upsert_world_ranking(db, world_id, tid, fmt, 100, pos, 0)
+
+            world = database.get_world(db, world_id)
         return jsonify({'world_id': world_id, 'fixture_count': len(fixtures_to_insert),
                         'world': world, 'calendar_style': cal_style, 'world_scope': world_scope})
     finally:
